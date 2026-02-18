@@ -26,3 +26,4 @@ timestamp,market_id,direction,confidence,entry_price,features_hash
 1771387200000,ETH-Hour1,Up,0.7493027798320422,0.0,rsi:58.67_macd:-1.40,,,,,,,,,
 1771389000000,BTC-Min15,Down,0.6810943450415002,0.0,rsi:36.74_macd:-78.68,,,,,,,,,
 1771389900000,BTC-Min15,Down,0.92,0.0,rsi:99.00_macd:-79.80,,,,,,,,,
+1771389900000,ETH-Min15,Down,0.92,0.0,rsi:96.79_macd:-2.69,,,,,,,,,
