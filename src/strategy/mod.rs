@@ -22,8 +22,12 @@ pub use calibrator::{
 use anyhow::Result;
 use std::collections::HashMap;
 
-use crate::features::{Features, MarketRegime};
+use crate::features::{
+    CrossAssetAnalyzer, CrossAssetSignal, Features, MarketRegime, SettlementEdge,
+    SettlementPrediction, SettlementPricePredictor, TemporalPatternAnalyzer,
+};
 use crate::types::{Asset, Direction, FeatureSet, Signal, Timeframe};
+use chrono::Utc;
 
 /// Cluster types for indicator grouping
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +148,12 @@ pub struct StrategyEngine {
     last_indicators_used: Vec<String>,
     /// Last strategy filter reason (for diagnostics/dashboard)
     last_filter_reason: Option<String>,
+    /// Temporal pattern analyzer for time-of-day optimization
+    temporal_analyzer: TemporalPatternAnalyzer,
+    /// Settlement price predictor for Chainlink oracle
+    settlement_predictor: SettlementPricePredictor,
+    /// Cross-asset analyzer for BTC/ETH correlation
+    cross_asset_analyzer: CrossAssetAnalyzer,
 }
 
 /// Generated signal with confidence
@@ -174,7 +184,25 @@ impl StrategyEngine {
             calibrator: IndicatorCalibrator::with_min_samples(min_samples.max(1)),
             last_indicators_used: Vec::new(),
             last_filter_reason: None,
+            temporal_analyzer: TemporalPatternAnalyzer::new(5),
+            settlement_predictor: SettlementPricePredictor::new(1000),
+            cross_asset_analyzer: CrossAssetAnalyzer::new(50),
         }
+    }
+
+    /// Get mutable reference to temporal analyzer
+    pub fn temporal_analyzer_mut(&mut self) -> &mut TemporalPatternAnalyzer {
+        &mut self.temporal_analyzer
+    }
+
+    /// Get mutable reference to settlement predictor
+    pub fn settlement_predictor_mut(&mut self) -> &mut SettlementPricePredictor {
+        &mut self.settlement_predictor
+    }
+
+    /// Get mutable reference to cross-asset analyzer
+    pub fn cross_asset_analyzer_mut(&mut self) -> &mut CrossAssetAnalyzer {
+        &mut self.cross_asset_analyzer
     }
 
     fn clear_filter_reason(&mut self) {
@@ -197,6 +225,40 @@ impl StrategyEngine {
                 .record_trade(&self.last_indicators_used, result);
             self.calibrator.recalibrate();
         }
+    }
+
+    /// Record complete trade result with all v3.0 analyzers
+    pub fn record_complete_trade(
+        &mut self,
+        asset: Asset,
+        timeframe: Timeframe,
+        indicators: &[String],
+        win: bool,
+        confidence: f64,
+        direction: Direction,
+        edge: f64,
+    ) {
+        let result = if win {
+            TradeResult::Win
+        } else {
+            TradeResult::Loss
+        };
+
+        // Update calibrator
+        self.calibrator
+            .record_trade_for_market(asset, timeframe, indicators, result);
+        self.calibrator.recalibrate();
+
+        // Update temporal analyzer
+        self.temporal_analyzer.record_trade(
+            asset,
+            timeframe,
+            Utc::now(),
+            win,
+            confidence,
+            direction,
+            edge,
+        );
     }
 
     /// Legacy/global calibration path (kept for backwards compatibility).
@@ -869,8 +931,128 @@ impl StrategyEngine {
             reasons.push("Multi-TF".to_string());
         }
 
+        // ============================================
+        // NEW v3.0: Temporal Pattern Adjustment
+        // ============================================
+        let now = Utc::now();
+        let (temporal_adj, temporal_reason) = self.temporal_analyzer.get_temporal_adjustment(
+            features.asset,
+            features.timeframe,
+            direction,
+            now,
+        );
+
+        // Check if we should block trading at this time
+        let (should_block, block_reason) =
+            self.temporal_analyzer
+                .should_block_trading(features.asset, features.timeframe, now);
+
+        if should_block {
+            self.set_filter_reason(&format!("temporal_block: {}", block_reason));
+            return None;
+        }
+
+        if temporal_adj != 1.0 {
+            confidence *= temporal_adj;
+            if !temporal_reason.is_empty() {
+                reasons.push(format!("Temporal: {}", temporal_reason));
+            }
+        }
+
+        // ============================================
+        // NEW v3.0: Cross-Asset Correlation Signal
+        // ============================================
+        if let Some(cross_signal) = self
+            .cross_asset_analyzer
+            .detect_divergence(features.timeframe)
+        {
+            match cross_signal.signal_type {
+                crate::features::CrossAssetSignalType::CorrelatedMovement => {
+                    if cross_signal.primary_direction == direction {
+                        confidence *= 1.0 + (cross_signal.correlation.abs() * 0.08);
+                        reasons.push(format!(
+                            "BTC-ETH aligned: {:.0}%",
+                            cross_signal.correlation * 100.0
+                        ));
+                    }
+                }
+                crate::features::CrossAssetSignalType::Divergence => {
+                    if cross_signal.confidence > 0.8 {
+                        // Strong divergence - our signal might be catching the reversal
+                        confidence *= 1.12;
+                        reasons.push("Divergence opportunity".to_string());
+                    }
+                }
+                crate::features::CrossAssetSignalType::BTCDominant => {
+                    if features.asset == Asset::BTC {
+                        confidence *= 1.06;
+                        reasons.push("BTC leading".to_string());
+                    }
+                }
+                crate::features::CrossAssetSignalType::ETHDominant => {
+                    if features.asset == Asset::ETH {
+                        confidence *= 1.06;
+                        reasons.push("ETH leading".to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // ============================================
+        // NEW v3.0: Settlement Price Prediction Edge
+        // ============================================
+        // This requires market metadata - we'll use current price as proxy for strike
+        // In production, you'd fetch the actual strike price from market conditions
+        let current_price = features.close;
+        if current_price > 0.0 {
+            // Note: In production, you'd get the actual expiry timestamp and strike price
+            // from the market metadata. Here we'll estimate based on timeframe.
+            let time_to_expiry_secs = match features.timeframe {
+                Timeframe::Min15 => 15 * 60,
+                Timeframe::Hour1 => 60 * 60,
+            };
+            let expiry_ts = (now.timestamp_millis() + time_to_expiry_secs * 1000) as i64;
+
+            let settlement_pred = self.settlement_predictor.predict_settlement(
+                features.asset,
+                current_price,
+                features.timeframe,
+                expiry_ts,
+                features.orderbook_imbalance.unwrap_or(0.0),
+            );
+
+            // Get market-implied probability (using close price as proxy)
+            // In production, this would come from orderbook mid price
+            let market_mid = features.close / 100000.0; // Normalized to 0-1 range
+
+            // Calculate edge
+            let strike_price = current_price; // Simplified - actual strike would come from market
+            let settlement_edge = self.settlement_predictor.calculate_settlement_edge(
+                &settlement_pred,
+                market_mid,
+                strike_price,
+            );
+
+            // Boost confidence if our settlement prediction aligns with signal
+            if settlement_edge.predicted_direction == direction {
+                let edge_boost = (settlement_edge.edge.abs() * 0.5).min(0.10);
+                confidence *= 1.0 + edge_boost;
+                if edge_boost > 0.02 {
+                    reasons.push(format!(
+                        "Settlement edge: {:.1}%",
+                        settlement_edge.edge * 100.0
+                    ));
+                }
+            } else if settlement_edge.confidence > 0.7 {
+                // Settlement prediction contradicts our signal - reduce confidence
+                confidence *= 0.9;
+                reasons.push("Settlement mismatch".to_string());
+            }
+        }
+
         // Confidence cap
-        confidence = confidence.min(0.92);
+        confidence = confidence.min(0.95); // Increased cap to 0.95 for v3.0
 
         // Final check
         if confidence < self.config.min_confidence {

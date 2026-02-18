@@ -34,6 +34,16 @@ use crate::types::{Asset, Candle, Direction, FeatureSet, Timeframe};
 pub mod orderbook_tracker;
 pub use orderbook_tracker::{MicrostructureFeatures, OrderbookImbalanceTracker, PressureSignal};
 
+// NEW v3.0: Temporal patterns, settlement prediction, cross-asset analysis
+pub mod temporal_patterns;
+pub use temporal_patterns::{TemporalPatternAnalyzer, HourlyStats, TemporalStatsSummary};
+
+pub mod settlement_predictor;
+pub use settlement_predictor::{SettlementPricePredictor, SettlementPrediction, SettlementEdge};
+
+pub mod cross_asset;
+pub use cross_asset::{CrossAssetAnalyzer, CrossAssetSignal, CrossAssetSignalType};
+
 /// Feature engine for computing technical indicators
 pub struct FeatureEngine {
     /// RSI period
@@ -79,6 +89,16 @@ pub struct FeatureEngine {
     orderbook_data: HashMap<(Asset, Timeframe), InternalOrderbookSnapshot>,
     /// External orderbook tracker for advanced microstructure analysis
     orderbook_tracker: Option<std::sync::Arc<std::sync::Mutex<OrderbookImbalanceTracker>>>,
+    
+    // ============================================
+    // NEW v3.0: Advanced pattern analysis
+    // ============================================
+    /// Temporal pattern analyzer for time-of-day performance
+    temporal_analyzer: TemporalPatternAnalyzer,
+    /// Settlement price predictor for Chainlink oracle
+    settlement_predictor: SettlementPricePredictor,
+    /// Cross-asset correlation analyzer (BTC vs ETH, 15m vs 1h)
+    cross_asset_analyzer: CrossAssetAnalyzer,
 }
 
 /// Market regime classification
@@ -267,7 +287,36 @@ impl FeatureEngine {
             tick_history: HashMap::new(),
             orderbook_data: HashMap::new(),
             orderbook_tracker: None,
+            // NEW v3.0: Initialize advanced analyzers
+            temporal_analyzer: TemporalPatternAnalyzer::new(5),
+            settlement_predictor: SettlementPricePredictor::new(1000),
+            cross_asset_analyzer: CrossAssetAnalyzer::new(50),
         }
+    }
+    
+    /// Get mutable reference to temporal analyzer for recording trades
+    pub fn temporal_analyzer_mut(&mut self) -> &mut TemporalPatternAnalyzer {
+        &mut self.temporal_analyzer
+    }
+    
+    /// Get reference to settlement predictor
+    pub fn settlement_predictor(&self) -> &SettlementPricePredictor {
+        &self.settlement_predictor
+    }
+    
+    /// Get mutable reference to settlement predictor
+    pub fn settlement_predictor_mut(&mut self) -> &mut SettlementPricePredictor {
+        &mut self.settlement_predictor
+    }
+    
+    /// Get reference to cross-asset analyzer
+    pub fn cross_asset_analyzer(&self) -> &CrossAssetAnalyzer {
+        &self.cross_asset_analyzer
+    }
+    
+    /// Get mutable reference to cross-asset analyzer
+    pub fn cross_asset_analyzer_mut(&mut self) -> &mut CrossAssetAnalyzer {
+        &mut self.cross_asset_analyzer
     }
 
     /// Set the external orderbook tracker

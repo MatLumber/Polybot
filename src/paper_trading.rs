@@ -2421,6 +2421,22 @@ impl PaperTradingEngine {
             .collect()
     }
 
+    /// NEW v3.0: Close all expired positions immediately
+    /// This should be called periodically (e.g., every 5 seconds) to ensure
+    /// positions are closed when markets expire, even if no new price arrives
+    pub async fn close_all_expired_positions(&self) -> Vec<PaperTradeRecord> {
+        let expired = self.get_expired_positions();
+        let mut closed_trades = Vec::new();
+        
+        for (asset, timeframe) in expired {
+            if let Some(record) = self.close_and_save(asset, timeframe, PaperExitReason::MarketExpiry).await {
+                closed_trades.push(record);
+            }
+        }
+        
+        closed_trades
+    }
+
     // ── CSV persistence ─────────────────────────────────────────
 
     /// Save trade to all relevant CSVs (trades, winloss, AND detailed analytics)

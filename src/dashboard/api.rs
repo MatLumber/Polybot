@@ -53,6 +53,10 @@ pub fn create_router(memory: Arc<DashboardMemory>, broadcaster: WebSocketBroadca
         .route("/api/data/rejections/:date", get(get_rejections_csv))
         .route("/api/data/rejections", get(get_latest_rejections_csv))
         .route("/api/data/files", get(list_data_files))
+        // NEW v3.0: Temporal patterns, settlement predictor, cross-asset
+        .route("/api/data/temporal-patterns", get(get_temporal_patterns))
+        .route("/api/data/settlement-metrics", get(get_settlement_metrics))
+        .route("/api/data/cross-asset-correlations", get(get_cross_asset_correlations))
         // WebSocket
         .route("/ws", axum::routing::get(websocket_handler))
         // State
@@ -534,4 +538,57 @@ async fn list_data_files(
     };
 
     Json(ApiResponse::success(response))
+}
+
+// ─────────────────────────────────────────────────────────────────
+// NEW v3.0: Advanced Analytics Endpoints
+// ─────────────────────────────────────────────────────────────────
+
+/// GET /api/data/temporal-patterns - Returns time-of-day performance stats
+async fn get_temporal_patterns(
+    State((memory, _, _)): State<AppState>,
+) -> impl IntoResponse {
+    // TODO: Connect to actual temporal analyzer
+    // For now, return placeholder
+    let placeholder = serde_json::json!({
+        "message": "Temporal patterns endpoint - connect to TemporalPatternAnalyzer",
+        "best_hours": [
+            {"hour": 2, "win_rate": 0.65},
+            {"hour": 3, "win_rate": 0.62},
+            {"hour": 1, "win_rate": 0.58}
+        ],
+        "worst_hours": [
+            {"hour": 16, "win_rate": 0.42},
+            {"hour": 17, "win_rate": 0.44}
+        ]
+    });
+    Json(ApiResponse::success(placeholder))
+}
+
+/// GET /api/data/settlement-metrics - Returns settlement prediction metrics
+async fn get_settlement_metrics(
+    State((memory, _, _)): State<AppState>,
+) -> impl IntoResponse {
+    // TODO: Connect to actual settlement predictor
+    let placeholder = serde_json::json!({
+        "message": "Settlement metrics endpoint - connect to SettlementPricePredictor",
+        "total_settlements_recorded": 0,
+        "avg_settlement_volatility": 0.0,
+        "historical_accuracy": 0.0
+    });
+    Json(ApiResponse::success(placeholder))
+}
+
+/// GET /api/data/cross-asset-correlations - Returns BTC/ETH correlation data
+async fn get_cross_asset_correlations(
+    State((memory, _, _)): State<AppState>,
+) -> impl IntoResponse {
+    // TODO: Connect to actual cross-asset analyzer
+    let placeholder = serde_json::json!({
+        "message": "Cross-asset correlations endpoint - connect to CrossAssetAnalyzer",
+        "btc_eth_15m_correlation": 0.0,
+        "btc_eth_1h_correlation": 0.0,
+        "last_update": chrono::Utc::now().to_rfc3339()
+    });
+    Json(ApiResponse::success(placeholder))
 }
