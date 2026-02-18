@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -282,10 +282,7 @@ function formatRejectionReason(reason: string): string {
 function RejectionDiagnosticsPanel({
   processed,
   generated,
-  filtered,
   strategyReasons,
-  lastStrategyReason,
-  lastStrategyTs,
   accepted,
   rejected,
   reasons,
@@ -294,10 +291,7 @@ function RejectionDiagnosticsPanel({
 }: {
   processed: number
   generated: number
-  filtered: number
   strategyReasons: Record<string, number>
-  lastStrategyReason: string | null
-  lastStrategyTs: number
   accepted: number
   rejected: number
   reasons: Record<string, number>
@@ -306,63 +300,91 @@ function RejectionDiagnosticsPanel({
 }) {
   const strategyRows = Object.entries(strategyReasons)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
+    .slice(0, 5)
   const rejectionRows = Object.entries(reasons)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
+    .slice(0, 5)
+  const maxCount = Math.max(
+    ...strategyRows.map(([, c]) => c),
+    ...rejectionRows.map(([, c]) => c),
+    1
+  )
 
   return (
-    <div className="diagnostic-list">
-      <div className="diagnostic-summary">
-        <span>Features: {processed}</span>
-        <span>Señales: {generated}</span>
-        <span>Filtradas: {filtered}</span>
-      </div>
-      <div className="diagnostic-summary">
-        <span>Aceptadas: {accepted}</span>
-        <span>Rechazadas: {rejected}</span>
-      </div>
-      {strategyRows.length === 0 ? (
-        <div className="empty-state">Sin filtros de estrategia registrados en esta sesión</div>
-      ) : (
-        <div className="asset-list">
-          {strategyRows.map(([reason, count]) => (
-            <div className="asset-row" key={reason}>
-              <div className="asset-name">
-                <strong>{formatRejectionReason(reason)}</strong>
-              </div>
-              <div className="asset-values">
-                <span>{count}</span>
-              </div>
-            </div>
-          ))}
+    <div className="diagnostics-panel">
+      <div className="diagnostics-header">
+        <div className="diagnostic-stat">
+          <span className="diagnostic-stat-label">Features</span>
+          <span className="diagnostic-stat-value">{processed}</span>
         </div>
-      )}
-      <div className="diagnostic-last">
-        <span>Último filtro de estrategia</span>
-        <strong>{lastStrategyReason ? formatRejectionReason(lastStrategyReason) : 'N/A'}</strong>
-        <span>{lastStrategyTs > 0 ? new Date(lastStrategyTs).toLocaleTimeString() : '--:--:--'}</span>
-      </div>
-      {rejectionRows.length === 0 ? (
-        <div className="empty-state">Sin rechazos de ejecución registrados en esta sesión</div>
-      ) : (
-        <div className="asset-list">
-          {rejectionRows.map(([reason, count]) => (
-            <div className="asset-row" key={reason}>
-              <div className="asset-name">
-                <strong>{formatRejectionReason(reason)}</strong>
-              </div>
-              <div className="asset-values">
-                <span>{count}</span>
-              </div>
-            </div>
-          ))}
+        <div className="diagnostic-stat">
+          <span className="diagnostic-stat-label">Signals</span>
+          <span className="diagnostic-stat-value">{generated}</span>
         </div>
-      )}
-      <div className="diagnostic-last">
-        <span>Último rechazo de ejecución</span>
-        <strong>{lastReason ? formatRejectionReason(lastReason) : 'N/A'}</strong>
-        <span>{lastTs > 0 ? new Date(lastTs).toLocaleTimeString() : '--:--:--'}</span>
+        <div className="diagnostic-stat">
+          <span className="diagnostic-stat-label">Accepted</span>
+          <span className="diagnostic-stat-value positive">{accepted}</span>
+        </div>
+        <div className="diagnostic-stat">
+          <span className="diagnostic-stat-label">Rejected</span>
+          <span className="diagnostic-stat-value negative">{rejected}</span>
+        </div>
+      </div>
+
+      <div className="diagnostics-section">
+        <div className="diagnostics-section-title">Strategy Filters</div>
+        {strategyRows.length === 0 ? (
+          <div className="empty-state">No strategy filters yet</div>
+        ) : (
+          <div className="rejection-bars">
+            {strategyRows.map(([reason, count]) => (
+              <div className="rejection-bar-item" key={reason}>
+                <span className="rejection-bar-label">{formatRejectionReason(reason)}</span>
+                <span className="rejection-bar-count">{count}</span>
+                <div className="rejection-bar-visual">
+                  <div
+                    className="rejection-bar-fill"
+                    style={{ width: `${(count / maxCount) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="diagnostics-section">
+        <div className="diagnostics-section-title">Execution Rejections</div>
+        {rejectionRows.length === 0 ? (
+          <div className="empty-state">No execution rejections yet</div>
+        ) : (
+          <div className="rejection-bars">
+            {rejectionRows.map(([reason, count]) => (
+              <div className="rejection-bar-item" key={reason}>
+                <span className="rejection-bar-label">{formatRejectionReason(reason)}</span>
+                <span className="rejection-bar-count">{count}</span>
+                <div className="rejection-bar-visual">
+                  <div
+                    className="rejection-bar-fill"
+                    style={{ width: `${(count / maxCount) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="last-rejection">
+        <div>
+          <span className="last-rejection-label">Last Rejection</span>
+          <span className="last-rejection-value">
+            {lastReason ? formatRejectionReason(lastReason) : 'N/A'}
+          </span>
+        </div>
+        <span className="last-rejection-time">
+          {lastTs > 0 ? new Date(lastTs).toLocaleTimeString() : '--:--:--'}
+        </span>
       </div>
     </div>
   )
@@ -370,7 +392,7 @@ function RejectionDiagnosticsPanel({
 
 function LearningPanel({ items }: { items: MarketLearningProgress[] }) {
   if (items.length === 0) {
-    return <div className="empty-state">Sin datos de entrenamiento todavía</div>
+    return <div className="empty-state">Waiting for training data...</div>
   }
 
   const sorted = sortLearningMarkets(items)
@@ -386,79 +408,81 @@ function LearningPanel({ items }: { items: MarketLearningProgress[] }) {
     <div className="learning-list">
       <div className="learning-global">
         <div className="learning-global-meta">
-          <span>Progreso global de aprendizaje</span>
-          <span>{readyCount}/{sorted.length} mercados listos</span>
+          <span>Global Training Progress</span>
+          <span>{readyCount}/{sorted.length} markets ready</span>
         </div>
         <div className="learning-bar learning-bar-global">
           <span className="learning-bar-fill" style={{ width: `${globalProgressPct}%` }} />
         </div>
       </div>
 
-      {sorted.map((item) => (
-        <div className="learning-row" key={item.marketKey}>
-          <div className="learning-headline">
-            <div className="learning-title-wrap">
-              <span
-                className={`learning-semaphore ${learningSemaphoreClass(item.status)}`}
-                title={`Semáforo: ${learningStatusLabel(item.status)}`}
-              />
-              <strong>{item.asset}</strong>
-              <span>{formatLearningTimeframe(item.timeframe)}</span>
+      <div className="learning-grid">
+        {sorted.map((item) => (
+          <div className="learning-row" key={item.marketKey}>
+            <div className="learning-headline">
+              <div className="learning-title-wrap">
+                <span
+                  className={`learning-semaphore ${learningSemaphoreClass(item.status)}`}
+                  title={`Status: ${learningStatusLabel(item.status)}`}
+                />
+                <strong>{item.asset}</strong>
+                <span>{formatLearningTimeframe(item.timeframe)}</span>
+              </div>
+              <span className={`learning-status ${learningStatusClass(item.status)}`}>
+                {learningStatusLabel(item.status)}
+              </span>
             </div>
-            <span className={`learning-status ${learningStatusClass(item.status)}`}>
-              {learningStatusLabel(item.status)}
-            </span>
-          </div>
 
-          {item.status !== 'ready' ? (
-            <>
-              <div className="learning-meta">
-                <span>{item.sampleCount}/{item.targetSamples} cierres</span>
-                <span>{item.progressPct.toFixed(0)}%</span>
-              </div>
-              <div className="learning-bar">
-                <span className="learning-bar-fill" style={{ width: `${item.progressPct}%` }} />
-              </div>
-              <p className="learning-hint">{trainingHint(item)}</p>
-              <div className="learning-foot">
-                <span>{item.indicatorsActive} indicadores detectados</span>
-                <span>
-                  Act.{' '}
-                  {item.lastUpdatedTs > 0
-                    ? new Date(toMsFromSeconds(item.lastUpdatedTs)).toLocaleTimeString()
-                    : '--:--:--'}
-                </span>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="learning-ready-grid">
-                <div className="learning-ready-kpi">
-                  <span>Precisión prom.</span>
-                  <strong>{item.avgWinRatePct.toFixed(1)}%</strong>
+            {item.status !== 'ready' ? (
+              <>
+                <div className="learning-meta">
+                  <span>{item.sampleCount}/{item.targetSamples} trades</span>
+                  <span>{item.progressPct.toFixed(0)}%</span>
                 </div>
-                <div className="learning-ready-kpi">
-                  <span>Indicadores activos</span>
-                  <strong>{item.indicatorsActive}</strong>
+                <div className="learning-bar">
+                  <span className="learning-bar-fill" style={{ width: `${item.progressPct}%` }} />
                 </div>
-                <div className="learning-ready-kpi">
-                  <span>Cierres usados</span>
-                  <strong>{item.sampleCount}</strong>
+                <p className="learning-hint">{trainingHint(item)}</p>
+                <div className="learning-foot">
+                  <span>{item.indicatorsActive} indicators</span>
+                  <span>
+                    Updated{' '}
+                    {item.lastUpdatedTs > 0
+                      ? new Date(toMsFromSeconds(item.lastUpdatedTs)).toLocaleTimeString()
+                      : '--:--:--'}
+                  </span>
                 </div>
-              </div>
-              <p className="learning-hint">{trainingHint(item)}</p>
-              <div className="learning-foot">
-                <span>
-                  Act.{' '}
-                  {item.lastUpdatedTs > 0
-                    ? new Date(toMsFromSeconds(item.lastUpdatedTs)).toLocaleTimeString()
-                    : '--:--:--'}
-                </span>
-              </div>
-            </>
-          )}
-        </div>
-      ))}
+              </>
+            ) : (
+              <>
+                <div className="learning-ready-grid">
+                  <div className="learning-ready-kpi">
+                    <span>Avg. Accuracy</span>
+                    <strong>{item.avgWinRatePct.toFixed(1)}%</strong>
+                  </div>
+                  <div className="learning-ready-kpi">
+                    <span>Indicators</span>
+                    <strong>{item.indicatorsActive}</strong>
+                  </div>
+                  <div className="learning-ready-kpi">
+                    <span>Trades</span>
+                    <strong>{item.sampleCount}</strong>
+                  </div>
+                </div>
+                <p className="learning-hint">{trainingHint(item)}</p>
+                <div className="learning-foot">
+                  <span>
+                    Updated{' '}
+                    {item.lastUpdatedTs > 0
+                      ? new Date(toMsFromSeconds(item.lastUpdatedTs)).toLocaleTimeString()
+                      : '--:--:--'}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -722,16 +746,13 @@ export function Dashboard() {
             <div className="panel-head">
               <div className="panel-title">
                 <AlertTriangle size={14} />
-                <span>Motivos de Rechazo</span>
+                <span>Signal Diagnostics</span>
               </div>
             </div>
             <RejectionDiagnosticsPanel
               processed={execution.processedFeatures}
               generated={execution.generatedSignals}
-              filtered={execution.filteredFeatures}
               strategyReasons={execution.strategyFilterReasons}
-              lastStrategyReason={execution.lastStrategyFilterReason}
-              lastStrategyTs={execution.lastStrategyFilterTs}
               accepted={execution.acceptedSignals}
               rejected={execution.rejectedSignals}
               reasons={execution.rejectionReasons}
@@ -745,11 +766,11 @@ export function Dashboard() {
           <div className="panel-head">
             <div className="panel-title">
               <Activity size={14} />
-              <span>Entrenamiento Por Mercado</span>
+              <span>Market Training</span>
             </div>
           </div>
           <p className="learning-help">
-            Cada mercado aprende por separado. Objetivo: 30 cierres por mercado.
+            Each market trains independently. Target: 30 closed trades per market for full calibration.
           </p>
           <LearningPanel items={marketLearning} />
         </section>
