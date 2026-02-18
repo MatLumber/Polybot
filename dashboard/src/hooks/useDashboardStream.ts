@@ -218,7 +218,11 @@ function normalizeBaseUrl(url: string): string {
 }
 
 async function fetchApi<T>(url: string): Promise<T> {
-  const response = await fetch(url)
+  const response = await fetch(url, {
+    headers: {
+      'ngrok-skip-browser-warning': 'true',
+    },
+  })
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} while requesting ${url}`)
   }
