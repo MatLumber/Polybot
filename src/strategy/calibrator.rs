@@ -160,25 +160,78 @@ impl IndicatorStats {
             return;
         }
 
-        // Binary prediction market payout-aware weighting.
+        // Binary prediction market payout-aware weighting - v2.0 AGGRESSIVE
+        // Más penalización para indicadores perdedores
         let performance_factor = if self.win_rate >= 0.55 {
-            1.0 + (self.win_rate - 0.55) * 4.0
+            // Buenos indicadores: boost significativo
+            1.0 + (self.win_rate - 0.55) * 5.0 // Aumentado de 4.0 a 5.0
         } else if self.win_rate >= 0.50 {
-            0.8 + (self.win_rate - 0.50) * 4.0
-        } else if self.win_rate >= 0.40 {
-            0.5 + (self.win_rate - 0.40) * 3.0
+            // Neutral a ligeramente positivo: reducción moderada
+            0.7 + (self.win_rate - 0.50) * 6.0 // Más agresivo
+        } else if self.win_rate >= 0.45 {
+            // Ligeramente negativo: reducción fuerte
+            0.4 + (self.win_rate - 0.45) * 6.0
+        } else if self.win_rate >= 0.35 {
+            // Negativo: reducción severa
+            0.25 + (self.win_rate - 0.35) * 1.5
         } else {
-            0.2 + self.win_rate * 0.75
+            // Muy negativo: casi eliminar
+            0.1 + self.win_rate * 0.4 // Era 0.2 + 0.75, ahora mucho más penalizado
         };
 
         self.calibrated_weight = self.default_weight * performance_factor;
+        // Rango más amplio para permitir penalización severa
         self.calibrated_weight = self
             .calibrated_weight
-            .clamp(self.default_weight * 0.1, self.default_weight * 3.0);
+            .clamp(self.default_weight * 0.05, self.default_weight * 3.5); // Min 0.05x en lugar de 0.1x
+    }
+
+    /// Recalculate with regime awareness - NEW v2.0
+    pub fn recalculate_regime_aware(&mut self, min_samples: usize, regime: &str) {
+        // Base recalculation
+        self.recalculate(min_samples);
+
+        // Apply regime-specific adjustments
+        let regime_multiplier = match regime {
+            "trending" => {
+                // En tendencia, confiar más en indicadores de tendencia
+                if self.name.contains("adx") || self.name.contains("ema") {
+                    1.15 // Boost 15%
+                } else if self.name.contains("rsi") || self.name.contains("bollinger") {
+                    0.85 // Penalizar reversion 15%
+                } else {
+                    1.0
+                }
+            }
+            "ranging" => {
+                // En rango, confiar más en indicadores de reversión
+                if self.name.contains("rsi") || self.name.contains("bollinger") {
+                    1.20 // Boost 20%
+                } else if self.name.contains("adx") {
+                    0.80 // Penalizar trend 20%
+                } else {
+                    1.0
+                }
+            }
+            "volatile" => {
+                // En volatilidad, reducir todos excepto microestructura
+                if self.name.contains("orderbook") || self.name.contains("orderflow") {
+                    1.10 // Boost microestructura 10%
+                } else {
+                    0.70 // Penalizar todo lo demás 30%
+                }
+            }
+            _ => 1.0,
+        };
+
+        self.calibrated_weight *= regime_multiplier;
+        self.calibrated_weight = self
+            .calibrated_weight
+            .clamp(self.default_weight * 0.05, self.default_weight * 3.5);
     }
 }
 
-/// Indicator Calibrator
+/// Indicator Calibrator v2.0 - Regime-aware calibration
 pub struct IndicatorCalibrator {
     /// Statistics per market and indicator: market_key -> indicator_name -> stats
     stats_by_market: HashMap<MarketKey, HashMap<String, IndicatorStats>>,
@@ -188,6 +241,10 @@ pub struct IndicatorCalibrator {
     min_samples: usize,
     /// Default weights for indicators
     default_weights: HashMap<String, f64>,
+    /// Current market regime per market - NEW v2.0
+    current_regime: HashMap<MarketKey, String>,
+    /// Regime-aware calibration enabled - NEW v2.0
+    regime_aware_enabled: bool,
 }
 
 impl IndicatorCalibrator {
@@ -222,6 +279,8 @@ impl IndicatorCalibrator {
             calibration_by_market: HashMap::new(),
             min_samples: 30,
             default_weights,
+            current_regime: HashMap::new(),
+            regime_aware_enabled: true,
         }
     }
 
@@ -229,6 +288,17 @@ impl IndicatorCalibrator {
         let mut calibrator = Self::new();
         calibrator.min_samples = min_samples;
         calibrator
+    }
+
+    /// Set regime for a market - NEW v2.0
+    pub fn set_regime(&mut self, asset: Asset, timeframe: Timeframe, regime: &str) {
+        let market_key = Self::canonical_market_key(asset, timeframe);
+        self.current_regime.insert(market_key, regime.to_string());
+    }
+
+    /// Enable/disable regime-aware calibration - NEW v2.0
+    pub fn set_regime_aware(&mut self, enabled: bool) {
+        self.regime_aware_enabled = enabled;
     }
 
     pub fn canonical_market_key(asset: Asset, timeframe: Timeframe) -> MarketKey {
@@ -314,11 +384,25 @@ impl IndicatorCalibrator {
         self.record_prediction_for_market_key(&market_key, p_pred, is_win);
     }
 
-    /// Recalculate all weights based on accumulated data.
+    /// Recalculate all weights based on accumulated data - v2.0 regime-aware
     pub fn recalibrate(&mut self) {
-        for market_map in self.stats_by_market.values_mut() {
+        for (market_key, market_map) in self.stats_by_market.iter_mut() {
+            // Get current regime for this market
+            let regime = if self.regime_aware_enabled {
+                self.current_regime
+                    .get(market_key)
+                    .cloned()
+                    .unwrap_or_else(|| "unknown".to_string())
+            } else {
+                "unknown".to_string()
+            };
+
             for stats in market_map.values_mut() {
-                stats.recalculate(self.min_samples);
+                if self.regime_aware_enabled && regime != "unknown" {
+                    stats.recalculate_regime_aware(self.min_samples, &regime);
+                } else {
+                    stats.recalculate(self.min_samples);
+                }
             }
         }
     }
@@ -527,6 +611,19 @@ impl IndicatorCalibrator {
             .into_iter()
             .filter(|s| s.total_signals >= self.min_samples && s.win_rate < avg)
             .collect()
+    }
+
+    /// Get win rate for a specific indicator in a market - NEW v2.0
+    pub fn get_indicator_win_rate(
+        &self,
+        asset: Asset,
+        timeframe: Timeframe,
+        indicator: &str,
+    ) -> Option<f64> {
+        let market_key = Self::canonical_market_key(asset, timeframe);
+        self.market_map(&market_key)
+            .and_then(|m| m.get(indicator))
+            .map(|s| s.win_rate)
     }
 }
 

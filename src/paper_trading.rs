@@ -224,8 +224,15 @@ pub struct PaperTradingConfig {
     pub kelly_fraction_1h: f64,
     pub kelly_cap_15m: f64,
     pub kelly_cap_1h: f64,
-    /// Minimum edge threshold for entry. Negative allows exploration in paper mode.
+    /// Minimum edge threshold for entry. v2.0: Increased to 0.05 (5%)
     pub min_edge_net: f64,
+    // NUEVO v2.0: Stops adaptativos basados en ATR
+    pub hard_stop_atr_multiplier: f64,
+    pub adaptive_stops_enabled: bool,
+    // NUEVO v2.0: ETH sizing multiplier (más conservador)
+    pub eth_size_multiplier: f64,
+    // NUEVO v2.0: ATR period for adaptive stops
+    pub atr_period: usize,
 }
 
 impl Default for PaperTradingConfig {
@@ -250,7 +257,12 @@ impl Default for PaperTradingConfig {
             kelly_fraction_1h: 0.50,
             kelly_cap_15m: 0.05,
             kelly_cap_1h: 0.10,
-            min_edge_net: 0.0,
+            min_edge_net: 0.05,  // v2.0: 5% edge mínimo (era 0.0)
+            // NUEVO v2.0
+            hard_stop_atr_multiplier: 1.5,
+            adaptive_stops_enabled: true,
+            eth_size_multiplier: 0.8,  // Reducir sizing ETH 20%
+            atr_period: 14,
         }
     }
 }

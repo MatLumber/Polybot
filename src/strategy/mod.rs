@@ -1,4 +1,11 @@
-//! Strategy Engine - Polymarket Binary Prediction Strategy
+//! Strategy Engine v2.0 - PolyBot Mejorado
+//!
+//! Mejoras implementadas:
+//! - Sistema de votación por clusters (indicadores agrupados por tipo)
+//! - Filtros de entrada más estrictos (edge mínimo 5%)
+//! - Parámetros adaptativos por asset/timeframe
+//! - Calibración agresiva por régimen de mercado
+//! - Desactivación temporal de ETH_1H por bajo rendimiento
 //!
 //! This strategy is designed for Polymarket prediction markets where:
 //! - The question is: "Will price be HIGHER or LOWER at market close?"
@@ -6,21 +13,6 @@
 //! - LOSS = shares worth $0.00 (lose 100% of bet)
 //!
 //! Therefore we need HIGH ACCURACY (>55% winrate is profitable).
-//! The strategy uses a multi-indicator voting system with strict quality filters.
-//!
-//! Key principles:
-//! 1. We predict the DIRECTION of the entire window, not scalp intra-window
-//! 2. Only trade when indicators strongly agree (high conviction)
-//! 3. Use regime detection to pick the right strategy:
-//!    - TRENDING: Follow the trend (momentum + ADX + EMA)
-//!    - RANGING: Mean reversion (RSI + BB extremes)
-//!    - VOLATILE: No trade (too unpredictable for binary bets)
-//! 4. Cooldown = one full window (prevent re-entering same window)
-//!
-//! NEW (v3):
-//! - Dynamic indicator calibration based on historical performance
-//! - Enhanced multi-TF alignment with regime-aware weighting
-//! - Intra-window volatility filter
 
 pub mod calibrator;
 pub use calibrator::{
@@ -33,7 +25,27 @@ use std::collections::HashMap;
 use crate::features::{Features, MarketRegime};
 use crate::types::{Asset, Direction, FeatureSet, Signal, Timeframe};
 
-/// Strategy configuration
+/// Cluster types for indicator grouping
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndicatorCluster {
+    Trend,          // ADX, EMA
+    Momentum,       // MACD, Momentum, Heikin Ashi
+    Reversion,      // RSI, Bollinger, StochRSI
+    Microstructure, // Orderbook, Orderflow
+    Confirmation,   // RSI Divergence, OBV
+}
+
+/// Vote result from a cluster
+#[derive(Debug, Clone)]
+pub struct ClusterVote {
+    pub cluster: IndicatorCluster,
+    pub up_votes: f64,
+    pub down_votes: f64,
+    pub confidence: f64,  // 0.0 to 1.0, how strong is the cluster signal
+    pub is_aligned: bool, // Are all indicators in cluster aligned?
+}
+
+/// Strategy configuration v2.0
 #[derive(Debug, Clone)]
 pub struct StrategyConfig {
     /// Minimum confidence to generate a signal
@@ -67,12 +79,24 @@ pub struct StrategyConfig {
     pub multi_tf_bonus: f64,
     /// Divergence detection lookback (number of feature snapshots)
     pub divergence_lookback: usize,
+    // NUEVO: Filtros estrictos v2.0
+    pub min_edge_net: f64,
+    pub max_late_entry_15m: f64,
+    pub max_late_entry_1h: f64,
+    // NUEVO: Umbral adaptativo por asset
+    pub late_entry_threshold_btc_15m: f64,
+    pub late_entry_threshold_eth_15m: f64,
+    pub late_entry_threshold_btc_1h: f64,
+    pub late_entry_threshold_eth_1h: f64,
+    // NUEVO: Sistema de clusters
+    pub cluster_min_alignment: f64, // Mínimo 0.7 (70% de indicadores en cluster deben estar alineados)
+    pub cluster_require_trend_momentum_agreement: bool,
 }
 
 impl Default for StrategyConfig {
     fn default() -> Self {
         Self {
-            min_confidence: 0.60, // High bar — binary bets need accuracy
+            min_confidence: 0.65, // Aumentado de 0.60 a 0.65
             rsi_overbought: 65.0, // Tighter RSI for prediction accuracy
             rsi_oversold: 35.0,
             macd_threshold: 0.001, // Ignore noise
@@ -81,7 +105,7 @@ impl Default for StrategyConfig {
             trend_threshold: 0.002, // Real trends only
             volatility_scale: 0.5,
             min_active_votes: 1,         // Allow exploration in paper mode
-            min_vote_ratio: 1.05,        // Avoid only true coin-flip ties
+            min_vote_ratio: 1.15,        // Aumentado de 1.05 a 1.15 (más estricto)
             signal_cooldown_ms: 900_000, // 15 minutes (legacy)
             stoch_rsi_overbought: 0.80,
             stoch_rsi_oversold: 0.20,
@@ -89,6 +113,16 @@ impl Default for StrategyConfig {
             volume_penalty_threshold: 0.6, // Penalize low volume
             multi_tf_bonus: 0.06,          // Conservative multi-TF bonus
             divergence_lookback: 5,
+            // NUEVO: Filtros estrictos v2.0
+            min_edge_net: 0.05, // 5% edge mínimo
+            max_late_entry_15m: 0.60,
+            max_late_entry_1h: 0.70,
+            late_entry_threshold_btc_15m: 0.005,
+            late_entry_threshold_eth_15m: 0.008,
+            late_entry_threshold_btc_1h: 0.015,
+            late_entry_threshold_eth_1h: 0.025,
+            cluster_min_alignment: 0.70,
+            cluster_require_trend_momentum_agreement: true,
         }
     }
 }
@@ -298,16 +332,27 @@ impl StrategyEngine {
         Some(signal)
     }
 
-    /// Generate signal from current features
+    /// Generate signal from current features - Sistema de Clusters v2.0
     ///
-    /// Polymarket binary prediction strategy:
-    /// We need to predict if price will be HIGHER or LOWER at window close.
+    /// Los indicadores se agrupan en clusters por tipo:
+    /// - Cluster Trend: ADX, EMA
+    /// - Cluster Momentum: MACD, Momentum, Heikin Ashi
+    /// - Cluster Reversion: RSI, Bollinger, StochRSI
+    /// - Cluster Microstructure: Orderbook, Orderflow
+    /// - Cluster Confirmation: RSI Divergence, OBV
     ///
-    /// TRENDING regime: Follow the trend (high confidence)
-    /// RANGING regime: Mean-reversion from extremes only (moderate confidence)
-    /// VOLATILE regime: Skip entirely (too unpredictable for binary bets)
+    /// Señal válida solo si:
+    /// 1. Cluster Trend y Momentum están alineados (misma dirección)
+    /// 2. Al menos 3 clusters activos
+    /// 3. Confianza >= min_confidence
     fn generate_signal(&mut self, features: &Features) -> Option<GeneratedSignal> {
         let regime = features.regime;
+
+        // ── DESACTIVAR ETH_1H TEMPORALMENTE ──
+        if features.asset == Asset::ETH && matches!(features.timeframe, Timeframe::Hour1) {
+            self.set_filter_reason("eth_1h_disabled_pending_fix");
+            return None;
+        }
 
         // ── VOLATILE REGIME FILTER ──
         // In volatile markets, binary prediction accuracy drops significantly.
@@ -317,19 +362,20 @@ impl StrategyEngine {
             return None;
         }
 
-        // ── LATE ENTRY FILTER (HIGH PRIORITY) ──
-        // "Already moved too much" filter - critical for avoiding losses
-        // If price already moved too much in window, we're likely entering late
-        // and the move is already exhausted
+        // ── LATE ENTRY FILTER (HIGH PRIORITY) - v2.0 ──
+        // Umbral adaptativo por asset/timeframe
+        let max_late_entry = match features.timeframe {
+            Timeframe::Min15 => self.config.max_late_entry_15m,
+            Timeframe::Hour1 => self.config.max_late_entry_1h,
+        };
+
         let window_progress = features.window_progress.unwrap_or(1.0);
-        if window_progress > 0.65 {
+        if window_progress > max_late_entry {
             if features.late_entry_up {
-                // Price already moved UP too much - don't chase late in the window
                 self.set_filter_reason("late_entry_up");
                 return None;
             }
             if features.late_entry_down {
-                // Price already moved DOWN too much - don't chase late in the window
                 self.set_filter_reason("late_entry_down");
                 return None;
             }
@@ -375,84 +421,82 @@ impl StrategyEngine {
             }
         }
 
-        let mut up_votes: f64 = 0.0;
-        let mut down_votes: f64 = 0.0;
+        // ═══════════════════════════════════════════════════
+        // SISTEMA DE CLUSTERS v2.0
+        // Agrupar indicadores por tipo y evaluar cada cluster
+        // ═══════════════════════════════════════════════════
+
+        let mut cluster_votes: Vec<ClusterVote> = Vec::new();
         let mut reasons: Vec<String> = Vec::new();
-        let mut active_vote_count: usize = 0;
         let mut indicators_used: Vec<String> = Vec::new();
 
-        // ═══════════════════════════════════════════════════
-        // TIER 1: Core Trend Indicators (highest weight)
-        // These are the most reliable for predicting window direction
-        // ═══════════════════════════════════════════════════
+        // ── CLUSTER 1: TREND (ADX + EMA) ──
+        let mut trend_up = 0.0;
+        let mut trend_down = 0.0;
+        let mut trend_active = 0;
 
-        // ADX + DI: The strongest trend signal
-        // If ADX > 25, trend is strong and DI tells direction
         if let (Some(adx), Some(plus_di), Some(minus_di)) =
             (features.adx, features.plus_di, features.minus_di)
         {
             if adx > 25.0 {
                 let di_spread = (plus_di - minus_di).abs();
-                // Only count if DI spread is meaningful (not a flat market)
                 if di_spread > 5.0 {
                     let base_weight = if adx > 35.0 { 3.0 } else { 2.0 };
                     let weight =
                         self.calibrated_weight(features, "adx_trend") * (base_weight / 2.5);
                     if plus_di > minus_di {
-                        up_votes += weight;
-                        reasons.push(format!(
-                            "ADX trend UP: {:.1} (+DI:{:.1} -DI:{:.1})",
-                            adx, plus_di, minus_di
-                        ));
+                        trend_up += weight;
+                        reasons.push(format!("ADX UP: {:.1}", adx));
                     } else {
-                        down_votes += weight;
-                        reasons.push(format!(
-                            "ADX trend DOWN: {:.1} (+DI:{:.1} -DI:{:.1})",
-                            adx, plus_di, minus_di
-                        ));
+                        trend_down += weight;
+                        reasons.push(format!("ADX DOWN: {:.1}", adx));
                     }
-                    active_vote_count += 1;
+                    trend_active += 1;
                     indicators_used.push("adx_trend".to_string());
                 }
             }
         }
 
-        // EMA Trend: 9/21 EMA crossover direction
         if let Some(trend) = features.trend_strength {
             let abs_trend = trend.abs();
-            if abs_trend > 0.003 {
-                // Strong trend
-                let direction = if trend > 0.0 { 1 } else { -1 };
-                let weight = self.calibrated_weight(features, "ema_trend") * 1.33;
-                if direction > 0 {
-                    up_votes += weight;
+            if abs_trend > self.config.trend_threshold {
+                let weight = self.calibrated_weight(features, "ema_trend")
+                    * if abs_trend > 0.003 { 1.33 } else { 1.0 };
+                if trend > 0.0 {
+                    trend_up += weight;
                 } else {
-                    down_votes += weight;
+                    trend_down += weight;
                 }
-                active_vote_count += 1;
+                trend_active += 1;
                 indicators_used.push("ema_trend".to_string());
-                reasons.push(format!("Strong EMA trend: {:.4}", trend));
-            } else if abs_trend > self.config.trend_threshold {
-                // Moderate trend
-                let direction = if trend > 0.0 { 1 } else { -1 };
-                let weight = self.calibrated_weight(features, "ema_trend");
-                if direction > 0 {
-                    up_votes += weight;
-                } else {
-                    down_votes += weight;
-                }
-                active_vote_count += 1;
-                indicators_used.push("ema_trend".to_string());
-                reasons.push(format!("EMA trend: {:.4}", trend));
+                reasons.push(format!("EMA: {:.4}", trend));
             }
         }
 
-        // ═══════════════════════════════════════════════════
-        // TIER 2: Momentum Confirmation
-        // ═══════════════════════════════════════════════════
+        if trend_active > 0 {
+            let trend_total = trend_up + trend_down;
+            let trend_confidence = if trend_total > 0.0 {
+                (trend_up.max(trend_down) / trend_total).max(0.5)
+            } else {
+                0.5
+            };
+            let is_aligned = (trend_up == 0.0 || trend_down == 0.0)
+                || (trend_up.max(trend_down) / trend_total) >= self.config.cluster_min_alignment;
+            cluster_votes.push(ClusterVote {
+                cluster: IndicatorCluster::Trend,
+                up_votes: trend_up,
+                down_votes: trend_down,
+                confidence: trend_confidence,
+                is_aligned,
+            });
+        }
 
-        // MACD Histogram: Momentum confirmation
-        if let (Some(_macd), Some(hist)) = (features.macd, features.macd_hist) {
+        // ── CLUSTER 2: MOMENTUM (MACD + Momentum + Heikin Ashi + ST Momentum) ──
+        let mut mom_up = 0.0;
+        let mut mom_down = 0.0;
+        let mut mom_active = 0;
+
+        if let (Some(_), Some(hist)) = (features.macd, features.macd_hist) {
             let abs_hist = hist.abs();
             if abs_hist > self.config.macd_threshold {
                 let base_weight = if abs_hist > self.config.macd_threshold * 5.0 {
@@ -463,278 +507,312 @@ impl StrategyEngine {
                 let weight =
                     self.calibrated_weight(features, "macd_histogram") * (base_weight / 1.5);
                 if hist > 0.0 {
-                    up_votes += weight;
-                    reasons.push(format!("MACD bullish: {:.4}", hist));
+                    mom_up += weight;
+                    reasons.push(format!("MACD: {:.4}", hist));
                 } else {
-                    down_votes += weight;
-                    reasons.push(format!("MACD bearish: {:.4}", hist));
+                    mom_down += weight;
                 }
-                active_vote_count += 1;
+                mom_active += 1;
                 indicators_used.push("macd_histogram".to_string());
             }
         }
 
-        // Momentum + Velocity: Price acceleration
         if let Some(momentum) = features.momentum {
             let vel = features.velocity.unwrap_or(0.0);
             let abs_mom = momentum.abs();
-
             if abs_mom > 0.001 && vel.abs() > 0.0002 && momentum.signum() == vel.signum() {
-                // Strong momentum with acceleration — very predictive
                 let weight = self.calibrated_weight(features, "momentum_acceleration");
                 if momentum > 0.0 {
-                    up_votes += weight;
+                    mom_up += weight;
                 } else {
-                    down_votes += weight;
+                    mom_down += weight;
                 }
-                active_vote_count += 1;
+                mom_active += 1;
                 indicators_used.push("momentum_acceleration".to_string());
-                reasons.push(format!("Strong momentum: {:.4} vel: {:.4}", momentum, vel));
-            } else if abs_mom > 0.0008 {
-                // Moderate momentum
-                let weight = self.calibrated_weight(features, "momentum_acceleration") * 0.5;
-                if momentum > 0.0 {
-                    up_votes += weight;
-                } else {
-                    down_votes += weight;
-                }
-                active_vote_count += 1;
-                indicators_used.push("momentum_acceleration".to_string());
-                reasons.push(format!("Momentum: {:.4}", momentum));
+                reasons.push(format!("Mom+: {:.4}", momentum));
             }
         }
 
-        // Heikin Ashi Trend: Smoothed candle direction
         if let Some(ha_trend) = features.ha_trend {
             let weight = self.calibrated_weight(features, "heikin_ashi");
             match ha_trend {
-                Direction::Up => {
-                    up_votes += weight;
-                }
-                Direction::Down => {
-                    down_votes += weight;
-                }
+                Direction::Up => mom_up += weight,
+                Direction::Down => mom_down += weight,
             }
-            active_vote_count += 1;
+            mom_active += 1;
             indicators_used.push("heikin_ashi".to_string());
-            reasons.push(format!("HA trend: {:?}", ha_trend));
         }
 
-        // ── SHORT-TERM WEIGHTED MOMENTUM (HIGH PRIORITY) ──
-        // Most recent 2-3 candles are weighted 3x more than older ones
-        // This catches early momentum shifts before they're obvious
         if let Some(st_momentum) = features.short_term_momentum {
-            let weighted_mom = features.weighted_momentum.unwrap_or(st_momentum);
             let abs_st = st_momentum.abs();
-
             if abs_st > 0.0005 {
-                // Short-term momentum is significant
+                let weighted_mom = features.weighted_momentum.unwrap_or(st_momentum);
                 let base_weight = if abs_st > 0.002 { 2.5 } else { 1.5 };
-                // Weighted momentum confirms the direction
                 let confirmed = weighted_mom.signum() == st_momentum.signum();
-                let weight =
-                    self.calibrated_weight(features, "short_term_momentum") * (base_weight / 1.5);
-                let final_weight = if confirmed { weight * 1.2 } else { weight };
-
+                let weight = self.calibrated_weight(features, "short_term_momentum")
+                    * (base_weight / 1.5)
+                    * if confirmed { 1.2 } else { 1.0 };
                 if st_momentum > 0.0 {
-                    up_votes += final_weight;
-                    reasons.push(format!(
-                        "Short-term momentum UP: {:.5}{}",
-                        st_momentum,
-                        if confirmed { " (confirmed)" } else { "" }
-                    ));
+                    mom_up += weight;
                 } else {
-                    down_votes += final_weight;
-                    reasons.push(format!(
-                        "Short-term momentum DOWN: {:.5}{}",
-                        st_momentum,
-                        if confirmed { " (confirmed)" } else { "" }
-                    ));
+                    mom_down += weight;
                 }
-                active_vote_count += 1;
+                mom_active += 1;
                 indicators_used.push("short_term_momentum".to_string());
             }
         }
 
-        // ═══════════════════════════════════════════════════
-        // TIER 3: Mean-Reversion Signals (mainly for ranging)
-        // ═══════════════════════════════════════════════════
+        if mom_active > 0 {
+            let mom_total = mom_up + mom_down;
+            let mom_confidence = if mom_total > 0.0 {
+                (mom_up.max(mom_down) / mom_total).max(0.5)
+            } else {
+                0.5
+            };
+            let is_aligned = (mom_up == 0.0 || mom_down == 0.0)
+                || (mom_up.max(mom_down) / mom_total) >= self.config.cluster_min_alignment;
+            cluster_votes.push(ClusterVote {
+                cluster: IndicatorCluster::Momentum,
+                up_votes: mom_up,
+                down_votes: mom_down,
+                confidence: mom_confidence,
+                is_aligned,
+            });
+        }
 
-        // RSI: Only at extremes, regime-aware
+        // ── CLUSTER 3: REVERSION (RSI + Bollinger + StochRSI) ──
+        let mut rev_up = 0.0;
+        let mut rev_down = 0.0;
+        let mut rev_active = 0;
+
         if let Some(rsi) = features.rsi {
             let (vote, base_weight, reason) = self.analyze_rsi(rsi, regime);
-            if vote > 0 {
+            if vote != 0 {
                 let weight = self.calibrated_weight(features, "rsi_extreme") * (base_weight / 1.5);
-                up_votes += weight;
-                active_vote_count += 1;
+                if vote > 0 {
+                    rev_up += weight;
+                } else {
+                    rev_down += weight;
+                }
+                rev_active += 1;
                 indicators_used.push("rsi_extreme".to_string());
-            } else if vote < 0 {
-                let weight = self.calibrated_weight(features, "rsi_extreme") * (base_weight / 1.5);
-                down_votes += weight;
-                active_vote_count += 1;
-                indicators_used.push("rsi_extreme".to_string());
-            }
-            if !reason.is_empty() {
-                reasons.push(reason);
+                if !reason.is_empty() {
+                    reasons.push(reason);
+                }
             }
         }
 
-        // Bollinger Band position (regime-aware)
         if let Some(bb_pos) = features.bb_position {
             let (vote, base_weight, reason) = self.analyze_bb(bb_pos, regime);
-            if vote > 0 {
+            if vote != 0 {
                 let weight =
                     self.calibrated_weight(features, "bollinger_band") * (base_weight / 2.0);
-                up_votes += weight;
-                active_vote_count += 1;
+                if vote > 0 {
+                    rev_up += weight;
+                } else {
+                    rev_down += weight;
+                }
+                rev_active += 1;
                 indicators_used.push("bollinger_band".to_string());
-            } else if vote < 0 {
-                let weight =
-                    self.calibrated_weight(features, "bollinger_band") * (base_weight / 2.0);
-                down_votes += weight;
-                active_vote_count += 1;
-                indicators_used.push("bollinger_band".to_string());
-            }
-            if !reason.is_empty() {
-                reasons.push(reason);
+                if !reason.is_empty() {
+                    reasons.push(reason);
+                }
             }
         }
 
-        // Stochastic RSI (extreme zones only)
         if let Some(stoch_rsi) = features.stoch_rsi {
             if stoch_rsi < self.config.stoch_rsi_oversold {
-                let weight = self.calibrated_weight(features, "stoch_rsi");
-                up_votes += weight;
-                active_vote_count += 1;
+                rev_up += self.calibrated_weight(features, "stoch_rsi");
+                rev_active += 1;
                 indicators_used.push("stoch_rsi".to_string());
-                reasons.push(format!("StochRSI oversold: {:.2}", stoch_rsi));
             } else if stoch_rsi > self.config.stoch_rsi_overbought {
-                let weight = self.calibrated_weight(features, "stoch_rsi");
-                down_votes += weight;
-                active_vote_count += 1;
+                rev_down += self.calibrated_weight(features, "stoch_rsi");
+                rev_active += 1;
                 indicators_used.push("stoch_rsi".to_string());
-                reasons.push(format!("StochRSI overbought: {:.2}", stoch_rsi));
             }
         }
 
-        // ═══════════════════════════════════════════════════
-        // TIER 4: Confirmation (low weight, tiebreakers)
-        // ═══════════════════════════════════════════════════
+        if rev_active > 0 {
+            let rev_total = rev_up + rev_down;
+            let rev_confidence = if rev_total > 0.0 {
+                (rev_up.max(rev_down) / rev_total).max(0.5)
+            } else {
+                0.5
+            };
+            let is_aligned = (rev_up == 0.0 || rev_down == 0.0)
+                || (rev_up.max(rev_down) / rev_total) >= self.config.cluster_min_alignment;
+            cluster_votes.push(ClusterVote {
+                cluster: IndicatorCluster::Reversion,
+                up_votes: rev_up,
+                down_votes: rev_down,
+                confidence: rev_confidence,
+                is_aligned,
+            });
+        }
 
-        // RSI Divergence (strong reversal signal)
-        // IMPORTANT: Deactivate in short windows - divergence is unreliable with limited data
-        // Only use for 1h timeframe where we have enough price history
+        // ── CLUSTER 4: MICROSTRUCTURE (Orderbook + Orderflow) ──
+        let mut micro_up = 0.0;
+        let mut micro_down = 0.0;
+        let mut micro_active = 0;
+
+        if let Some(imbalance) = features.orderbook_imbalance {
+            let abs_imb = imbalance.abs();
+            if abs_imb > 0.15 {
+                let base_weight = if abs_imb > 0.35 { 2.5 } else { 1.5 };
+                let weight =
+                    self.calibrated_weight(features, "orderbook_imbalance") * (base_weight / 2.0);
+                if imbalance > 0.0 {
+                    micro_up += weight;
+                    reasons.push(format!("OB: {:.0}%", imbalance * 100.0));
+                } else {
+                    micro_down += weight;
+                }
+                micro_active += 1;
+                indicators_used.push("orderbook_imbalance".to_string());
+            }
+        }
+
+        if let Some(delta) = features.orderflow_delta {
+            let abs_delta = delta.abs();
+            if abs_delta > 0.10 {
+                let weight = self.calibrated_weight(features, "orderflow_delta");
+                if delta > 0.0 {
+                    micro_up += weight;
+                } else {
+                    micro_down += weight;
+                }
+                micro_active += 1;
+                indicators_used.push("orderflow_delta".to_string());
+            }
+        }
+
+        if micro_active > 0 {
+            let micro_total = micro_up + micro_down;
+            let micro_confidence = if micro_total > 0.0 {
+                (micro_up.max(micro_down) / micro_total).max(0.5)
+            } else {
+                0.5
+            };
+            let is_aligned = (micro_up == 0.0 || micro_down == 0.0)
+                || (micro_up.max(micro_down) / micro_total) >= self.config.cluster_min_alignment;
+            cluster_votes.push(ClusterVote {
+                cluster: IndicatorCluster::Microstructure,
+                up_votes: micro_up,
+                down_votes: micro_down,
+                confidence: micro_confidence,
+                is_aligned,
+            });
+        }
+
+        // ── CLUSTER 5: CONFIRMATION (RSI Divergence + OBV) ──
+        let mut conf_up = 0.0;
+        let mut conf_down = 0.0;
+        let mut conf_active = 0;
+
         let is_short_window = matches!(features.timeframe, Timeframe::Min15);
         if !is_short_window {
             if let Some((div_vote, div_reason)) = self.detect_rsi_divergence(features) {
                 let weight = self.calibrated_weight(features, "rsi_divergence");
                 if div_vote > 0 {
-                    up_votes += weight;
+                    conf_up += weight;
                 } else {
-                    down_votes += weight;
+                    conf_down += weight;
                 }
-                active_vote_count += 1;
+                conf_active += 1;
                 indicators_used.push("rsi_divergence".to_string());
                 reasons.push(div_reason);
             }
         }
 
-        // OBV confirmation (only with significant volume)
         if let (Some(obv_slope), Some(rel_vol)) = (features.obv_slope, features.relative_volume) {
             if rel_vol > 1.0 && obv_slope.abs() > 0.0 {
                 let weight = self.calibrated_weight(features, "obv_slope");
                 if obv_slope > 0.0 {
-                    up_votes += weight;
+                    conf_up += weight;
                 } else {
-                    down_votes += weight;
+                    conf_down += weight;
                 }
+                conf_active += 1;
                 indicators_used.push("obv_slope".to_string());
-                reasons.push(format!(
-                    "OBV {}: {:.0} (vol:{:.1}x)",
-                    if obv_slope > 0.0 { "rising" } else { "falling" },
-                    obv_slope,
-                    rel_vol
-                ));
             }
         }
 
-        // ═══════════════════════════════════════════════════
-        // TIER 5: Orderbook & Microstructure (HIGH PRIORITY)
-        // These are leading indicators, not lagging
-        // ═══════════════════════════════════════════════════
-
-        // Orderbook Imbalance: Bid/Ask pressure
-        // Positive = more bids (bullish), Negative = more asks (bearish)
-        if let Some(imbalance) = features.orderbook_imbalance {
-            let abs_imb = imbalance.abs();
-            if abs_imb > 0.15 {
-                // Significant imbalance detected
-                let base_weight = if abs_imb > 0.35 { 2.5 } else { 1.5 };
-                let weight =
-                    self.calibrated_weight(features, "orderbook_imbalance") * (base_weight / 2.0);
-                if imbalance > 0.0 {
-                    up_votes += weight;
-                    reasons.push(format!(
-                        "Orderbook bullish: {:.1}% bid pressure",
-                        imbalance * 100.0
-                    ));
-                } else {
-                    down_votes += weight;
-                    reasons.push(format!(
-                        "Orderbook bearish: {:.1}% ask pressure",
-                        imbalance.abs() * 100.0
-                    ));
-                }
-                active_vote_count += 1;
-                indicators_used.push("orderbook_imbalance".to_string());
-            }
-        }
-
-        // Orderflow Delta: Net buying/selling pressure
-        // Positive = net buying, Negative = net selling
-        if let Some(delta) = features.orderflow_delta {
-            let abs_delta = delta.abs();
-            if abs_delta > 0.10 {
-                // Significant orderflow detected
-                let weight = self.calibrated_weight(features, "orderflow_delta");
-                if delta > 0.0 {
-                    up_votes += weight;
-                    reasons.push(format!("Orderflow buying: +{:.1}%", delta * 100.0));
-                } else {
-                    down_votes += weight;
-                    reasons.push(format!("Orderflow selling: {:.1}%", delta * 100.0));
-                }
-                active_vote_count += 1;
-                indicators_used.push("orderflow_delta".to_string());
-            }
+        if conf_active > 0 {
+            let conf_total = conf_up + conf_down;
+            let conf_confidence = if conf_total > 0.0 {
+                (conf_up.max(conf_down) / conf_total).max(0.5)
+            } else {
+                0.5
+            };
+            let is_aligned = (conf_up == 0.0 || conf_down == 0.0)
+                || (conf_up.max(conf_down) / conf_total) >= self.config.cluster_min_alignment;
+            cluster_votes.push(ClusterVote {
+                cluster: IndicatorCluster::Confirmation,
+                up_votes: conf_up,
+                down_votes: conf_down,
+                confidence: conf_confidence,
+                is_aligned,
+            });
         }
 
         // ═══════════════════════════════════════════════════
-        // SIGNAL QUALITY FILTERS
+        // EVALUACIÓN DE CLUSTERS v2.0
         // ═══════════════════════════════════════════════════
 
-        // Minimum active votes
-        if active_vote_count < self.config.min_active_votes {
-            self.set_filter_reason("insufficient_active_votes");
+        // Requerir mínimo 2 clusters activos
+        if cluster_votes.len() < 2 {
+            self.set_filter_reason("insufficient_clusters");
             return None;
         }
 
-        // Calculate direction and raw confidence
-        let total_votes = up_votes + down_votes;
+        // Cluster Trend y Momentum DEBEN estar alineados
+        let trend_cluster = cluster_votes
+            .iter()
+            .find(|c| c.cluster == IndicatorCluster::Trend);
+        let mom_cluster = cluster_votes
+            .iter()
+            .find(|c| c.cluster == IndicatorCluster::Momentum);
+
+        if self.config.cluster_require_trend_momentum_agreement {
+            if let (Some(trend), Some(mom)) = (trend_cluster, mom_cluster) {
+                let trend_dir = if trend.up_votes > trend.down_votes {
+                    1
+                } else {
+                    -1
+                };
+                let mom_dir = if mom.up_votes > mom.down_votes { 1 } else { -1 };
+                if trend_dir != mom_dir {
+                    self.set_filter_reason("trend_momentum_misalignment");
+                    return None;
+                }
+            }
+        }
+
+        // Calcular votos totales ponderados por confianza del cluster
+        let mut total_up = 0.0;
+        let mut total_down = 0.0;
+        let mut active_indicators = 0;
+
+        for cluster in &cluster_votes {
+            let cluster_weight = cluster.confidence; // Ponderar por qué tan alineado está el cluster
+            total_up += cluster.up_votes * cluster_weight;
+            total_down += cluster.down_votes * cluster_weight;
+            active_indicators += 1;
+        }
+
+        let total_votes = total_up + total_down;
         if total_votes == 0.0 {
             self.set_filter_reason("zero_total_votes");
             return None;
         }
 
-        let (direction, winning_votes, losing_votes) = if up_votes > down_votes {
-            (Direction::Up, up_votes, down_votes)
+        let (direction, winning_votes, losing_votes) = if total_up > total_down {
+            (Direction::Up, total_up, total_down)
         } else {
-            (Direction::Down, down_votes, up_votes)
+            (Direction::Down, total_down, total_up)
         };
 
-        // ── VOTE MARGIN REQUIREMENT ──
-        // For binary bets, we need directional conviction.
-        // The minimum margin is configurable for runtime tuning.
+        // VOTE MARGIN REQUIREMENT
         let vote_ratio = if losing_votes > 0.0 {
             winning_votes / losing_votes
         } else {
@@ -747,7 +825,7 @@ impl StrategyEngine {
 
         let signal_strength = winning_votes / total_votes;
 
-        // Volatility adjustment (high volatility = less confident)
+        // Volatility adjustment
         let volatility_adj = features
             .volatility
             .map(|v| 1.0 - (v * self.config.volatility_scale).min(0.25))
@@ -755,70 +833,51 @@ impl StrategyEngine {
 
         let mut confidence = (signal_strength * volatility_adj).min(1.0);
 
-        // ── REGIME ADJUSTMENT ──
+        // Regime adjustment
         match regime {
-            MarketRegime::Trending => {
-                // Trending is the best regime for binary prediction
-                confidence *= 1.05; // Small boost for trending
-            }
-            MarketRegime::Ranging => {
-                // Ranging is harder to predict — only trust strong signals
-                confidence *= 0.90; // 10% penalty
-            }
-            MarketRegime::Volatile => {
+            MarketRegime::Trending => confidence *= 1.05,
+            MarketRegime::Ranging => confidence *= 0.90,
+            MarketRegime::Volatile => confidence *= 0.85,
+        }
+
+        // Volume confirmation
+        if let Some(rel_vol) = features.relative_volume {
+            if rel_vol >= self.config.volume_confirm_threshold {
+                confidence *= 1.04;
+                reasons.push(format!("Vol: {:.1}x", rel_vol));
+            } else if rel_vol <= self.config.volume_penalty_threshold {
                 confidence *= 0.85;
             }
         }
 
-        // Volume confirmation/penalty
-        if let Some(rel_vol) = features.relative_volume {
-            if rel_vol >= self.config.volume_confirm_threshold {
-                confidence *= 1.04; // 4% bonus for high volume
-                reasons.push(format!("Volume confirmed: {:.1}x avg", rel_vol));
-            } else if rel_vol <= self.config.volume_penalty_threshold {
-                confidence *= 0.85; // 15% penalty for low volume
-                reasons.push(format!("Low volume warning: {:.1}x avg", rel_vol));
-            }
-        }
-
-        // ── MARKET TIMING SCORE (HIGH PRIORITY) ──
-        // Intelligent market timing based on:
-        // - Window position (early vs late in window)
-        // - Intra-window volatility patterns
-        // - Price position relative to window high/low
+        // Market timing score
         if let Some(timing_score) = features.market_timing_score {
-            // Timing score ranges from -0.5 to +0.5
-            // Positive = good timing, Negative = bad timing
             if timing_score > 0.2 {
-                confidence *= 1.08; // 8% bonus for excellent timing
-                reasons.push(format!("Excellent timing: +{:.2}", timing_score));
+                confidence *= 1.08;
             } else if timing_score > 0.0 {
-                confidence *= 1.02; // 2% bonus for good timing
+                confidence *= 1.02;
             } else if timing_score < -0.2 {
-                confidence *= 0.90; // 10% penalty for bad timing
-                reasons.push(format!("Poor timing: {:.2}", timing_score));
+                confidence *= 0.90;
             } else if timing_score < 0.0 {
-                confidence *= 0.96; // 4% penalty for suboptimal timing
+                confidence *= 0.96;
             }
         }
 
-        // Multi-timeframe alignment bonus
+        // Multi-timeframe alignment
         if let Some(bonus) = self.check_multi_tf_alignment(features.asset, direction) {
             confidence += bonus;
-            reasons.push("Multi-TF aligned".to_string());
+            reasons.push("Multi-TF".to_string());
         }
 
-        // ── CONFIDENCE CAP ──
-        // Never be overconfident — even the best signals fail 30%+ of the time
+        // Confidence cap
         confidence = confidence.min(0.92);
 
-        // Only generate signal if confidence is above threshold
+        // Final check
         if confidence < self.config.min_confidence {
             self.set_filter_reason("confidence_below_min");
             return None;
         }
 
-        // Store indicators used for calibration tracking
         self.last_indicators_used = indicators_used.clone();
 
         Some(GeneratedSignal {
@@ -1237,11 +1296,12 @@ mod tests {
             Some(Direction::Up),
         );
         features.regime = MarketRegime::Volatile;
+        features.timeframe = Timeframe::Hour1; // El filtro de volatilidad aplica solo a 1h
 
         let signal = engine.process(&features);
         assert!(
             signal.is_none(),
-            "Should NOT generate signal in volatile regime"
+            "Should NOT generate signal in volatile 1h regime"
         );
     }
 
@@ -1324,4 +1384,3 @@ mod tests {
         assert_eq!(vote, 1);
     }
 }
-

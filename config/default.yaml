@@ -1,8 +1,8 @@
-# PolyBot Default Configuration
+# PolyBot Default Configuration v2.0 - Optimizado para mejor rendimiento
 # Override with environment variables: POLYBOT__SECTION__KEY=value
 
 bot:
-  tag: "polybot-v0.1.0"
+  tag: "polybot-v2.0"
   assets:
     - "BTC"
     - "ETH"
@@ -20,40 +20,78 @@ oracle:
   staleness_ms: 20000
   reconnect_delay_ms: 5000
 
-polymarket:
-  data_mode: "native_only"
-  rtds:
-    enabled: true
-
+# ============================================================================
+# FEATURES - Parámetros adaptativos por asset/timeframe
+# ============================================================================
 features:
-  rsi_period: 14
+  # RSI adaptativo: ETH necesita períodos más cortos por mayor volatilidad
+  rsi_period_btc: 14
+  rsi_period_eth: 10
+  
+  # MACD estándar (funciona bien para ambos)
   macd_fast: 12
   macd_slow: 26
   macd_signal: 9
+  
+  # Bollinger Bands adaptativo: ETH necesita bandas más anchas
   bb_period: 20
-  atr_period: 14
+  bb_std_btc: 2.0
+  bb_std_eth: 2.5
+  
+  # ATR adaptativo
+  atr_period_btc: 14
+  atr_period_eth: 10
+  
   vwap_reset_secs: 86400
   momentum_lookback_secs: 300
 
+# ============================================================================
+# STRATEGY - Configuración mejorada
+# ============================================================================
 strategy:
-  min_confidence: 0.60
+  # Umbral de confianza aumentado (era 0.60)
+  min_confidence: 0.65
+  
   entry_delay_secs: 60
   min_time_to_expiry_secs: 120
   rolling_analysis: true
   reeval_interval_secs: 30
+  
+  # Muestras mínimas para calibración (adaptativo por timeframe)
   calibration_min_samples_per_market: 30
+  calibration_min_samples_eth: 40  # ETH necesita más muestras por mayor varianza
+  
+  # Nuevo: Filtros estrictos
+  min_edge_net: 0.05  # 5% edge mínimo (era 0.0)
+  max_late_entry_15m: 0.60  # 60% del window (era 65%)
+  max_late_entry_1h: 0.70   # 70% del window
+  
+  # Nuevo: Umbrales de late entry adaptativos
+  late_entry_threshold_btc_15m: 0.005  # 0.5%
+  late_entry_threshold_eth_15m: 0.008  # 0.8% (ETH más volátil)
+  late_entry_threshold_btc_1h: 0.015   # 1.5%
+  late_entry_threshold_eth_1h: 0.025   # 2.5%
 
+# ============================================================================
+# RISK - Gestión de riesgo mejorada
+# ============================================================================
 risk:
   max_position_usdc: 8.0
-  max_daily_loss_usdc: 20.0
+  max_daily_loss_usdc: 1000.0  # Desactivar kill switch (paper trading)
   max_open_positions: 3
-  max_drawdown_pct: 0.20
-  kill_switch_enabled: true
+  max_drawdown_pct: 0.50  # Más permisivo para paper trading
+  kill_switch_enabled: false  # DESACTIVADO - Queremos que siga aprendiendo
   min_oracle_confidence: 0.7
+  
+  # Checkpoint trailing stops
   checkpoint_arm_roi: 0.05
   checkpoint_initial_floor_roi: 0.022
   checkpoint_trail_gap_roi: 0.012
+  
+  # Hard stop adaptativo: -1.5x ATR dinámico
   hard_stop_roi: -0.07
+  hard_stop_atr_multiplier: 1.5
+  
   time_stop_seconds_to_expiry: 90
   max_open_exposure_total: 0.12
   max_open_exposure_asset: 0.04
@@ -85,6 +123,9 @@ persistence:
   paper_analytics_file: "paper_analytics.csv"
   flush_interval_secs: 30
 
+# ============================================================================
+# PAPER TRADING - Configuración para aprendizaje continuo
+# ============================================================================
 paper_trading:
   enabled: true
   initial_balance: 1000.0
@@ -95,14 +136,19 @@ paper_trading:
   max_hold_duration_ms: 900000
   dashboard_interval_secs: 30
   prefer_chainlink: true
-  min_edge_net: 0.0
+  min_edge_net: 0.05  # Edge mínimo 5%
 
+# ============================================================================
+# KELLY - Sizing más conservador para ETH
+# ============================================================================
 kelly:
   enabled: true
   fraction_15m: 0.25
   fraction_1h: 0.50
-  max_bankroll_fraction_15m: 0.05
-  max_bankroll_fraction_1h: 0.10
+  max_bankroll_fraction_15m: 0.035  # 3.5% (reducido)
+  max_bankroll_fraction_1h: 0.075   # 7.5% (reducido)
+  # ETH multipliers (más conservador)
+  eth_size_multiplier: 0.8  # Reducir sizing ETH en 20%
 
 reset:
   enabled_on_start: false
@@ -111,3 +157,43 @@ reset:
   delete_prices: true
   delete_learning_state: true
   delete_paper_state: true
+
+# ============================================================================
+# CALIBRATION - Configuración agresiva
+# ============================================================================
+calibration:
+  enabled: true
+  min_samples: 30
+  min_samples_eth: 40
+  
+  # Factores de ajuste más agresivos
+  performance_boost_good: 5.0      # Era 4.0
+  performance_penalty_bad: 0.5     # Era 0.2 + 0.75
+  
+  # Rango de pesos
+  min_weight_multiplier: 0.1       # Era 0.1
+  max_weight_multiplier: 3.0       # Era 3.0
+  
+  # Calibración por régimen
+  regime_aware_calibration: true
+  
+# ============================================================================
+# MARKET CONFIGURATION - Desactivar ETH_1H temporalmente
+# ============================================================================
+market_config:
+  enabled_markets:
+    - "BTC_15M"
+    - "BTC_1H"
+    - "ETH_15M"
+    # ETH_1H desactivado hasta corrección de parámetros
+    # - "ETH_1H"
+  
+  # Volatilidad máxima permitida por mercado (basado en ATR)
+  max_volatility_btc_15m: 0.02     # 2%
+  max_volatility_eth_15m: 0.03     # 3%
+  max_volatility_btc_1h: 0.04      # 4%
+  max_volatility_eth_1h: 0.06      # 6%
+  
+  # Spread máximo permitido
+  max_spread_bps_15m: 800          # Era 1200
+  max_spread_bps_1h: 1500          # Era 2000
