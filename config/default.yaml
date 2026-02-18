@@ -1,0 +1,113 @@
+# PolyBot Default Configuration
+# Override with environment variables: POLYBOT__SECTION__KEY=value
+
+bot:
+  tag: "polybot-v0.1.0"
+  assets:
+    - "BTC"
+    - "ETH"
+  timeframes:
+    - "15m"
+    - "1h"
+  dry_run: true
+
+oracle:
+  binance_enabled: false
+  bybit_enabled: false
+  coinbase_enabled: false
+  rtds_enabled: true
+  min_sources: 1
+  staleness_ms: 20000
+  reconnect_delay_ms: 5000
+
+polymarket:
+  data_mode: "native_only"
+  rtds:
+    enabled: true
+
+features:
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_period: 20
+  atr_period: 14
+  vwap_reset_secs: 86400
+  momentum_lookback_secs: 300
+
+strategy:
+  min_confidence: 0.60
+  entry_delay_secs: 60
+  min_time_to_expiry_secs: 120
+  rolling_analysis: true
+  reeval_interval_secs: 30
+  calibration_min_samples_per_market: 30
+
+risk:
+  max_position_usdc: 8.0
+  max_daily_loss_usdc: 20.0
+  max_open_positions: 3
+  max_drawdown_pct: 0.20
+  kill_switch_enabled: true
+  min_oracle_confidence: 0.7
+  checkpoint_arm_roi: 0.10
+  checkpoint_initial_floor_roi: 0.08
+  checkpoint_trail_gap_roi: 0.02
+  hard_stop_roi: -0.08
+  time_stop_seconds_to_expiry: 90
+  max_open_exposure_total: 0.12
+  max_open_exposure_asset: 0.04
+  max_open_exposure_market: 0.015
+  take_profit_pct: 0.80
+  stop_loss_pct: 0.50
+  trailing_stop_pct: 0.005
+  max_hold_duration_ms: 900000  # 15 minutes
+  min_position_size: 1.0
+
+execution:
+  clob_url: "https://clob.polymarket.com"
+  gamma_url: "https://gamma-api.polymarket.com"
+  chain_id: 137
+  signature_type: 0
+  maker_first: true
+  post_only: true
+  fallback_taker_seconds_to_expiry: 120
+  order_timeout_ms: 10000
+  max_retries: 3
+  market_refresh_secs: 300
+
+persistence:
+  data_dir: "./data"
+  signals_file: "signals.csv"
+  trades_file: "trades.csv"
+  prices_file: "prices.csv"
+  winloss_file: "winloss.csv"
+  paper_analytics_file: "paper_analytics.csv"
+  flush_interval_secs: 30
+
+paper_trading:
+  enabled: true
+  initial_balance: 1000.0
+  slippage_bps: 5.0
+  fee_bps: 10.0
+  trailing_stop_pct: 0.005
+  take_profit_pct: 0.008
+  max_hold_duration_ms: 900000
+  dashboard_interval_secs: 30
+  prefer_chainlink: true
+  min_edge_net: 0.0
+
+kelly:
+  enabled: true
+  fraction_15m: 0.25
+  fraction_1h: 0.50
+  max_bankroll_fraction_15m: 0.05
+  max_bankroll_fraction_1h: 0.10
+
+reset:
+  enabled_on_start: false
+  mode: "hard_all_history"
+  no_backup: true
+  delete_prices: true
+  delete_learning_state: true
+  delete_paper_state: true

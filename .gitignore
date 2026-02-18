@@ -1,0 +1,33 @@
+# Environment (contains secrets!)
+.env
+.env.local
+.env.*.local
+
+# Build
+/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temp files
+.tmp/
+tmp_*/
+*.tmp
+__main*.rs
+
+# Claude/AI context
+.claude/
+
+# Dashboard (deployed separately)
+# dashboard/  # uncomment if you want to exclude from repo entirely
