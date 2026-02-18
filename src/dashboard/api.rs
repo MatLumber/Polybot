@@ -3,8 +3,10 @@
 //! REST endpoints for the React frontend.
 
 use axum::{
-    extract::{Query, State},
-    response::IntoResponse,
+    body::Body,
+    extract::{Path, Query, State},
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
@@ -15,8 +17,13 @@ use tower_http::cors::{Any, CorsLayer};
 use super::types::*;
 use super::{ApiResponse, DashboardMemory, WebSocketBroadcaster};
 
+#[derive(Clone)]
+pub struct DataDir(pub String);
+
+pub type AppState = (Arc<DashboardMemory>, WebSocketBroadcaster, DataDir);
+
 /// Create the API router with all endpoints
-pub fn create_router(memory: Arc<DashboardMemory>, broadcaster: WebSocketBroadcaster) -> Router {
+pub fn create_router(memory: Arc<DashboardMemory>, broadcaster: WebSocketBroadcaster, data_dir: String) -> Router {
     Router::new()
         // Main endpoints
         .route("/api/stats", get(get_stats))
@@ -34,10 +41,22 @@ pub fn create_router(memory: Arc<DashboardMemory>, broadcaster: WebSocketBroadca
             get(get_market_learning_progress),
         )
         .route("/api/calibration/quality", get(get_calibration_quality))
+        // Data endpoints (NEW)
+        .route("/api/data/calibrator", get(get_calibrator_state))
+        .route("/api/data/paper-state", get(get_paper_trading_state))
+        .route("/api/data/trades/:date", get(get_trades_csv))
+        .route("/api/data/trades", get(get_latest_trades_csv))
+        .route("/api/data/signals/:date", get(get_signals_csv))
+        .route("/api/data/signals", get(get_latest_signals_csv))
+        .route("/api/data/prices/:date", get(get_prices_csv))
+        .route("/api/data/prices", get(get_latest_prices_csv))
+        .route("/api/data/rejections/:date", get(get_rejections_csv))
+        .route("/api/data/rejections", get(get_latest_rejections_csv))
+        .route("/api/data/files", get(list_data_files))
         // WebSocket
         .route("/ws", axum::routing::get(websocket_handler))
         // State
-        .with_state((memory, broadcaster))
+        .with_state((memory, broadcaster, DataDir(data_dir)))
         // CORS for frontend
         .layer(
             CorsLayer::new()
@@ -53,7 +72,7 @@ pub fn create_router(memory: Arc<DashboardMemory>, broadcaster: WebSocketBroadca
 
 /// GET /api/stats - Complete dashboard state
 async fn get_stats(
-    State((memory, _)): State<(Arc<DashboardMemory>, WebSocketBroadcaster)>,
+    State((memory, _, _)): State<AppState>,
 ) -> impl IntoResponse {
     let state = memory.get_state().await;
     Json(ApiResponse::success(state))
@@ -61,7 +80,7 @@ async fn get_stats(
 
 /// GET /api/trades - Recent trades
 async fn get_trades(
-    State((memory, _)): State<(Arc<DashboardMemory>, WebSocketBroadcaster)>,
+    State((memory, _, _)): State<AppState>,
 ) -> impl IntoResponse {
     let paper = memory.get_paper_state().await;
     Json(ApiResponse::success(paper.recent_trades))
@@ -69,7 +88,7 @@ async fn get_trades(
 
 /// GET /api/signals - Recent signals
 async fn get_signals(
-    State((memory, _)): State<(Arc<DashboardMemory>, WebSocketBroadcaster)>,
+    State((memory, _, _)): State<AppState>,
 ) -> impl IntoResponse {
     let signals = memory.signals.read().await.clone();
     Json(ApiResponse::success(signals))
@@ -77,7 +96,7 @@ async fn get_signals(
 
 /// GET /api/prices - Current prices by asset
 async fn get_prices(
-    State((memory, _)): State<(Arc<DashboardMemory>, WebSocketBroadcaster)>,
+    State((memory, _, _)): State<AppState>,
 ) -> impl IntoResponse {
     let prices = memory.get_prices().await;
     Json(ApiResponse::success(prices.prices))
@@ -85,7 +104,7 @@ async fn get_prices(
 
 /// GET /api/health - Feed health/staleness/reconnect status.
 async fn get_health(
-    State((memory, _)): State<(Arc<DashboardMemory>, WebSocketBroadcaster)>,
+    State((memory, _, _)): State<AppState>,
 ) -> impl IntoResponse {
     let health = memory.get_health().await;
     Json(ApiResponse::success(health))
@@ -101,7 +120,7 @@ struct PriceHistoryQuery {
 /// GET /api/prices/history?assets=BTC,ETH&window_secs=3600&bucket_ms=1000
 async fn get_prices_history(
     Query(query): Query<PriceHistoryQuery>,
-    State((memory, _)): State<(Arc<DashboardMemory>, WebSocketBroadcaster)>,
+    State((memory, _, _)): State<AppState>,
 ) -> impl IntoResponse {
     if let Some(window_secs) = query.window_secs {
         if !(60..=86_400).contains(&window_secs) {
@@ -143,7 +162,7 @@ async fn get_prices_history(
 
 /// GET /api/positions - Open positions (paper + live)
 async fn get_positions(
-    State((memory, _)): State<(Arc<DashboardMemory>, WebSocketBroadcaster)>,
+    State((memory, _, _)): State<AppState>,
 ) -> impl IntoResponse {
     let paper_positions = memory.paper_positions.read().await.clone();
     let live_positions = memory.live_positions.read().await.clone();
@@ -162,7 +181,7 @@ async fn get_positions(
 
 /// GET /api/analytics - Per-asset analytics
 async fn get_analytics(
-    State((memory, _)): State<(Arc<DashboardMemory>, WebSocketBroadcaster)>,
+    State((memory, _, _)): State<AppState>,
 ) -> impl IntoResponse {
     let paper = memory.get_paper_state().await;
     Json(ApiResponse::success(paper.asset_stats))
@@ -170,7 +189,7 @@ async fn get_analytics(
 
 /// GET /api/indicator-stats - Indicator calibration statistics
 async fn get_indicator_stats(
-    State((memory, _)): State<(Arc<DashboardMemory>, WebSocketBroadcaster)>,
+    State((memory, _, _)): State<AppState>,
 ) -> impl IntoResponse {
     let stats = memory.indicator_stats.read().await.clone();
     Json(ApiResponse::success(stats))
@@ -178,7 +197,7 @@ async fn get_indicator_stats(
 
 /// GET /api/calibration/markets - Market-level training progress
 async fn get_market_learning_progress(
-    State((memory, _)): State<(Arc<DashboardMemory>, WebSocketBroadcaster)>,
+    State((memory, _, _)): State<AppState>,
 ) -> impl IntoResponse {
     let stats = memory.get_market_learning_progress().await;
     Json(ApiResponse::success(stats))
@@ -186,7 +205,7 @@ async fn get_market_learning_progress(
 
 /// GET /api/calibration/quality - ECE/Brier quality by market
 async fn get_calibration_quality(
-    State((memory, _)): State<(Arc<DashboardMemory>, WebSocketBroadcaster)>,
+    State((memory, _, _)): State<AppState>,
 ) -> impl IntoResponse {
     let stats = memory.get_calibration_quality().await;
     Json(ApiResponse::success(stats))
@@ -196,15 +215,12 @@ async fn get_calibration_quality(
 // WebSocket Handler
 // ─────────────────────────────────────────────────────────────────
 
-use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    response::Response,
-};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 
 /// WebSocket upgrade handler
 async fn websocket_handler(
     ws: WebSocketUpgrade,
-    State((memory, broadcaster)): State<(Arc<DashboardMemory>, WebSocketBroadcaster)>,
+    State((memory, broadcaster, _)): State<AppState>,
 ) -> Response {
     ws.on_upgrade(move |socket| handle_websocket(socket, memory, broadcaster))
 }
@@ -287,4 +303,235 @@ async fn handle_websocket(
 
     send_task.abort();
     tracing::info!("🖥️ WebSocket connection closed");
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Data Endpoints (CSV/JSON downloads)
+// ─────────────────────────────────────────────────────────────────
+
+/// GET /api/data/calibrator - Returns calibrator_state_v2.json
+async fn get_calibrator_state(
+    State((_, _, data_dir)): State<AppState>,
+) -> impl IntoResponse {
+    let path = format!("{}/calibrator_state_v2.json", data_dir.0);
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            match serde_json::from_str::<serde_json::Value>(&content) {
+                Ok(json) => Json(ApiResponse::success(json)),
+                Err(_) => Json(ApiResponse::<serde_json::Value>::error("Failed to parse calibrator JSON")),
+            }
+        }
+        Err(_) => Json(ApiResponse::<serde_json::Value>::error("Calibrator state file not found")),
+    }
+}
+
+/// GET /api/data/paper-state - Returns paper_trading_state.json
+async fn get_paper_trading_state(
+    State((_, _, data_dir)): State<AppState>,
+) -> impl IntoResponse {
+    let path = format!("{}/paper_trading_state.json", data_dir.0);
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            match serde_json::from_str::<serde_json::Value>(&content) {
+                Ok(json) => Json(ApiResponse::success(json)),
+                Err(_) => Json(ApiResponse::<serde_json::Value>::error("Failed to parse paper state JSON")),
+            }
+        }
+        Err(_) => Json(ApiResponse::<serde_json::Value>::error("Paper trading state file not found")),
+    }
+}
+
+fn find_latest_csv(data_dir: &str, subfolder: &str, prefix: &str) -> Option<String> {
+    let folder_path = format!("{}/{}", data_dir, subfolder);
+    if let Ok(entries) = std::fs::read_dir(&folder_path) {
+        let mut files: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map(|ext| ext == "csv").unwrap_or(false))
+            .filter(|e| e.file_name().to_string_lossy().starts_with(prefix))
+            .map(|e| e.path().to_string_lossy().to_string())
+            .collect();
+        files.sort();
+        files.last().cloned()
+    } else {
+        None
+    }
+}
+
+fn serve_csv_file(path: &str, filename: &str) -> Response {
+    match std::fs::read_to_string(path) {
+        Ok(content) => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "text/csv")
+            .header(header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", filename))
+            .body(Body::from(content))
+            .unwrap(),
+        Err(_) => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("File not found"))
+            .unwrap(),
+    }
+}
+
+/// GET /api/data/trades/:date - Returns trades CSV for specific date (YYYY-MM-DD)
+async fn get_trades_csv(
+    Path(date): Path<String>,
+    State((_, _, data_dir)): State<AppState>,
+) -> Response {
+    let filename = format!("trades_{}.csv", date);
+    let path = format!("{}/trades/{}", data_dir.0, filename);
+    serve_csv_file(&path, &filename)
+}
+
+/// GET /api/data/trades - Returns latest trades CSV
+async fn get_latest_trades_csv(
+    State((_, _, data_dir)): State<AppState>,
+) -> Response {
+    if let Some(path) = find_latest_csv(&data_dir.0, "trades", "trades_") {
+        let filename = path.rsplit('/').next().unwrap_or("trades.csv");
+        serve_csv_file(&path, filename)
+    } else {
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("No trades CSV files found"))
+            .unwrap()
+    }
+}
+
+/// GET /api/data/signals/:date - Returns signals CSV for specific date
+async fn get_signals_csv(
+    Path(date): Path<String>,
+    State((_, _, data_dir)): State<AppState>,
+) -> Response {
+    let filename = format!("signals_{}.csv", date);
+    let path = format!("{}/signals/{}", data_dir.0, filename);
+    serve_csv_file(&path, &filename)
+}
+
+/// GET /api/data/signals - Returns latest signals CSV
+async fn get_latest_signals_csv(
+    State((_, _, data_dir)): State<AppState>,
+) -> Response {
+    if let Some(path) = find_latest_csv(&data_dir.0, "signals", "signals_") {
+        let filename = path.rsplit('/').next().unwrap_or("signals.csv");
+        serve_csv_file(&path, filename)
+    } else {
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("No signals CSV files found"))
+            .unwrap()
+    }
+}
+
+/// GET /api/data/prices/:date - Returns prices CSV for specific date
+async fn get_prices_csv(
+    Path(date): Path<String>,
+    State((_, _, data_dir)): State<AppState>,
+) -> Response {
+    let filename = format!("prices_{}.csv", date);
+    let path = format!("{}/prices/{}", data_dir.0, filename);
+    serve_csv_file(&path, &filename)
+}
+
+/// GET /api/data/prices - Returns latest prices CSV
+async fn get_latest_prices_csv(
+    State((_, _, data_dir)): State<AppState>,
+) -> Response {
+    if let Some(path) = find_latest_csv(&data_dir.0, "prices", "prices_") {
+        let filename = path.rsplit('/').next().unwrap_or("prices.csv");
+        serve_csv_file(&path, filename)
+    } else {
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("No prices CSV files found"))
+            .unwrap()
+    }
+}
+
+/// GET /api/data/rejections/:date - Returns rejections CSV for specific date
+async fn get_rejections_csv(
+    Path(date): Path<String>,
+    State((_, _, data_dir)): State<AppState>,
+) -> Response {
+    let filename = format!("rejections_{}.csv", date);
+    let path = format!("{}/rejections/{}", data_dir.0, filename);
+    serve_csv_file(&path, &filename)
+}
+
+/// GET /api/data/rejections - Returns latest rejections CSV
+async fn get_latest_rejections_csv(
+    State((_, _, data_dir)): State<AppState>,
+) -> Response {
+    if let Some(path) = find_latest_csv(&data_dir.0, "rejections", "rejections_") {
+        let filename = path.rsplit('/').next().unwrap_or("rejections.csv");
+        serve_csv_file(&path, filename)
+    } else {
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("No rejections CSV files found"))
+            .unwrap()
+    }
+}
+
+#[derive(serde::Serialize)]
+struct DataFileInfo {
+    name: String,
+    size_bytes: u64,
+    modified: String,
+}
+
+#[derive(serde::Serialize)]
+struct DataFilesResponse {
+    data_dir: String,
+    calibrator_state: Option<DataFileInfo>,
+    paper_trading_state: Option<DataFileInfo>,
+    trades: Vec<DataFileInfo>,
+    signals: Vec<DataFileInfo>,
+    prices: Vec<DataFileInfo>,
+    rejections: Vec<DataFileInfo>,
+}
+
+/// GET /api/data/files - Lists all available data files
+async fn list_data_files(
+    State((_, _, data_dir)): State<AppState>,
+) -> impl IntoResponse {
+    let get_file_info = |path: &str| -> Option<DataFileInfo> {
+        let metadata = std::fs::metadata(path).ok()?;
+        let modified: String = metadata.modified().ok()
+            .map(|t| {
+                let datetime: chrono::DateTime<chrono::Utc> = t.into();
+                datetime.to_rfc3339()
+            })
+            .unwrap_or_default();
+        let name = path.rsplit('/').next().unwrap_or("unknown").to_string();
+        Some(DataFileInfo {
+            name,
+            size_bytes: metadata.len(),
+            modified,
+        })
+    };
+
+    let list_csv_files = |subfolder: &str| -> Vec<DataFileInfo> {
+        let folder_path = format!("{}/{}", data_dir.0, subfolder);
+        if let Ok(entries) = std::fs::read_dir(&folder_path) {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().map(|ext| ext == "csv").unwrap_or(false))
+                .filter_map(|e| get_file_info(&e.path().to_string_lossy()))
+                .collect()
+        } else {
+            Vec::new()
+        }
+    };
+
+    let response = DataFilesResponse {
+        data_dir: data_dir.0.clone(),
+        calibrator_state: get_file_info(&format!("{}/calibrator_state_v2.json", data_dir.0)),
+        paper_trading_state: get_file_info(&format!("{}/paper_trading_state.json", data_dir.0)),
+        trades: list_csv_files("trades"),
+        signals: list_csv_files("signals"),
+        prices: list_csv_files("prices"),
+        rejections: list_csv_files("rejections"),
+    };
+
+    Json(ApiResponse::success(response))
 }

@@ -908,8 +908,9 @@ pub async fn start_server(
     memory: Arc<DashboardMemory>,
     broadcaster: WebSocketBroadcaster,
     port: u16,
+    data_dir: String,
 ) -> anyhow::Result<()> {
-    let app = create_router(memory, broadcaster);
+    let app = create_router(memory, broadcaster, data_dir);
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
 
     tracing::info!("🖥️ Dashboard API starting on http://{}", addr);
