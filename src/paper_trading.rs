@@ -208,13 +208,13 @@ pub struct PaperTradingConfig {
     pub prefer_chainlink: bool,
     /// Enforce Polymarket-native price sources only.
     pub native_only: bool,
-    /// Checkpoint arm ROI (e.g. 0.10 = +10%)
+    /// Checkpoint arm ROI baseline (dynamic logic may tighten/lower this intratrade).
     pub checkpoint_arm_roi: f64,
-    /// Initial checkpoint floor ROI (e.g. 0.08 = +8%)
+    /// Initial checkpoint floor ROI baseline.
     pub checkpoint_initial_floor_roi: f64,
-    /// Dynamic trailing gap from peak ROI (e.g. 0.02 = 2pp)
+    /// Baseline trailing gap from peak ROI.
     pub checkpoint_trail_gap_roi: f64,
-    /// Hard stop ROI (e.g. -0.08 = -8%)
+    /// Hard stop ROI baseline.
     pub hard_stop_roi: f64,
     /// Time-stop threshold in seconds to expiry
     pub time_stop_seconds_to_expiry: i64,
@@ -240,10 +240,10 @@ impl Default for PaperTradingConfig {
             dashboard_interval_secs: 30,
             prefer_chainlink: true,
             native_only: false,
-            checkpoint_arm_roi: 0.10,
-            checkpoint_initial_floor_roi: 0.08,
-            checkpoint_trail_gap_roi: 0.02,
-            hard_stop_roi: -0.08,
+            checkpoint_arm_roi: 0.05,
+            checkpoint_initial_floor_roi: 0.022,
+            checkpoint_trail_gap_roi: 0.012,
+            hard_stop_roi: -0.07,
             time_stop_seconds_to_expiry: 90,
             kelly_enabled: true,
             kelly_fraction_15m: 0.25,
@@ -298,7 +298,7 @@ pub struct PaperPosition {
     pub peak_share_price: f64,
     /// Whether the position is currently winning (price moved in correct direction)
     pub is_winning: bool,
-    /// Checkpoint trailing state (10% -> 8% and then trail by 2pp).
+    /// Checkpoint trailing state (dynamic arm/floor/gap).
     pub checkpoint_armed: bool,
     pub checkpoint_peak_roi: f64,
     pub checkpoint_floor_roi: f64,
@@ -1072,7 +1072,8 @@ impl PaperTradingEngine {
     ///
     /// Base comes from `config.hard_stop_roi`, then adapts using:
     /// - real-time spread (wider spread => wider stop to avoid microstructure noise)
-    /// - intratrade share volatility early in the window (more noise => wider stop)
+    /// - intratrade share volatility (more noise => wider stop)
+    /// - low-volatility tightening (tiny moves => cut losers earlier)
     /// - time-to-expiry (near expiry => tighter stop)
     fn dynamic_hard_stop_roi(
         &self,
@@ -1091,17 +1092,31 @@ impl PaperTradingEngine {
         let entry = pos.share_price.max(0.01);
 
         // Range relative to entry approximates local volatility in probability space.
-        let local_range = ((pos.peak_share_price - bid).abs() / entry).clamp(0.0, 0.30);
+        let excursion = ((pos.peak_share_price - pos.share_price).abs() / entry).clamp(0.0, 0.30);
+        let retrace = ((pos.peak_share_price - bid).max(0.0) / entry).clamp(0.0, 0.30);
+        let local_range = excursion.max(retrace);
 
-        let (vol_scale, spread_scale, late_tighten, min_floor, max_floor) = match pos.timeframe {
-            Timeframe::Min15 => (0.45, 0.40, 0.03, -0.16, -0.04),
-            Timeframe::Hour1 => (0.30, 0.25, 0.02, -0.20, -0.05),
+        let (
+            vol_scale,
+            spread_scale,
+            low_vol_ref,
+            low_vol_tighten,
+            late_tighten,
+            min_floor,
+            max_floor,
+        ) = match pos.timeframe {
+            Timeframe::Min15 => (0.45, 0.40, 0.06, 0.030, 0.03, -0.16, -0.04),
+            Timeframe::Hour1 => (0.30, 0.25, 0.08, 0.022, 0.02, -0.20, -0.05),
         };
 
         let widen_vol = (local_range * vol_scale * early_phase).clamp(0.0, 0.06);
         let widen_spread = (spread * spread_scale).clamp(0.0, 0.03);
+        let low_vol_factor = ((low_vol_ref - local_range) / low_vol_ref).clamp(0.0, 1.0);
+        let tighten_low_vol =
+            (low_vol_factor * low_vol_tighten * (0.5 + progress * 0.5)).clamp(0.0, 0.035);
 
         let mut dynamic = base - widen_vol - widen_spread;
+        dynamic += tighten_low_vol;
 
         // As expiry approaches, cut losers faster.
         if progress >= 0.80 {
@@ -1111,6 +1126,89 @@ impl PaperTradingEngine {
         }
 
         dynamic.clamp(min_floor, max_floor)
+    }
+
+    /// Dynamic checkpoint parameters for take-profit.
+    ///
+    /// Keeps the checkpoint mechanism, but adapts arm/floor/gap to:
+    /// - low-volatility markets (arms earlier)
+    /// - wide spreads (slightly less sensitive to avoid churn)
+    /// - late phase of market window (locks gains sooner)
+    fn dynamic_checkpoint_params(
+        &self,
+        pos: &PaperPosition,
+        now_ms: i64,
+        bid_share: f64,
+        ask_share: f64,
+    ) -> (f64, f64, f64) {
+        let progress = Self::market_progress_ratio(pos, now_ms);
+        let bid = bid_share.clamp(0.01, 0.99);
+        let ask = ask_share.clamp(0.01, 0.99);
+        let spread = (ask - bid).max(0.0).clamp(0.0, 0.10);
+        let entry = pos.share_price.max(0.01);
+
+        let favorable_move = ((pos.peak_share_price - entry).max(0.0) / entry).clamp(0.0, 0.40);
+        let retrace = ((pos.peak_share_price - bid).max(0.0) / entry).clamp(0.0, 0.40);
+
+        let base_arm = self.config.checkpoint_arm_roi.max(0.005);
+        let base_floor = self.config.checkpoint_initial_floor_roi.max(0.003);
+        let base_gap = self.config.checkpoint_trail_gap_roi.max(0.002);
+
+        let (
+            abs_arm_min,
+            abs_floor_min,
+            abs_gap_min,
+            low_vol_ref,
+            low_vol_scale,
+            late_tighten,
+            spread_relax,
+        ) = match pos.timeframe {
+            Timeframe::Min15 => (0.020, 0.009, 0.005, 0.07, 0.45, 0.25, 0.08),
+            Timeframe::Hour1 => (0.028, 0.012, 0.007, 0.09, 0.35, 0.20, 0.06),
+        };
+
+        let arm_min = (base_arm * 0.45).max(abs_arm_min);
+        let floor_min = (base_floor * 0.40).max(abs_floor_min);
+        let gap_min = (base_gap * 0.55).max(abs_gap_min);
+
+        let low_vol_factor = ((low_vol_ref - favorable_move) / low_vol_ref).clamp(0.0, 1.0);
+        let late_factor = if progress >= 0.85 {
+            1.0
+        } else if progress >= 0.60 {
+            ((progress - 0.60) / 0.25).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        let mut arm = base_arm * (1.0 - low_vol_scale * low_vol_factor);
+        let mut floor = base_floor * (1.0 - (low_vol_scale * 0.90) * low_vol_factor);
+        let mut gap = base_gap * (1.0 - (low_vol_scale * 0.55) * low_vol_factor);
+
+        arm *= 1.0 - late_tighten * late_factor;
+        floor *= 1.0 - (late_tighten * 0.85) * late_factor;
+        gap *= 1.0 - (late_tighten * 0.65) * late_factor;
+
+        // Protect gains faster when we've retraced from the local peak.
+        let retrace_factor = (retrace / 0.05).clamp(0.0, 1.0);
+        floor *= 1.0 - 0.15 * retrace_factor;
+        gap *= 1.0 - 0.20 * retrace_factor;
+
+        // Wide spread => slightly relax thresholds to reduce microstructure churn.
+        arm += spread * spread_relax;
+        floor += spread * spread_relax * 0.8;
+        gap += spread * spread_relax * 0.5;
+
+        arm = arm.clamp(arm_min, base_arm.max(arm_min));
+        floor = floor.clamp(floor_min, base_floor.max(floor_min));
+        gap = gap.clamp(gap_min, base_gap.max(gap_min));
+
+        // Keep floor safely below arm.
+        let floor_cap = (arm - gap_min * 0.5).max(floor_min);
+        if floor > floor_cap {
+            floor = floor_cap;
+        }
+
+        (arm, floor, gap)
     }
 
     // ── Price updates ──────────────────────────────────────────
@@ -1203,10 +1301,9 @@ impl PaperTradingEngine {
                     0.0
                 };
 
-                // Checkpoint trailing: arm at +10%, floor +8%, then trail peak by 2pp.
-                let arm_roi = self.config.checkpoint_arm_roi;
-                let floor_base = self.config.checkpoint_initial_floor_roi;
-                let trail_gap = self.config.checkpoint_trail_gap_roi.max(0.0);
+                // Dynamic checkpoint trailing: adapts arm/floor/gap to volatility + time.
+                let (arm_roi, floor_base, trail_gap) =
+                    self.dynamic_checkpoint_params(pos, now, sell_share_price, ask_share);
 
                 if !pos.checkpoint_armed && roi >= arm_roi {
                     pos.checkpoint_armed = true;
@@ -2299,6 +2396,17 @@ impl PaperTradingEngine {
 
     pub fn open_position_count(&self) -> usize {
         self.positions.read().unwrap().len()
+    }
+
+    pub fn get_expired_positions(&self) -> Vec<(Asset, Timeframe)> {
+        let now = Utc::now().timestamp_millis();
+        self.positions
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|(_, pos)| pos.market_close_ts > 0 && now >= pos.market_close_ts)
+            .map(|((asset, timeframe), _)| (*asset, *timeframe))
+            .collect()
     }
 
     // ── CSV persistence ─────────────────────────────────────────

@@ -268,10 +268,10 @@ impl AppConfig {
             .set_default("risk.max_drawdown_pct", 10.0)?
             .set_default("risk.kill_switch_enabled", true)?
             .set_default("risk.min_oracle_confidence", 0.7)?
-            .set_default("risk.checkpoint_arm_roi", 0.10)?
-            .set_default("risk.checkpoint_initial_floor_roi", 0.08)?
-            .set_default("risk.checkpoint_trail_gap_roi", 0.02)?
-            .set_default("risk.hard_stop_roi", -0.08)?
+            .set_default("risk.checkpoint_arm_roi", 0.05)?
+            .set_default("risk.checkpoint_initial_floor_roi", 0.022)?
+            .set_default("risk.checkpoint_trail_gap_roi", 0.012)?
+            .set_default("risk.hard_stop_roi", -0.07)?
             .set_default("risk.time_stop_seconds_to_expiry", 90)?
             .set_default("risk.max_open_exposure_total", 0.12)?
             .set_default("risk.max_open_exposure_asset", 0.04)?
