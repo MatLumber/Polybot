@@ -1,6 +1,6 @@
 # PolyBot
 
-Directional trading bot for Polymarket 15m/1h BTC/ETH/SOL/XRP markets using native RTDS + CLOB market data.
+Directional trading bot for 15m/1h BTC/ETH/SOL/XRP markets using native RTDS + CLOB market data.
 
 ## Features
 
