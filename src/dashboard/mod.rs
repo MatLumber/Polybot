@@ -913,7 +913,9 @@ fn build_market_learning_row(
         last_updated_ts,
         status: status.to_string(),
     }
+}
 
+impl DashboardMemory {
     /// Get ML Engine state
     pub async fn get_ml_state(&self) -> serde_json::Value {
         let metrics = self.ml_metrics.read().await;
