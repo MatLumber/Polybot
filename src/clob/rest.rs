@@ -28,6 +28,7 @@ fn parse_book_level(price: &str, size: &str) -> Option<BookLevel> {
     Some(BookLevel { price, size })
 }
 
+
 fn build_normalized_order_book(
     token_id: String,
     bids: Vec<(String, String)>,
