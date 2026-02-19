@@ -2,7 +2,8 @@
 //!
 //! Predicts UP/DOWN direction for 15m/1h BTC/ETH/SOL/XRP markets
 //! using Polymarket-native RTDS + CLOB market data.
-mod backtesting;mod clob;mod config;mod features;mod ml_engine;mod oracle;mod paper_trading;mod persistence;mod polymarket;mod risk;mod strategy;mod types;#[cfg(feature = "dashboard")]mod dashboard;use anyhow::Result;use std::sync::Arc;use tokio::sync::{mpsc, Mutex};use tracing::{error, info, warn};use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};use crate::clob::{ClobClient, Order};use crate::config::AppConfig;use crate::features::{FeatureEngine, Features, MarketRegime, OrderbookImbalanceTracker};use crate::oracle::PriceAggregator;use crate::paper_trading::{PaperTradingConfig, PaperTradingEngine};use crate::persistence::{BalanceTracker, CsvPersistence, HardResetOptions};use crate::risk::RiskManager;use crate::strategy::{Strategy, StrategyConfig, StrategyEngine, TradeResult};use crate::types::{Asset, Direction, FeatureSet, PriceSource, PriceTick, Signal, Timeframe};#[cfg(feature = "dashboard")]use crate::dashboard::{PaperStatsResponse, PositionResponse, TradeResponse};const BOT_TAG: &str = env!("CARGO_PKG_VERSION");#[tokio::main]async fn main() -> Result<()> {    // Initialize logging
+mod backtesting;mod clob;mod config;mod features;mod ml_engine;mod oracle;mod paper_trading;mod persistence;mod polymarket;mod risk;mod strategy;mod types;#[cfg(feature = "dashboard")]mod dashboard;use anyhow::Result;use std::sync::Arc;use tokio::sync::{mpsc, Mutex};use tracing::{error, info, warn};use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};use crate::clob::{ClobClient, Order};use crate::config::AppConfig;use crate::features::{FeatureEngine, Features, MarketRegime, OrderbookImbalanceTracker};use crate::oracle::PriceAggregator;use crate::paper_trading::{PaperTradingConfig, PaperTradingEngine};use crate::persistence::{BalanceTracker, CsvPersistence, HardResetOptions};use crate::risk::RiskManager;use crate::ml_engine::config_bridge::MLConfigConvertible;
+use crate::strategy::{Strategy, StrategyConfig, StrategyEngine, TradeResult};use crate::types::{Asset, Direction, FeatureSet, PriceSource, PriceTick, Signal, Timeframe};#[cfg(feature = "dashboard")]use crate::dashboard::{PaperStatsResponse, PositionResponse, TradeResponse};const BOT_TAG: &str = env!("CARGO_PKG_VERSION");#[tokio::main]async fn main() -> Result<()> {    // Initialize logging
     init_logging()?;    info!(        bot_tag = %BOT_TAG,        "🤖 PolyBot v{} starting...", BOT_TAG    );    #[cfg(feature = "dashboard")]    info!("🖥️ Dashboard feature ENABLED - server will start on port 3000");    #[cfg(not(feature = "dashboard"))]    info!("🖥️ Dashboard feature DISABLED");    // Load configuration
     let runtime_args = parse_runtime_args()?;    let config = AppConfig::load()?;    info!(config_digest = %config.digest(), "✅ Configuration loaded");    let _startup_reset_executed = maybe_run_startup_reset(&config, &runtime_args)?;    if runtime_args.reset_mode.is_some() {        info!("Reset command completed; exiting by CLI request");        return Ok(());    }    // Validate environment
     config.validate_env()?;    // Create channels for inter-component communication
@@ -11,7 +12,16 @@ mod backtesting;mod clob;mod config;mod features;mod ml_engine;mod oracle;mod pa
     let orderbook_tracker = Arc::new(std::sync::Mutex::new(OrderbookImbalanceTracker::new()));    {        let tracker_clone = orderbook_tracker.clone();        feature_engine            .lock()            .await            .set_orderbook_tracker(tracker_clone);    }    info!("📊 OrderbookImbalanceTracker connected to FeatureEngine");        // Initialize strategy (V2 or V3 based on config)
     let strategy: Arc<Mutex<Box<dyn Strategy>>> = if config.use_v3_strategy {
         info!("🤖 Initializing V3 ML Strategy...");
-        let ml_config = crate::ml_engine::MLEngineConfig::default();
+        
+        // Load ML configuration from config file, with fallback to defaults
+        let ml_config = config.ml_engine.to_ml_engine_config();
+        info!(
+            ml_enabled = ml_config.enabled,
+            model_type = ?ml_config.model_type,
+            min_confidence = ml_config.min_confidence,
+            "🧠 ML Engine configuration loaded"
+        );
+        
         let v3_strategy = crate::strategy::V3Strategy::new(ml_config, StrategyConfig::default());
         
         // Load persisted ML state if exists

@@ -8,6 +8,7 @@
 //! - Sistema de aprendizaje continuo
 
 pub mod calibration;
+pub mod config_bridge;
 pub mod data_client;
 pub mod dataset;
 pub mod features;
@@ -17,6 +18,8 @@ pub mod models;
 pub mod persistence;
 pub mod predictor;
 pub mod training;
+
+pub use config_bridge::MLConfigConvertible;
 
 pub use calibration::{CalibrationCurve, ProbabilityCalibrator};
 pub use dataset::{Dataset, LabeledSample, TradeSample};
@@ -100,18 +103,20 @@ impl Default for MLEngineConfig {
                 logistic_regression_weight: 0.25,
                 dynamic_weight_adjustment: true,
             },
+            // FILTERS: More permissive defaults for paper trading
+            // These can be overridden in config/local.yaml
             filters: FilterConfig {
-                max_spread_bps_15m: 100.0,
-                max_spread_bps_1h: 150.0,
-                min_depth_usdc: 5000.0,
-                max_volatility_5m: 0.02,
-                min_volatility_5m: 0.001,
-                optimal_hours_only: true,
-                min_btc_eth_correlation: 0.6,
-                max_btc_eth_correlation: 0.95,
-                max_window_progress: 0.70,
-                min_time_to_close_minutes: 3.0,
-                min_model_confidence: 0.55,
+                max_spread_bps_15m: 200.0,    // Was 100 - too restrictive
+                max_spread_bps_1h: 300.0,     // Was 150 - too restrictive
+                min_depth_usdc: 1000.0,       // Was 5000 - too restrictive for some markets
+                max_volatility_5m: 0.05,      // Was 0.02 - too restrictive
+                min_volatility_5m: 0.0001,    // Was 0.001 - allow very low vol
+                optimal_hours_only: false,    // Was true - don't restrict by hour
+                min_btc_eth_correlation: 0.0, // Was 0.6 - correlation not required
+                max_btc_eth_correlation: 1.0, // Was 0.95 - allow any correlation
+                max_window_progress: 0.90,    // Was 0.70 - allow later entries
+                min_time_to_close_minutes: 2.0, // Was 3.0 - slightly more permissive
+                min_model_confidence: 0.52,   // Was 0.55 - lower threshold for exploration
             },
             training: TrainingConfig {
                 retrain_interval_trades: 50,
@@ -120,7 +125,7 @@ impl Default for MLEngineConfig {
                 walk_forward_test_days: 7,
                 early_stopping_patience: 10,
             },
-            min_confidence: 0.55,
+            min_confidence: 0.52, // Lower default for exploration phase
         }
     }
 }

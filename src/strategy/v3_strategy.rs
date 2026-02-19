@@ -191,11 +191,21 @@ impl V3Strategy {
     }
 
     /// Process features and generate ML-powered signal
+    /// 
+    /// Flow:
+    /// 1. Apply smart filters (market conditions)
+    /// 2. Try ML prediction if available and enabled
+    /// 3. If ML fails or has low confidence, try fallback rule-based
+    /// 4. Return signal with metadata for tracking
     pub fn process(&mut self, features: &crate::features::Features) -> Option<GeneratedSignal> {
         self.last_filter_reason = None;
+        
+        // Track this evaluation attempt
+        let asset = features.asset;
+        let timeframe = features.timeframe;
 
         // Store in history
-        let key = (features.asset, features.timeframe);
+        let key = (asset, timeframe);
         let history = self.feature_history.entry(key).or_default();
         history.push(features.clone());
         if history.len() > 100 {
@@ -210,8 +220,8 @@ impl V3Strategy {
 
         // Apply smart filters first
         let filter_context = FilterContext {
-            asset: features.asset,
-            timeframe: features.timeframe,
+            asset,
+            timeframe,
             timestamp: features.ts,
             spread_bps: features.spread_bps.unwrap_or(0.0),
             depth_usdc: features.orderbook_depth_top5.unwrap_or(0.0),
@@ -223,29 +233,97 @@ impl V3Strategy {
             window_progress: features.window_progress.unwrap_or(1.0),
             btc_eth_correlation: context.btc_eth_correlation,
             is_macro_event_near: false,
-            model_confidence: 0.0, // Will be updated after prediction
+            model_confidence: 0.0,
         };
 
         match self.filter_engine.evaluate(&filter_context) {
-            FilterDecision::Allow => {}
+            FilterDecision::Allow => {
+                tracing::debug!(?asset, ?timeframe, "✅ Market filters passed");
+            }
             FilterDecision::Reject(reason) => {
-                self.last_filter_reason = Some(format!("{:?}", reason));
+                let reason_str = format!("{:?}", reason);
+                tracing::debug!(?asset, ?timeframe, reason = %reason_str, "❌ Signal rejected by market filter");
+                self.last_filter_reason = Some(reason_str);
                 return None;
             }
         }
 
-        // Make ML prediction
-        let prediction = if let Some(ref predictor) = self.predictor {
-            predictor.predict(&ml_features)
-        } else {
-            // Fallback to rule-based if ML not enabled
-            return self.fallback_signal(features);
-        };
+        // Check if ML is enabled and models are trained
+        let ml_available = self.config.enabled && self.predictor.is_some();
+        let dataset_size = self.dataset.len();
+        let min_samples = self.config.training.min_samples_for_training;
+        
+        tracing::debug!(
+            ?asset, ?timeframe,
+            ml_enabled = self.config.enabled,
+            predictor_loaded = self.predictor.is_some(),
+            dataset_size,
+            min_samples_required = min_samples,
+            "ML status check"
+        );
+
+        // Try ML prediction if available
+        if ml_available && dataset_size >= min_samples {
+            if let Some(prediction) = self.try_ml_prediction(&ml_features, features, &context) {
+                return Some(prediction);
+            }
+        }
+
+        // Fallback to rule-based if ML not available or rejected
+        if dataset_size < min_samples {
+            tracing::info!(
+                ?asset, ?timeframe,
+                dataset_size,
+                min_samples_required = min_samples,
+                "ML not ready (insufficient training data), using fallback"
+            );
+        } else if !ml_available {
+            tracing::info!(
+                ?asset, ?timeframe,
+                "ML disabled or models not loaded, using fallback"
+            );
+        }
+
+        // Try fallback signal
+        if let Some(signal) = self.fallback_signal(features) {
+            tracing::info!(
+                ?asset, ?timeframe,
+                direction = ?signal.direction,
+                confidence = signal.confidence,
+                "📊 Fallback signal generated"
+            );
+            return Some(signal);
+        }
+
+        tracing::debug!(?asset, ?timeframe, "No signal generated (ML and fallback both failed)");
+        None
+    }
+    
+    /// Try to generate ML prediction
+    fn try_ml_prediction(
+        &mut self,
+        ml_features: &crate::ml_engine::MLFeatureVector,
+        features: &crate::features::Features,
+        _context: &crate::ml_engine::features::MarketContext,
+    ) -> Option<GeneratedSignal> {
+        let predictor = self.predictor.as_ref()?;
+        let prediction = predictor.predict(ml_features);
+        
+        tracing::debug!(
+            asset = ?features.asset,
+            timeframe = ?features.timeframe,
+            prob_up = prediction.prob_up,
+            confidence = prediction.confidence,
+            model = %prediction.model_name,
+            "ML prediction result"
+        );
 
         // Check minimum confidence
         if prediction.confidence < self.config.min_confidence {
-            self.last_filter_reason =
-                Some(format!("low_ml_confidence: {:.2}", prediction.confidence));
+            let reason = format!("low_ml_confidence: {:.2} < {:.2}", 
+                prediction.confidence, self.config.min_confidence);
+            tracing::debug!(%reason, "ML prediction rejected");
+            self.last_filter_reason = Some(reason);
             return None;
         }
 
@@ -258,7 +336,7 @@ impl V3Strategy {
 
         // Calculate final confidence
         let confidence = prediction.confidence * (prediction.prob_up - 0.5).abs() * 2.0;
-        let confidence = confidence.clamp(0.55, 0.95);
+        let confidence = confidence.clamp(0.52, 0.95);
 
         // Track prediction for later validation
         self.state.add_prediction(Prediction {
@@ -284,20 +362,18 @@ impl V3Strategy {
         ];
 
         // Add top features
-        if let Some(ref predictor) = self.predictor {
-            let top_features = predictor.top_features(3);
-            for (name, importance) in top_features {
-                reasons.push(format!("{}:{:.2}", name, importance));
-            }
+        let top_features = predictor.top_features(3);
+        for (name, importance) in top_features {
+            reasons.push(format!("{}:{:.2}", name, importance));
         }
 
-        info!(
+        tracing::info!(
             asset = ?features.asset,
             timeframe = ?features.timeframe,
             direction = ?direction,
             confidence = confidence,
             prob_up = prediction.prob_up,
-            model = prediction.model_name,
+            model = %prediction.model_name,
             "🤖 V3 ML Signal generated"
         );
 
