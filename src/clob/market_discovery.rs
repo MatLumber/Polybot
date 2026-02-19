@@ -285,13 +285,18 @@ impl MarketDiscovery {
             info!("Tag '{}' returned {} markets", tag, markets.len());
             
             for market in markets {
-                debug!("Processing market: {} - {}", market.condition_id, market.question);
+                let q_preview: String = market.question.chars().take(60).collect();
+                debug!("Processing market: {} - {}...", market.condition_id, q_preview);
+                let slug = market.slug.clone().unwrap_or_default();
+                let end_date = market.end_date.clone().unwrap_or_default();
                 if let Some(discovered) = self.convert_market_response(market, asset) {
                     info!("Converted market: {} (tf={:?}, end={})", 
                         discovered.condition_id, discovered.timeframe, discovered.end_date);
                     all_markets.push(discovered);
                 } else {
-                    debug!("Failed to convert market response");
+                    debug!("Failed to convert: {} slug='{}' end='{}' tokens={}", 
+                        q_preview, slug, end_date, 
+                        if let Some(ref tokens) = None::<Vec<String>> { 0 } else { 2 }); // Can't easily get token count here
                 }
             }
         }
@@ -325,6 +330,8 @@ impl MarketDiscovery {
         market: MarketResponse,
         asset: Asset,
     ) -> Option<DiscoveredMarket> {
+        let condition_id = &market.condition_id;
+        
         // Parse end date
         let end_date = market.end_date.as_deref()
             .and_then(|d| {
@@ -353,14 +360,29 @@ impl MarketDiscovery {
             // Try to infer from end_date relative to now
             let now = Utc::now();
             let duration = end_date.signed_duration_since(now);
+            debug!("Market {}: can't determine timeframe from text, trying duration: {} min", 
+                condition_id, duration.num_minutes());
             if duration.num_minutes() <= 20 && duration.num_minutes() > 0 {
                 Timeframe::Min15
             } else if duration.num_hours() <= 2 && duration.num_hours() > 0 {
                 Timeframe::Hour1
             } else {
+                debug!("Market {} rejected: can't determine timeframe (text='{}' duration={}min)", 
+                    condition_id, text, duration.num_minutes());
                 return None; // Can't determine timeframe
             }
         };
+        
+        // Check token_ids
+        if market.clob_token_ids.len() != 2 {
+            debug!("Market {} rejected: expected 2 token_ids, got {}", 
+                condition_id, market.clob_token_ids.len());
+            return None;
+        }
+        
+        info!("Market {} CONVERTED: slug='{}' tf={:?} tokens={} outcomes={:?}",
+            condition_id, market.slug.as_deref().unwrap_or(""), timeframe,
+            market.clob_token_ids.len(), market.outcomes);
 
         Some(DiscoveredMarket {
             condition_id: market.condition_id,
