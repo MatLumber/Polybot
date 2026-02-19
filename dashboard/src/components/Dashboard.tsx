@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   BarChart3,
   Bot,
+  Brain,
   CandlestickChart,
   Clock3,
   DollarSign,
@@ -17,6 +18,7 @@ import {
 import { ChartErrorBoundary } from './charts/ChartErrorBoundary'
 import { PriceStreamChart } from './charts/PriceStreamChart'
 import { useDashboardStream } from '../hooks/useDashboardStream'
+import { MLPanel } from './MLPanel'
 import type { AssetPrice, AssetStats, MarketLearningProgress, Position, Trade } from '../types/ui'
 
 const RECENT_TRADES_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -773,6 +775,20 @@ export function Dashboard() {
             Each market trains independently. Target: 30 closed trades per market for full calibration.
           </p>
           <LearningPanel items={marketLearning} />
+        </section>
+
+        <section className="glass-panel ml-panel-container">
+          <div className="panel-head">
+            <div className="panel-title">
+              <Brain size={14} />
+              <span>ML Engine v3.0</span>
+            </div>
+          </div>
+          <MLPanel 
+            mlState={stream.mlState} 
+            mlMetrics={stream.mlMetrics} 
+            mlPrediction={stream.mlPrediction} 
+          />
         </section>
       </main>
 

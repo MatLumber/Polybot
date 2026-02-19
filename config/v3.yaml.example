@@ -1,0 +1,79 @@
+# PolyBot v3.0 ML Strategy Configuration
+# Copy this to config/v3.yaml and set use_v3_strategy: true in your main config
+
+# Enable V3 ML Strategy
+use_v3_strategy: true
+
+# ML Engine Configuration
+ml_engine:
+  enabled: true
+  model_type: "ensemble"  # Options: "random_forest", "gradient_boosting", "logistic_regression", "ensemble"
+  
+  # Training parameters
+  retrain_interval_trades: 50
+  min_samples_for_training: 30
+  
+  # Features to use
+  use_microstructure: true
+  use_temporal_patterns: true
+  use_cross_asset: true
+  
+  # Ensemble weights (must sum to 1.0)
+  random_forest_weight: 0.40
+  gradient_boosting_weight: 0.35
+  logistic_regression_weight: 0.25
+  dynamic_weight_adjustment: true
+  
+  # Smart filters
+  max_spread_bps_15m: 100
+  max_spread_bps_1h: 150
+  min_depth_usdc: 5000
+  max_volatility_5m: 0.02
+  optimal_hours_only: false
+
+# Base strategy parameters (still used by V3 for fallback)
+strategy:
+  min_confidence: 0.55  # Lower for ML to allow exploration
+  entry_delay_secs: 30
+  min_time_to_expiry_secs: 30
+  rolling_analysis: true
+  reeval_interval_secs: 10
+  calibration_min_samples_per_market: 30
+
+# Risk parameters (ML can use tighter stops)
+risk:
+  max_position_usdc: 10.0
+  max_daily_loss_usdc: 100.0
+  max_open_positions: 3
+  max_drawdown_pct: 15.0
+  kill_switch_enabled: true
+  min_oracle_confidence: 0.7
+  checkpoint_arm_roi: 0.05
+  checkpoint_initial_floor_roi: 0.022
+  checkpoint_trail_gap_roi: 0.012
+  hard_stop_roi: -0.07
+  time_stop_seconds_to_expiry: 90
+  max_open_exposure_total: 0.12
+  max_open_exposure_asset: 0.04
+  max_open_exposure_market: 0.015
+
+# Kelly sizing for ML (can be more aggressive with better predictions)
+kelly:
+  enabled: true
+  fraction_15m: 0.30  # Higher confidence allows higher sizing
+  fraction_1h: 0.60
+  max_bankroll_fraction_15m: 0.05
+  max_bankroll_fraction_1h: 0.10
+
+# Paper trading
+paper_trading:
+  enabled: true
+  initial_balance: 1000.0
+  slippage_bps: 5.0
+  fee_bps: 10.0
+  trailing_stop_pct: 0.005
+  take_profit_pct: 0.008
+  max_hold_duration_ms: 900000  # 15 minutes
+  dashboard_interval_secs: 30
+  prefer_chainlink: true
+  min_edge_net: 0.03  # Lower edge requirement for ML

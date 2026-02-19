@@ -283,3 +283,82 @@ export function applyPriceUpdateToHistory(
   }
   return nextHistory
 }
+
+// ML Mappers
+import type {
+  MLStateWire,
+  MLMetricsWire,
+  MLPredictionWire,
+  MLFeaturesWire,
+  MLTrainingWire,
+  MLModelInfoWire,
+} from '../types/wire'
+import type {
+  MLState,
+  MLMetrics,
+  MLPrediction,
+  MLFeatures,
+  MLTraining,
+  MLModelInfo,
+} from '../types/ui'
+
+export function mapMLModelInfo(model: MLModelInfoWire): MLModelInfo {
+  return {
+    name: model.name,
+    weight: model.weight,
+    accuracy: model.accuracy,
+    status: model.status,
+  }
+}
+
+export function mapMLState(state: MLStateWire): MLState {
+  return {
+    enabled: state.enabled,
+    modelType: state.model_type,
+    version: state.version,
+    timestamp: state.timestamp,
+  }
+}
+
+export function mapMLMetrics(metrics: MLMetricsWire): MLMetrics {
+  return {
+    accuracy: metrics.accuracy,
+    winRate: metrics.win_rate,
+    totalPredictions: metrics.total_predictions,
+    correctPredictions: metrics.correct_predictions,
+    ensembleWeights: metrics.ensemble_weights.map(mapMLModelInfo),
+    timestamp: metrics.timestamp,
+  }
+}
+
+export function mapMLPrediction(prediction: MLPredictionWire): MLPrediction {
+  return {
+    asset: prediction.asset,
+    timeframe: prediction.timeframe,
+    direction: prediction.direction,
+    confidence: prediction.confidence,
+    probUp: prediction.prob_up,
+    modelName: prediction.model_name,
+    featuresTriggered: prediction.features_triggered,
+    timestamp: prediction.timestamp,
+  }
+}
+
+export function mapMLFeatures(features: MLFeaturesWire): MLFeatures {
+  return {
+    totalFeatures: features.total_features,
+    topFeatures: features.top_features,
+    timestamp: features.timestamp,
+  }
+}
+
+export function mapMLTraining(training: MLTrainingWire): MLTraining {
+  return {
+    status: training.status,
+    lastTraining: training.last_training,
+    samplesTrained: training.samples_trained,
+    retrainInterval: training.retrain_interval,
+    walkForwardEnabled: training.walk_forward_enabled,
+    timestamp: training.timestamp,
+  }
+}

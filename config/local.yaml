@@ -1,0 +1,112 @@
+# PolyBot ML v3.0 - Configuración Lista para Usar
+# Copia este archivo como config/local.yaml para activar ML
+
+# ============================================================================
+# ACTIVAR ML STRATEGY
+# ============================================================================
+use_v3_strategy: true
+
+bot:
+  tag: "polybot-ml-v3.0"
+  assets:
+    - "BTC"
+    - "ETH"
+  timeframes:
+    - "15m"
+    - "1h"
+  dry_run: true  # Paper trading
+
+# ============================================================================
+# ML ENGINE CONFIGURATION
+# ============================================================================
+ml_engine:
+  enabled: true
+  model_type: "ensemble"  # Options: random_forest, gradient_boosting, logistic_regression, ensemble
+  min_confidence: 0.55
+  
+  # Features
+  use_microstructure: true
+  use_temporal_patterns: true
+  use_cross_asset: true
+  use_calibrator_features: true
+  
+  # Training
+  retrain_interval_trades: 50
+  min_samples_for_training: 30
+  
+  # Ensemble weights (must sum to 1.0)
+  random_forest_weight: 0.40
+  gradient_boosting_weight: 0.35
+  logistic_regression_weight: 0.25
+  dynamic_weight_adjustment: true
+  
+  # Smart filters
+  max_spread_bps_15m: 100
+  max_spread_bps_1h: 150
+  min_depth_usdc: 5000
+  max_volatility_5m: 0.02
+  optimal_hours_only: false
+
+# ============================================================================
+# STRATEGY
+# ============================================================================
+strategy:
+  min_confidence: 0.55
+  entry_delay_secs: 30
+  min_time_to_expiry_secs: 30
+  rolling_analysis: true
+  reeval_interval_secs: 10
+  calibration_min_samples_per_market: 30
+
+# ============================================================================
+# RISK
+# ============================================================================
+risk:
+  max_position_usdc: 10.0
+  max_daily_loss_usdc: 100.0
+  max_open_positions: 3
+  max_drawdown_pct: 15.0
+  kill_switch_enabled: true
+  min_oracle_confidence: 0.7
+  checkpoint_arm_roi: 0.05
+  checkpoint_initial_floor_roi: 0.022
+  checkpoint_trail_gap_roi: 0.012
+  hard_stop_roi: -0.07
+  time_stop_seconds_to_expiry: 90
+
+# ============================================================================
+# PAPER TRADING
+# ============================================================================
+paper_trading:
+  enabled: true
+  initial_balance: 1000.0
+  slippage_bps: 5.0
+  fee_bps: 10.0
+  trailing_stop_pct: 0.005
+  take_profit_pct: 0.008
+  max_hold_duration_ms: 900000
+  dashboard_interval_secs: 30
+  prefer_chainlink: true
+  min_edge_net: 0.03
+
+# ============================================================================
+# KELLY
+# ============================================================================
+kelly:
+  enabled: true
+  fraction_15m: 0.30
+  fraction_1h: 0.60
+  max_bankroll_fraction_15m: 0.05
+  max_bankroll_fraction_1h: 0.10
+
+# ============================================================================
+# DASHBOARD
+# ============================================================================
+# Dashboard available at: http://localhost:3000
+# WebSocket: ws://localhost:3000/ws
+# ML Endpoints:
+#   - GET /api/ml/state
+#   - GET /api/ml/metrics
+#   - GET /api/ml/models
+#   - GET /api/ml/features
+#   - GET /api/ml/training

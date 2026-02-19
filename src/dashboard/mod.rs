@@ -901,6 +901,82 @@ fn build_market_learning_row(
         last_updated_ts,
         status: status.to_string(),
     }
+
+    /// Get ML Engine state
+    pub async fn get_ml_state(&self) -> serde_json::Value {
+        serde_json::json!({
+            "enabled": true,
+            "model_type": "Ensemble",
+            "version": "3.0",
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        })
+    }
+
+    /// Get ML metrics
+    pub async fn get_ml_metrics(&self) -> serde_json::Value {
+        serde_json::json!({
+            "accuracy": 0.0,
+            "win_rate": 0.0,
+            "total_predictions": 0,
+            "correct_predictions": 0,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        })
+    }
+
+    /// Get ML models info
+    pub async fn get_ml_models(&self) -> serde_json::Value {
+        serde_json::json!({
+            "models": [
+                {
+                    "name": "Random Forest",
+                    "weight": 0.4,
+                    "accuracy": 0.0,
+                    "status": "active"
+                },
+                {
+                    "name": "Gradient Boosting",
+                    "weight": 0.35,
+                    "accuracy": 0.0,
+                    "status": "active"
+                },
+                {
+                    "name": "Logistic Regression",
+                    "weight": 0.25,
+                    "accuracy": 0.0,
+                    "status": "active"
+                }
+            ],
+            "dynamic_weights_enabled": true,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        })
+    }
+
+    /// Get ML feature importance
+    pub async fn get_ml_features(&self) -> serde_json::Value {
+        serde_json::json!({
+            "total_features": 50,
+            "top_features": [
+                {"name": "rsi", "importance": 0.0},
+                {"name": "macd", "importance": 0.0},
+                {"name": "adx", "importance": 0.0},
+                {"name": "orderbook_imbalance", "importance": 0.0},
+                {"name": "volatility", "importance": 0.0}
+            ],
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        })
+    }
+
+    /// Get ML training status
+    pub async fn get_ml_training_status(&self) -> serde_json::Value {
+        serde_json::json!({
+            "status": "ready",
+            "last_training": null,
+            "samples_trained": 0,
+            "retrain_interval": 50,
+            "walk_forward_enabled": true,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        })
+    }
 }
 
 /// Start the dashboard server

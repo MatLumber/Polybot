@@ -160,6 +160,55 @@ export interface DashboardStateWire {
   timestamp: number
 }
 
+export interface MLModelInfoWire {
+  name: string
+  weight: number
+  accuracy: number
+  status: string
+}
+
+export interface MLStateWire {
+  enabled: boolean
+  model_type: string
+  version: string
+  timestamp: number
+}
+
+export interface MLMetricsWire {
+  accuracy: number
+  win_rate: number
+  total_predictions: number
+  correct_predictions: number
+  ensemble_weights: MLModelInfoWire[]
+  timestamp: number
+}
+
+export interface MLPredictionWire {
+  asset: string
+  timeframe: string
+  direction: string
+  confidence: number
+  prob_up: number
+  model_name: string
+  features_triggered: string[]
+  timestamp: number
+}
+
+export interface MLFeaturesWire {
+  total_features: number
+  top_features: Array<{ name: string; importance: number }>
+  timestamp: number
+}
+
+export interface MLTrainingWire {
+  status: string
+  last_training: number | null
+  samples_trained: number
+  retrain_interval: number
+  walk_forward_enabled: boolean
+  timestamp: number
+}
+
 export type WsMessageWire =
   | { type: 'FullState'; data: DashboardStateWire }
   | { type: 'StatsUpdate'; data: PaperStatsWire }
@@ -169,4 +218,7 @@ export type WsMessageWire =
   | { type: 'PositionOpened'; data: PositionWire }
   | { type: 'PositionClosed'; data: { position_id: string; trade: TradeWire } }
   | { type: 'PositionsUpdate'; data: PositionWire[] }
+  | { type: 'MLStateUpdate'; data: MLStateWire }
+  | { type: 'MLPrediction'; data: MLPredictionWire }
+  | { type: 'MLMetricsUpdate'; data: MLMetricsWire }
   | { type: 'Heartbeat'; data: number }

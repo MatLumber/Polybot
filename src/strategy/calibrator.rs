@@ -593,6 +593,15 @@ impl IndicatorCalibrator {
         }
     }
 
+    /// Get confidence level based on calibration state
+    pub fn get_confidence(&self) -> f64 {
+        if self.is_calibrated() {
+            self.overall_win_rate()
+        } else {
+            0.5 // Default confidence when not calibrated
+        }
+    }
+
     /// Get indicators sorted by performance (aggregated).
     pub fn top_performers(&self, limit: usize) -> Vec<IndicatorStats> {
         let mut stats = self.export_stats();

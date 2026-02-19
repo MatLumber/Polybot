@@ -80,6 +80,73 @@ impl WebSocketBroadcaster {
     pub fn broadcast_heartbeat(&self) {
         self.broadcast(&WsMessage::Heartbeat(chrono::Utc::now().timestamp_millis()));
     }
+
+    /// Broadcast ML state update
+    pub fn broadcast_ml_state(&self, enabled: bool, model_type: &str, version: &str) {
+        self.broadcast(&WsMessage::MLStateUpdate(
+            super::types::MLStateUpdatePayload {
+                enabled,
+                model_type: model_type.to_string(),
+                version: version.to_string(),
+                timestamp: chrono::Utc::now().timestamp_millis(),
+            },
+        ));
+    }
+
+    /// Broadcast ML prediction
+    pub fn broadcast_ml_prediction(
+        &self,
+        asset: &str,
+        timeframe: &str,
+        direction: &str,
+        confidence: f64,
+        prob_up: f64,
+        model_name: &str,
+        features: Vec<String>,
+    ) {
+        self.broadcast(&WsMessage::MLPrediction(
+            super::types::MLPredictionPayload {
+                asset: asset.to_string(),
+                timeframe: timeframe.to_string(),
+                direction: direction.to_string(),
+                confidence,
+                prob_up,
+                model_name: model_name.to_string(),
+                features_triggered: features,
+                timestamp: chrono::Utc::now().timestamp_millis(),
+            },
+        ));
+    }
+
+    /// Broadcast ML metrics update
+    pub fn broadcast_ml_metrics(
+        &self,
+        accuracy: f64,
+        win_rate: f64,
+        total_predictions: usize,
+        correct_predictions: usize,
+        weights: Vec<(String, f64, f64)>,
+    ) {
+        let ensemble_weights = weights
+            .into_iter()
+            .map(|(name, weight, accuracy)| super::types::ModelWeightInfo {
+                name,
+                weight,
+                accuracy,
+            })
+            .collect();
+
+        self.broadcast(&WsMessage::MLMetricsUpdate(
+            super::types::MLMetricsPayload {
+                accuracy,
+                win_rate,
+                total_predictions,
+                correct_predictions,
+                ensemble_weights,
+                timestamp: chrono::Utc::now().timestamp_millis(),
+            },
+        ));
+    }
 }
 
 impl Default for WebSocketBroadcaster {

@@ -283,8 +283,54 @@ pub enum WsMessage {
     PositionClosed(PositionClosedPayload),
     /// Full paper positions snapshot (for real-time position PnL/time updates)
     PositionsUpdate(Vec<PositionResponse>),
+    /// ML Engine state update
+    MLStateUpdate(MLStateUpdatePayload),
+    /// ML Prediction made
+    MLPrediction(MLPredictionPayload),
+    /// ML Model metrics update
+    MLMetricsUpdate(MLMetricsPayload),
     /// Heartbeat
     Heartbeat(i64),
+}
+
+/// ML State update payload for WebSocket
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MLStateUpdatePayload {
+    pub enabled: bool,
+    pub model_type: String,
+    pub version: String,
+    pub timestamp: i64,
+}
+
+/// ML Prediction payload for WebSocket
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MLPredictionPayload {
+    pub asset: String,
+    pub timeframe: String,
+    pub direction: String,
+    pub confidence: f64,
+    pub prob_up: f64,
+    pub model_name: String,
+    pub features_triggered: Vec<String>,
+    pub timestamp: i64,
+}
+
+/// ML Metrics payload for WebSocket
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MLMetricsPayload {
+    pub accuracy: f64,
+    pub win_rate: f64,
+    pub total_predictions: usize,
+    pub correct_predictions: usize,
+    pub ensemble_weights: Vec<ModelWeightInfo>,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelWeightInfo {
+    pub name: String,
+    pub weight: f64,
+    pub accuracy: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

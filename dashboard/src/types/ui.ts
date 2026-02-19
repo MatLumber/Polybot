@@ -157,9 +157,62 @@ export interface DashboardStreamState {
   dashboard: DashboardState | null
   priceHistory: PriceHistoryMap
   marketLearning: MarketLearningProgress[]
+  mlState: MLState | null
+  mlMetrics: MLMetrics | null
+  mlPrediction: MLPrediction | null
   connected: boolean
   status: 'connecting' | 'connected' | 'disconnected' | 'error'
   error: string | null
   lastHeartbeatAt: number | null
   lastMessageAt: number | null
+}
+
+// ML Types
+export interface MLModelInfo {
+  name: string
+  weight: number
+  accuracy: number
+  status: string
+}
+
+export interface MLState {
+  enabled: boolean
+  modelType: string
+  version: string
+  timestamp: number
+}
+
+export interface MLMetrics {
+  accuracy: number
+  winRate: number
+  totalPredictions: number
+  correctPredictions: number
+  ensembleWeights: MLModelInfo[]
+  timestamp: number
+}
+
+export interface MLPrediction {
+  asset: string
+  timeframe: string
+  direction: string
+  confidence: number
+  probUp: number
+  modelName: string
+  featuresTriggered: string[]
+  timestamp: number
+}
+
+export interface MLFeatures {
+  totalFeatures: number
+  topFeatures: Array<{ name: string; importance: number }>
+  timestamp: number
+}
+
+export interface MLTraining {
+  status: string
+  lastTraining: number | null
+  samplesTrained: number
+  retrainInterval: number
+  walkForwardEnabled: boolean
+  timestamp: number
 }

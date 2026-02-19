@@ -159,6 +159,39 @@ reset:
   delete_paper_state: true
 
 # ============================================================================
+# ML ENGINE v3.0 - Machine Learning Strategy
+# ============================================================================
+use_v3_strategy: false  # Set to true to enable ML-powered trading
+
+ml_engine:
+  enabled: true
+  model_type: "ensemble"
+  min_confidence: 0.55
+  
+  # Training parameters
+  retrain_interval_trades: 50
+  min_samples_for_training: 30
+  
+  # Features
+  use_microstructure: true
+  use_temporal_patterns: true
+  use_cross_asset: true
+  use_calibrator_features: true
+  
+  # Ensemble weights (must sum to 1.0)
+  random_forest_weight: 0.40
+  gradient_boosting_weight: 0.35
+  logistic_regression_weight: 0.25
+  dynamic_weight_adjustment: true
+  
+  # Smart filters
+  max_spread_bps_15m: 100
+  max_spread_bps_1h: 150
+  min_depth_usdc: 5000
+  max_volatility_5m: 0.02
+  optimal_hours_only: false
+
+# ============================================================================
 # CALIBRATION - Configuración agresiva
 # ============================================================================
 calibration:

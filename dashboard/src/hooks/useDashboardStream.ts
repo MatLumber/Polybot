@@ -3,6 +3,9 @@ import {
   applyPriceUpdateToHistory,
   mapDashboardState,
   mapMarketLearningProgressList,
+  mapMLMetrics,
+  mapMLPrediction,
+  mapMLState,
   mapPaperStats,
   mapPosition,
   mapPriceHistory,
@@ -39,6 +42,9 @@ const initialState: DashboardStreamState = {
   dashboard: null,
   priceHistory: {},
   marketLearning: [],
+  mlState: null,
+  mlMetrics: null,
+  mlPrediction: null,
   connected: false,
   status: 'connecting',
   error: null,
@@ -203,6 +209,28 @@ function reducer(state: DashboardStreamState, action: StreamAction): DashboardSt
               openPositions: message.data.map(mapPosition),
             },
           },
+        }
+      }
+
+      // ML Messages
+      if (message.type === 'MLStateUpdate') {
+        return {
+          ...nextState,
+          mlState: mapMLState(message.data),
+        }
+      }
+
+      if (message.type === 'MLMetricsUpdate') {
+        return {
+          ...nextState,
+          mlMetrics: mapMLMetrics(message.data),
+        }
+      }
+
+      if (message.type === 'MLPrediction') {
+        return {
+          ...nextState,
+          mlPrediction: mapMLPrediction(message.data),
         }
       }
 

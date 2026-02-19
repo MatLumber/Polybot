@@ -19,6 +19,9 @@ pub use calibrator::{
     CalibrationQualitySnapshot, IndicatorCalibrator, IndicatorStats, TradeResult,
 };
 
+pub mod v3_strategy;
+pub use v3_strategy::V3Strategy;
+
 use anyhow::Result;
 use std::collections::HashMap;
 

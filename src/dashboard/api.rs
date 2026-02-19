@@ -57,6 +57,12 @@ pub fn create_router(memory: Arc<DashboardMemory>, broadcaster: WebSocketBroadca
         .route("/api/data/temporal-patterns", get(get_temporal_patterns))
         .route("/api/data/settlement-metrics", get(get_settlement_metrics))
         .route("/api/data/cross-asset-correlations", get(get_cross_asset_correlations))
+        // NEW v3.0: ML Engine endpoints
+        .route("/api/ml/state", get(get_ml_state))
+        .route("/api/ml/metrics", get(get_ml_metrics))
+        .route("/api/ml/models", get(get_ml_models))
+        .route("/api/ml/features", get(get_ml_features))
+        .route("/api/ml/training", get(get_ml_training_status))
         // WebSocket
         .route("/ws", axum::routing::get(websocket_handler))
         // State
@@ -591,4 +597,34 @@ async fn get_cross_asset_correlations(
         "last_update": chrono::Utc::now().to_rfc3339()
     });
     Json(ApiResponse::success(placeholder))
+}
+
+/// GET /api/ml/state - Returns ML Engine state and configuration
+async fn get_ml_state(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
+    let ml_state = memory.get_ml_state().await;
+    Json(ApiResponse::success(ml_state))
+}
+
+/// GET /api/ml/metrics - Returns ML model performance metrics
+async fn get_ml_metrics(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
+    let metrics = memory.get_ml_metrics().await;
+    Json(ApiResponse::success(metrics))
+}
+
+/// GET /api/ml/models - Returns ensemble model information
+async fn get_ml_models(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
+    let models = memory.get_ml_models().await;
+    Json(ApiResponse::success(models))
+}
+
+/// GET /api/ml/features - Returns feature importance and statistics
+async fn get_ml_features(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
+    let features = memory.get_ml_features().await;
+    Json(ApiResponse::success(features))
+}
+
+/// GET /api/ml/training - Returns training status and history
+async fn get_ml_training_status(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
+    let training = memory.get_ml_training_status().await;
+    Json(ApiResponse::success(training))
 }

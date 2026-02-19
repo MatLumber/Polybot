@@ -26,6 +26,12 @@ pub struct AppConfig {
     pub persistence: PersistenceConfig,
     pub paper_trading: PaperTradingCfg,
     pub reset: ResetConfig,
+    /// Use V3 ML-based strategy (default: false for backward compatibility)
+    #[serde(default)]
+    pub use_v3_strategy: bool,
+    /// ML Engine configuration
+    #[serde(default)]
+    pub ml_engine: MLConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -222,6 +228,60 @@ pub struct ResetConfig {
     pub delete_paper_state: bool,
 }
 
+/// ML Engine Configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct MLConfig {
+    /// Enable ML engine
+    pub enabled: bool,
+    /// Model type: "random_forest", "gradient_boosting", "logistic_regression", "ensemble"
+    pub model_type: String,
+    /// Retrain interval (number of trades)
+    pub retrain_interval_trades: usize,
+    /// Minimum samples required for training
+    pub min_samples_for_training: usize,
+    /// Use microstructure features
+    pub use_microstructure: bool,
+    /// Use temporal patterns
+    pub use_temporal_patterns: bool,
+    /// Use cross-asset correlation
+    pub use_cross_asset: bool,
+    /// Ensemble weights
+    pub random_forest_weight: f64,
+    pub gradient_boosting_weight: f64,
+    pub logistic_regression_weight: f64,
+    /// Dynamic weight adjustment
+    pub dynamic_weight_adjustment: bool,
+    /// Filter configuration
+    pub max_spread_bps_15m: f64,
+    pub max_spread_bps_1h: f64,
+    pub min_depth_usdc: f64,
+    pub max_volatility_5m: f64,
+    pub optimal_hours_only: bool,
+}
+
+impl Default for MLConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model_type: "ensemble".to_string(),
+            retrain_interval_trades: 50,
+            min_samples_for_training: 30,
+            use_microstructure: true,
+            use_temporal_patterns: true,
+            use_cross_asset: true,
+            random_forest_weight: 0.4,
+            gradient_boosting_weight: 0.35,
+            logistic_regression_weight: 0.25,
+            dynamic_weight_adjustment: true,
+            max_spread_bps_15m: 100.0,
+            max_spread_bps_1h: 150.0,
+            min_depth_usdc: 5000.0,
+            max_volatility_5m: 0.02,
+            optimal_hours_only: false,
+        }
+    }
+}
+
 impl AppConfig {
     /// Load configuration from file and environment
     pub fn load() -> Result<Self> {
@@ -316,6 +376,24 @@ impl AppConfig {
             .set_default("reset.delete_prices", true)?
             .set_default("reset.delete_learning_state", true)?
             .set_default("reset.delete_paper_state", true)?
+            // ML Engine defaults
+            .set_default("use_v3_strategy", false)?
+            .set_default("ml_engine.enabled", true)?
+            .set_default("ml_engine.model_type", "ensemble")?
+            .set_default("ml_engine.retrain_interval_trades", 50)?
+            .set_default("ml_engine.min_samples_for_training", 30)?
+            .set_default("ml_engine.use_microstructure", true)?
+            .set_default("ml_engine.use_temporal_patterns", true)?
+            .set_default("ml_engine.use_cross_asset", true)?
+            .set_default("ml_engine.random_forest_weight", 0.4)?
+            .set_default("ml_engine.gradient_boosting_weight", 0.35)?
+            .set_default("ml_engine.logistic_regression_weight", 0.25)?
+            .set_default("ml_engine.dynamic_weight_adjustment", true)?
+            .set_default("ml_engine.max_spread_bps_15m", 100.0)?
+            .set_default("ml_engine.max_spread_bps_1h", 150.0)?
+            .set_default("ml_engine.min_depth_usdc", 5000.0)?
+            .set_default("ml_engine.max_volatility_5m", 0.02)?
+            .set_default("ml_engine.optimal_hours_only", false)?
             // Load config file if exists
             .add_source(File::with_name("config/default").required(false))
             .add_source(File::with_name("config/local").required(false))
