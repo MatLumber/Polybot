@@ -48,6 +48,14 @@ pub trait Strategy: Send + Sync {
         p_pred: f64,
         is_win: bool,
     );
+
+    /// Exportar calidad de calibración por mercado (V2 feature, V3 devuelve vacío)
+    fn export_calibration_quality_by_market(
+        &self,
+    ) -> HashMap<String, crate::strategy::CalibrationQualitySnapshot>;
+
+    /// Obtener estadísticas de indicadores (V2 feature, V3 devuelve vacío)
+    fn get_indicator_stats(&self) -> Vec<crate::strategy::IndicatorStats>;
 }
 
 // Implementación para StrategyEngine (V2)
@@ -101,6 +109,16 @@ impl Strategy for crate::strategy::StrategyEngine {
         is_win: bool,
     ) {
         self.record_prediction_outcome_for_market(asset, timeframe, p_pred, is_win)
+    }
+
+    fn export_calibration_quality_by_market(
+        &self,
+    ) -> HashMap<String, crate::strategy::CalibrationQualitySnapshot> {
+        self.export_calibration_quality_by_market()
+    }
+
+    fn get_indicator_stats(&self) -> Vec<crate::strategy::IndicatorStats> {
+        self.get_indicator_stats()
     }
 }
 
@@ -164,5 +182,17 @@ impl Strategy for crate::strategy::V3Strategy {
     ) {
         // V3 maneja esto internamente, no necesita implementación externa
         let _ = (asset, timeframe, p_pred, is_win);
+    }
+
+    fn export_calibration_quality_by_market(
+        &self,
+    ) -> HashMap<String, crate::strategy::CalibrationQualitySnapshot> {
+        // V3 usa ML, no calibración tradicional - devuelve vacío
+        HashMap::new()
+    }
+
+    fn get_indicator_stats(&self) -> Vec<crate::strategy::IndicatorStats> {
+        // V3 usa ML ensemble, no indicadores individuales - devuelve vacío
+        Vec::new()
     }
 }
