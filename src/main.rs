@@ -93,8 +93,35 @@ mod backtesting;mod clob;mod config;mod features;mod ml_engine;mod oracle;mod pa
                 let candles = candle_builder.get_last_n(tick.asset, timeframe, 50);                let candle_count = candles.len();                // Log candle count periodically (every 10 seconds per asset/timeframe)
                 let now = chrono::Utc::now().timestamp_millis();                let key = (tick.asset, timeframe);                let last = last_feature_time.entry(key).or_insert(0);                if now - *last > 10000 {                    *last = now;                    tracing::info!(                        asset = ?tick.asset,                        timeframe = ?timeframe,                        candle_count = candle_count,                        "🕯️ Candle count"                    );                }                // Need at least 30 candles for meaningful technical indicators
                 if candle_count >= 30 {                    if let Some(features) = feature_engine_inner.lock().await.compute(&candles) {                        // Log features at DEBUG level to avoid log spam
-                        if features.rsi.is_some() || features.macd.is_some() {                            tracing::debug!(                                asset = ?tick.asset,                                timeframe = ?timeframe,                                rsi = ?features.rsi,                                macd = ?features.macd,                                momentum = ?features.momentum,                                trend = ?features.trend_strength,                                "📊 Features computed"                            );                            // Send Features directly to strategy
-                            if let Err(e) = feature_tx.send(features).await {                                tracing::error!(error = %e, "Failed to send features");                            }                        }                    }                }            }        }    });    // Strategy engine task - processes features and generates signals
+                        // ALWAYS send features to strategy (V3 handles partial features)
+                        // Log indicator availability for debugging
+                        if features.rsi.is_none() && features.macd.is_none() {
+                            tracing::warn!(
+                                asset = ?tick.asset,
+                                timeframe = ?timeframe,
+                                candle_count = candle_count,
+                                "⚠️ Features computed but RSI/MACD are None - sending anyway"
+                            );
+                        } else {
+                            tracing::debug!(
+                                asset = ?tick.asset,
+                                timeframe = ?timeframe,
+                                rsi = ?features.rsi,
+                                macd = ?features.macd,
+                                momentum = ?features.momentum,
+                                trend = ?features.trend_strength,
+                                "📊 Features computed with indicators"
+                            );
+                        }
+                        // Send Features directly to strategy
+                        if let Err(e) = feature_tx.send(features).await {
+                            tracing::error!(error = %e, "Failed to send features");
+                        }
+                    }
+                }
+            }
+        }
+    });    // Strategy engine task - processes features and generates signals
     let strategy_inner = strategy.clone();    let strategy_persistence = csv_persistence.clone();    let strategy_client = clob_client.clone(); // For market lookup
     let strategy_risk = risk_manager.clone(); // For position sizing
     let strategy_kelly_cfg = config.kelly.clone();    let strategy_edge_floor = if paper_trading_enabled { config.paper_trading.min_edge_net } else { 0.0 };    #[cfg(feature = "dashboard")]    let strategy_dashboard_memory = dashboard_memory.clone();    #[cfg(feature = "dashboard")]    let strategy_dashboard_broadcaster = dashboard_broadcaster.clone();    // ML broadcast counter for real-time dashboard updates

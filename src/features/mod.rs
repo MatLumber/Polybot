@@ -375,10 +375,21 @@ impl FeatureEngine {
     /// Compute all features from a series of candles
     pub fn compute(&mut self, candles: &[Candle]) -> Option<Features> {
         if candles.is_empty() {
+            tracing::debug!("FeatureEngine::compute: No candles provided");
             return None;
         }
 
         let last = candles.last()?;
+        let key = (last.asset, last.timeframe);
+        
+        tracing::debug!(
+            asset = ?last.asset,
+            timeframe = ?last.timeframe,
+            candle_count = candles.len(),
+            first_close = candles.first().map(|c| c.close),
+            last_close = last.close,
+            "FeatureEngine::compute starting"
+        );
         let key = (last.asset, last.timeframe);
         let mut features = Features {
             asset: last.asset,
@@ -507,6 +518,27 @@ impl FeatureEngine {
         // NEW: Orderbook/Microstructure Features
         // ============================================
         self.compute_orderbook_features(&key, &mut features);
+
+        // Log feature computation results for debugging
+        tracing::debug!(
+            asset = ?key.0,
+            timeframe = ?key.1,
+            rsi = ?features.rsi,
+            macd = ?features.macd,
+            has_rsi = features.rsi.is_some(),
+            has_macd = features.macd.is_some(),
+            has_bb = features.bb_position.is_some(),
+            has_atr = features.atr.is_some(),
+            has_vwap = features.vwap.is_some(),
+            "FeatureEngine::compute completed with {} indicators",
+            [
+                features.rsi.is_some(),
+                features.macd.is_some(),
+                features.bb_position.is_some(),
+                features.atr.is_some(),
+                features.vwap.is_some(),
+            ].iter().filter(|&&x| x).count()
+        );
 
         Some(features)
     }
@@ -765,10 +797,25 @@ impl FeatureEngine {
     /// Compute RSI using Wilder's smoothing method
     fn compute_rsi_wilders(&mut self, candles: &[Candle], key: (Asset, Timeframe)) -> Option<f64> {
         if candles.len() < self.rsi_period + 1 {
+            tracing::debug!(
+                asset = ?key.0,
+                timeframe = ?key.1,
+                candle_count = candles.len(),
+                required = self.rsi_period + 1,
+                "RSI: Not enough candles"
+            );
             return None;
         }
 
         let has_prev_state = self.rsi_state.contains_key(&key);
+        
+        tracing::debug!(
+            asset = ?key.0,
+            timeframe = ?key.1,
+            has_prev_state = has_prev_state,
+            candle_count = candles.len(),
+            "RSI: Computing with {} candles", candles.len()
+        );
 
         if !has_prev_state {
             // First computation: use simple average to seed
