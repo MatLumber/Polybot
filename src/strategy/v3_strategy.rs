@@ -159,8 +159,8 @@ impl V3Strategy {
         let walk_forward_config = WalkForwardConfig::default();
         let training_pipeline = TrainingPipeline::new(ml_config.clone(), walk_forward_config);
 
-        Self {
-            config: ml_config,
+        let mut strategy = Self {
+            config: ml_config.clone(),
             predictor,
             feature_engine: FeatureEngine::new(),
             filter_engine,
@@ -174,7 +174,20 @@ impl V3Strategy {
             correct_predictions,
             dataset,
             persistence,
+        };
+
+        // Auto-train models on startup if we have enough samples
+        if strategy.dataset.len() >= strategy.config.training.min_samples_for_training {
+            info!(
+                "🎓 Auto-training models on startup with {} samples...",
+                strategy.dataset.len()
+            );
+            if let Err(e) = strategy.train_initial_model(vec![]) {
+                warn!("⚠️ Auto-training failed: {}", e);
+            }
         }
+
+        strategy
     }
 
     /// Process features and generate ML-powered signal
