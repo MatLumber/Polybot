@@ -277,31 +277,45 @@ impl MarketDiscovery {
 
         // Search using different tags
         for tag in search_tags {
+            info!("Fetching markets with tag '{}' for {:?}", tag, asset);
             let markets = self.rest_client
                 .get_markets_page(&self.gamma_url, Some(tag), 100, 0)
                 .await?;
             
+            info!("Tag '{}' returned {} markets", tag, markets.len());
+            
             for market in markets {
+                debug!("Processing market: {} - {}", market.condition_id, market.question);
                 if let Some(discovered) = self.convert_market_response(market, asset) {
+                    info!("Converted market: {} (tf={:?}, end={})", 
+                        discovered.condition_id, discovered.timeframe, discovered.end_date);
                     all_markets.push(discovered);
+                } else {
+                    debug!("Failed to convert market response");
                 }
             }
         }
 
         // Also do a general search for intraday markets
+        info!("Fetching intraday markets for {:?}", asset);
         let intraday_markets = self.rest_client
             .get_markets_page(&self.gamma_url, Some("Intraday"), 200, 0)
             .await?;
+        
+        info!("Intraday tag returned {} markets", intraday_markets.len());
         
         for market in intraday_markets {
             if let Some(discovered) = self.convert_market_response(market, asset) {
                 // Check if already in list
                 if !all_markets.iter().any(|m| m.condition_id == discovered.condition_id) {
+                    info!("Converted intraday market: {} (tf={:?})", 
+                        discovered.condition_id, discovered.timeframe);
                     all_markets.push(discovered);
                 }
             }
         }
 
+        info!("Total candidate markets for {:?}: {}", asset, all_markets.len());
         Ok(all_markets)
     }
 
@@ -377,23 +391,30 @@ impl MarketDiscovery {
         timeframe: Timeframe,
         now: DateTime<Utc>,
     ) -> bool {
+        let condition_id = &market.condition_id;
+        
         // Must not be in expired cache
-        if self.expired_cache.contains_key(&market.condition_id) {
+        if self.expired_cache.contains_key(condition_id) {
+            debug!("Market {} rejected: in expired cache", condition_id);
             return false;
         }
 
         // Must be active and not closed
         if !market.active || market.closed {
+            debug!("Market {} rejected: active={} closed={}", condition_id, market.active, market.closed);
             return false;
         }
 
         // Must not have ended
         if now > market.end_date {
+            debug!("Market {} rejected: already ended (end={} now={})", condition_id, market.end_date, now);
             return false;
         }
 
         // Must have exactly 2 outcomes/tokens
         if market.token_ids.len() != 2 || market.outcomes.len() != 2 {
+            debug!("Market {} rejected: token_ids={} outcomes={}", 
+                condition_id, market.token_ids.len(), market.outcomes.len());
             return false;
         }
 
@@ -410,11 +431,15 @@ impl MarketDiscovery {
             _ => false,
         };
         if !asset_match {
+            debug!("Market {} rejected: asset mismatch (slug='{}' question='{}')", 
+                condition_id, market.slug, market.question);
             return false;
         }
 
         // Verify timeframe match
         if market.timeframe != timeframe {
+            debug!("Market {} rejected: timeframe mismatch (market={:?} requested={:?})", 
+                condition_id, market.timeframe, timeframe);
             return false;
         }
 
@@ -429,6 +454,8 @@ impl MarketDiscovery {
         });
         
         if !has_up || !has_down {
+            debug!("Market {} rejected: outcomes missing up={} down={} (outcomes={:?})", 
+                condition_id, has_up, has_down, market.outcomes);
             return false;
         }
 
@@ -440,9 +467,12 @@ impl MarketDiscovery {
         };
         
         if time_to_end > max_lookahead {
+            debug!("Market {} rejected: ends too far in future ({} > {:?})", 
+                condition_id, time_to_end, max_lookahead);
             return false;
         }
 
+        info!("Market {} VALIDATED for {:?} {:?}", condition_id, asset, timeframe);
         true
     }
 
