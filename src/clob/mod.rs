@@ -8,14 +8,18 @@
 //! - Orderbook feed for microstructure analysis
 //! - Taker fee calculation based on Polymarket fee curve
 
+pub mod dynamic_orderbook_feed;
 pub mod fees;
+pub mod market_discovery;
 pub mod orderbook_feed;
 pub mod rest;
 pub mod signing;
 pub mod types;
 pub mod websocket;
 
+pub use dynamic_orderbook_feed::*;
 pub use fees::*;
+pub use market_discovery::*;
 pub use orderbook_feed::*;
 pub use rest::*;
 pub use signing::*;
