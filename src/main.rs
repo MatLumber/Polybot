@@ -121,13 +121,12 @@ mod backtesting;mod clob;mod config;mod features;mod ml_engine;mod oracle;mod pa
             if let Some(signal) = generated_signal {                tracing::info!(                    asset = ?signal.asset,                    direction = ?signal.direction,                    confidence = %signal.confidence,                    reasons = ?signal.reasons,                    "🎯 Signal generated!"                );                // Broadcast ML prediction to dashboard in real-time
                 #[cfg(feature = "dashboard")]
                 {
-                    use crate::dashboard::types::MLPredictionPayload;
                     let prob_up = if signal.direction == Direction::Up { signal.confidence } else { 1.0 - signal.confidence };
                     let features_triggered: Vec<String> = signal.reasons.iter().take(5).cloned().collect();
                     strategy_dashboard_broadcaster.broadcast_ml_prediction(
-                        // Save signal to CSVformat!("{:?}", signal.asset),
-                        // Save signal to CSVformat!("{:?}", signal.timeframe),
-                        // Save signal to CSVformat!("{:?}", signal.direction),
+                        &format!("{:?}", signal.asset),
+                        &format!("{:?}", signal.timeframe),
+                        &format!("{:?}", signal.direction),
                         signal.confidence,
                         prob_up,
                         "Ensemble",
