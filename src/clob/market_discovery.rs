@@ -360,22 +360,20 @@ impl MarketDiscovery {
             // Try to infer from end_date relative to now
             let now = Utc::now();
             let duration = end_date.signed_duration_since(now);
-            debug!("Market {}: can't determine timeframe from text, trying duration: {} min", 
-                condition_id, duration.num_minutes());
             if duration.num_minutes() <= 20 && duration.num_minutes() > 0 {
                 Timeframe::Min15
             } else if duration.num_hours() <= 2 && duration.num_hours() > 0 {
                 Timeframe::Hour1
             } else {
-                debug!("Market {} rejected: can't determine timeframe (text='{}' duration={}min)", 
-                    condition_id, text, duration.num_minutes());
+                info!("Market {} rejected: can't determine timeframe (text='{}' duration={}min)", 
+                    condition_id, text.chars().take(80).collect::<String>(), duration.num_minutes());
                 return None; // Can't determine timeframe
             }
         };
         
         // Check token_ids
         if market.clob_token_ids.len() != 2 {
-            debug!("Market {} rejected: expected 2 token_ids, got {}", 
+            info!("Market {} rejected: expected 2 token_ids, got {}", 
                 condition_id, market.clob_token_ids.len());
             return None;
         }
