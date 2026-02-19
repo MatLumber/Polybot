@@ -14,6 +14,7 @@ pub mod features;
 pub mod filters;
 pub mod integration;
 pub mod models;
+pub mod persistence;
 pub mod predictor;
 pub mod training;
 
@@ -22,6 +23,7 @@ pub use dataset::{Dataset, LabeledSample, TradeSample};
 pub use features::{FeatureEngine, MLFeatureVector};
 pub use filters::{FilterConfig, FilterDecision, SmartFilterEngine};
 pub use models::{EnsembleWeights, MLPredictor, ModelPrediction};
+pub use persistence::{MLPersistenceManager, MLPersistenceState, ModelPerformance, TrainingRecord};
 pub use predictor::MLStrategyPredictor;
 pub use training::{TrainingPipeline, WalkForwardConfig};
 

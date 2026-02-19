@@ -60,13 +60,21 @@ pub struct DashboardMemory {
     pub live_daily_trades: RwLock<u32>,
     pub live_kill_switch: RwLock<bool>,
     pub live_positions: RwLock<Vec<PositionResponse>>,
-    /// Indicator calibration statistics
+    /// Indicator calibration statistics (V2 legacy - mantener para compatibilidad)
     pub indicator_stats: RwLock<Vec<crate::strategy::IndicatorStats>>,
-    /// Market-aware calibrator snapshot (market_key -> indicator stats list)
+    /// Market-aware calibrator snapshot (V2 legacy)
     pub market_learning_stats: RwLock<HashMap<String, Vec<crate::strategy::IndicatorStats>>>,
-    /// Probability calibration quality by market (ECE/Brier).
+    /// Probability calibration quality by market (V2 legacy).
     pub calibration_quality_stats:
         RwLock<HashMap<String, crate::strategy::CalibrationQualitySnapshot>>,
+    /// ML Engine state (V3)
+    pub ml_state: RwLock<Option<crate::ml_engine::persistence::MLPersistenceState>>,
+    /// ML Metrics (V3)
+    pub ml_metrics: RwLock<Option<crate::strategy::v3_strategy::MLStateResponse>>,
+    /// ML Training history (V3)
+    pub ml_training_history: RwLock<Vec<crate::ml_engine::persistence::TrainingRecord>>,
+    /// ML Dataset stats (V3)
+    pub ml_dataset_stats: RwLock<Option<crate::strategy::v3_strategy::DatasetStats>>,
     /// Signal execution diagnostics (accept/reject reasons).
     pub execution_diagnostics: RwLock<ExecutionDiagnosticsResponse>,
     /// Data feed health snapshot for /api/health.
@@ -98,6 +106,10 @@ impl Default for DashboardMemory {
             indicator_stats: RwLock::new(Vec::new()),
             market_learning_stats: RwLock::new(HashMap::new()),
             calibration_quality_stats: RwLock::new(HashMap::new()),
+            ml_state: RwLock::new(None),
+            ml_metrics: RwLock::new(None),
+            ml_training_history: RwLock::new(Vec::new()),
+            ml_dataset_stats: RwLock::new(None),
             execution_diagnostics: RwLock::new(ExecutionDiagnosticsResponse::default()),
             health: RwLock::new(HealthResponse {
                 stale_threshold_ms: 20_000,
@@ -904,78 +916,163 @@ fn build_market_learning_row(
 
     /// Get ML Engine state
     pub async fn get_ml_state(&self) -> serde_json::Value {
-        serde_json::json!({
-            "enabled": true,
-            "model_type": "Ensemble",
-            "version": "3.0",
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        })
+        let metrics = self.ml_metrics.read().await;
+        let state = self.ml_state.read().await;
+        
+        if let Some(ref metrics) = *metrics {
+            serde_json::json!({
+                "enabled": metrics.enabled,
+                "model_type": "Ensemble",
+                "version": "3.0",
+                "accuracy": metrics.model_accuracy,
+                "win_rate": metrics.win_rate,
+                "total_predictions": metrics.total_predictions,
+                "correct_predictions": metrics.correct_predictions,
+                "is_calibrated": metrics.is_calibrated,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })
+        } else {
+            serde_json::json!({
+                "enabled": false,
+                "model_type": "Ensemble",
+                "version": "3.0",
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })
+        }
     }
 
     /// Get ML metrics
     pub async fn get_ml_metrics(&self) -> serde_json::Value {
-        serde_json::json!({
-            "accuracy": 0.0,
-            "win_rate": 0.0,
-            "total_predictions": 0,
-            "correct_predictions": 0,
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        })
+        let metrics = self.ml_metrics.read().await;
+        
+        if let Some(ref m) = *metrics {
+            serde_json::json!({
+                "accuracy": m.model_accuracy,
+                "win_rate": m.win_rate,
+                "total_predictions": m.total_predictions,
+                "correct_predictions": m.correct_predictions,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })
+        } else {
+            serde_json::json!({
+                "accuracy": 0.0,
+                "win_rate": 0.0,
+                "total_predictions": 0,
+                "correct_predictions": 0,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })
+        }
     }
 
     /// Get ML models info
     pub async fn get_ml_models(&self) -> serde_json::Value {
-        serde_json::json!({
-            "models": [
-                {
-                    "name": "Random Forest",
-                    "weight": 0.4,
-                    "accuracy": 0.0,
+        let state = self.ml_state.read().await;
+        
+        if let Some(ref s) = *state {
+            let models: Vec<_> = s.model_performances.iter().map(|m| {
+                serde_json::json!({
+                    "name": m.model_name.clone(),
+                    "weight": s.ensemble_weights.random_forest, // Simplificado
+                    "accuracy": m.accuracy,
                     "status": "active"
-                },
-                {
-                    "name": "Gradient Boosting",
-                    "weight": 0.35,
-                    "accuracy": 0.0,
-                    "status": "active"
-                },
-                {
-                    "name": "Logistic Regression",
-                    "weight": 0.25,
-                    "accuracy": 0.0,
-                    "status": "active"
-                }
-            ],
-            "dynamic_weights_enabled": true,
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        })
+                })
+            }).collect();
+            
+            serde_json::json!({
+                "models": models,
+                "dynamic_weights_enabled": s.ensemble_weights.dynamic_weight_adjustment,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })
+        } else {
+            serde_json::json!({
+                "models": [
+                    {"name": "Random Forest", "weight": 0.4, "accuracy": 0.0, "status": "standby"},
+                    {"name": "Gradient Boosting", "weight": 0.35, "accuracy": 0.0, "status": "standby"},
+                    {"name": "Logistic Regression", "weight": 0.25, "accuracy": 0.0, "status": "standby"}
+                ],
+                "dynamic_weights_enabled": true,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })
+        }
     }
 
     /// Get ML feature importance
     pub async fn get_ml_features(&self) -> serde_json::Value {
-        serde_json::json!({
-            "total_features": 50,
-            "top_features": [
-                {"name": "rsi", "importance": 0.0},
-                {"name": "macd", "importance": 0.0},
-                {"name": "adx", "importance": 0.0},
-                {"name": "orderbook_imbalance", "importance": 0.0},
-                {"name": "volatility", "importance": 0.0}
-            ],
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        })
+        let state = self.ml_state.read().await;
+        
+        if let Some(ref s) = *state {
+            let mut features: Vec<_> = s.feature_importance.iter()
+                .map(|(name, importance)| {
+                    serde_json::json!({"name": name.clone(), "importance": importance})
+                })
+                .collect();
+            
+            // Ordenar por importancia
+            features.sort_by(|a, b| {
+                let a_imp: f64 = a["importance"].as_f64().unwrap_or(0.0);
+                let b_imp: f64 = b["importance"].as_f64().unwrap_or(0.0);
+                b_imp.partial_cmp(&a_imp).unwrap()
+            });
+            
+            // Tomar top 10
+            let top_features: Vec<_> = features.into_iter().take(10).collect();
+            
+            serde_json::json!({
+                "total_features": s.feature_importance.len(),
+                "top_features": top_features,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })
+        } else {
+            serde_json::json!({
+                "total_features": 50,
+                "top_features": [],
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            })
+        }
     }
 
     /// Get ML training status
     pub async fn get_ml_training_status(&self) -> serde_json::Value {
+        let history = self.ml_training_history.read().await;
+        let dataset_stats = self.ml_dataset_stats.read().await;
+        let state = self.ml_state.read().await;
+        
+        let last_training = history.last().map(|t| t.timestamp);
+        let samples_trained = dataset_stats.as_ref().map(|s| s.total_samples).unwrap_or(0);
+        
         serde_json::json!({
-            "status": "ready",
-            "last_training": null,
-            "samples_trained": 0,
+            "status": if history.is_empty() { "waiting_data" } else { "ready" },
+            "last_training": last_training,
+            "samples_trained": samples_trained,
             "retrain_interval": 50,
             "walk_forward_enabled": true,
+            "training_count": history.len(),
             "timestamp": chrono::Utc::now().to_rfc3339(),
         })
+    }
+
+    /// Update ML metrics from V3Strategy
+    pub async fn update_ml_metrics(&self, metrics: crate::strategy::v3_strategy::MLStateResponse) {
+        let mut m = self.ml_metrics.write().await;
+        *m = Some(metrics);
+    }
+
+    /// Update ML state from persistence
+    pub async fn update_ml_state(&self, state: crate::ml_engine::persistence::MLPersistenceState) {
+        let mut s = self.ml_state.write().await;
+        *s = Some(state);
+    }
+
+    /// Update ML training history
+    pub async fn update_ml_training_history(&self, history: Vec<crate::ml_engine::persistence::TrainingRecord>) {
+        let mut h = self.ml_training_history.write().await;
+        *h = history;
+    }
+
+    /// Update ML dataset stats
+    pub async fn update_ml_dataset_stats(&self, stats: crate::strategy::v3_strategy::DatasetStats) {
+        let mut s = self.ml_dataset_stats.write().await;
+        *s = Some(stats);
     }
 }
 

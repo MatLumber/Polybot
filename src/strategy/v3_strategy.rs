@@ -7,13 +7,15 @@ use crate::ml_engine::dataset::{Dataset, TradeSample};
 use crate::ml_engine::features::{FeatureEngine, MLFeatureVector, MarketContext};
 use crate::ml_engine::filters::{FilterConfig, FilterContext, FilterDecision, SmartFilterEngine};
 use crate::ml_engine::models::{EnsembleWeights, MLPredictor, ModelPrediction};
+use crate::ml_engine::persistence::{MLPersistenceManager, TrainingRecord};
 use crate::ml_engine::training::{TrainingPipeline, WalkForwardConfig};
 use crate::ml_engine::{MLEngineConfig, MLEngineState, Prediction};
 use crate::strategy::calibrator::{IndicatorCalibrator, IndicatorStats, TradeResult};
 use crate::strategy::GeneratedSignal;
 use crate::types::{Asset, Direction, Timeframe};
 use std::collections::HashMap;
-use tracing::{info, warn};
+use std::path::Path;
+use tracing::{error, info, warn};
 
 /// ML-Powered Trading Strategy (V3)
 pub struct V3Strategy {
@@ -41,25 +43,100 @@ pub struct V3Strategy {
     total_predictions: usize,
     /// Correct predictions
     correct_predictions: usize,
+    /// Dataset for training
+    dataset: Dataset,
+    /// Persistence manager
+    persistence: MLPersistenceManager,
 }
 
 impl V3Strategy {
     pub fn new(ml_config: MLEngineConfig, _base_config: crate::strategy::StrategyConfig) -> Self {
         let calibrator = IndicatorCalibrator::with_min_samples(30);
 
-        // Create ensemble weights from config
-        let weights = EnsembleWeights {
-            random_forest: ml_config.ensemble.random_forest_weight,
-            gradient_boosting: ml_config.ensemble.gradient_boosting_weight,
-            logistic_regression: ml_config.ensemble.logistic_regression_weight,
-            dynamic_weight_adjustment: ml_config.ensemble.dynamic_weight_adjustment,
-        };
+        // Initialize persistence manager
+        let persistence = MLPersistenceManager::new("./data");
 
-        // Initialize predictor (will be trained when data is available)
-        let predictor = if ml_config.enabled {
-            Some(MLPredictor::new(weights))
-        } else {
-            None
+        // Try to load previous state
+        let (
+            mut predictor,
+            mut dataset,
+            mut state,
+            mut model_accuracy,
+            mut total_predictions,
+            mut correct_predictions,
+        ) = match persistence.load_ml_state() {
+            Ok(Some((persisted, loaded_dataset))) => {
+                info!("🧠 Loading persisted ML state...");
+
+                // Restore ensemble weights
+                let weights = persisted.ensemble_weights;
+                let pred = if ml_config.enabled {
+                    Some(MLPredictor::new(weights))
+                } else {
+                    None
+                };
+
+                let mut ml_state = MLEngineState::new(ml_config.clone());
+                ml_state.total_predictions = persisted.total_predictions;
+                ml_state.correct_predictions = persisted.correct_predictions;
+                ml_state.last_retraining = persisted.last_retraining;
+
+                let accuracy = if persisted.total_predictions > 0 {
+                    persisted.correct_predictions as f64 / persisted.total_predictions as f64
+                } else {
+                    0.5
+                };
+
+                info!(
+                    "✅ ML state restored: {} predictions, {:.1}% accuracy, {} samples in dataset",
+                    persisted.total_predictions,
+                    accuracy * 100.0,
+                    loaded_dataset.len()
+                );
+
+                (
+                    pred,
+                    loaded_dataset,
+                    ml_state,
+                    accuracy,
+                    persisted.total_predictions,
+                    persisted.correct_predictions,
+                )
+            }
+            Ok(None) => {
+                info!("🆕 No previous ML state found, starting fresh");
+                let weights = EnsembleWeights::from_config(&ml_config.ensemble);
+                let pred = if ml_config.enabled {
+                    Some(MLPredictor::new(weights))
+                } else {
+                    None
+                };
+                (
+                    pred,
+                    Dataset::new(),
+                    MLEngineState::new(ml_config.clone()),
+                    0.5,
+                    0,
+                    0,
+                )
+            }
+            Err(e) => {
+                warn!("⚠️ Failed to load ML state: {}, starting fresh", e);
+                let weights = EnsembleWeights::from_config(&ml_config.ensemble);
+                let pred = if ml_config.enabled {
+                    Some(MLPredictor::new(weights))
+                } else {
+                    None
+                };
+                (
+                    pred,
+                    Dataset::new(),
+                    MLEngineState::new(ml_config.clone()),
+                    0.5,
+                    0,
+                    0,
+                )
+            }
         };
 
         // Initialize filter engine
@@ -82,8 +159,6 @@ impl V3Strategy {
         let walk_forward_config = WalkForwardConfig::default();
         let training_pipeline = TrainingPipeline::new(ml_config.clone(), walk_forward_config);
 
-        let state = MLEngineState::new(ml_config.clone());
-
         Self {
             config: ml_config,
             predictor,
@@ -94,9 +169,11 @@ impl V3Strategy {
             state,
             feature_history: HashMap::new(),
             last_filter_reason: None,
-            model_accuracy: 0.5,
-            total_predictions: 0,
-            correct_predictions: 0,
+            model_accuracy,
+            total_predictions,
+            correct_predictions,
+            dataset,
+            persistence,
         }
     }
 
@@ -314,35 +391,47 @@ impl V3Strategy {
         historical_trades: Vec<TradeSample>,
     ) -> anyhow::Result<()> {
         info!(
-            "🎓 V3 training with {} historical trades...",
+            "🎓 V3 training with {} new historical trades...",
             historical_trades.len()
         );
 
-        if historical_trades.len() < self.config.training.min_samples_for_training {
+        let current_size = self.dataset.len();
+        info!("📊 Current dataset size: {} samples", current_size);
+
+        // Agregar nuevos trades al dataset EXISTENTE (acumulativo)
+        for trade in historical_trades {
+            self.dataset.add_trade(trade);
+        }
+
+        info!(
+            "📈 Dataset updated: {} → {} samples (added {})",
+            current_size,
+            self.dataset.len(),
+            self.dataset.len() - current_size
+        );
+
+        // Verificar si tenemos suficientes muestras totales
+        if self.dataset.len() < self.config.training.min_samples_for_training {
             warn!(
-                "Not enough samples for training (need {}, have {})",
+                "Not enough total samples for training (need {}, have {})",
                 self.config.training.min_samples_for_training,
-                historical_trades.len()
+                self.dataset.len()
             );
             return Ok(());
         }
 
-        // Create dataset
-        let mut dataset = Dataset::new();
-        for trade in historical_trades {
-            dataset.add_trade(trade);
-        }
+        // Crear copia balanceada para entrenamiento
+        let mut training_dataset = self.dataset.clone();
+        training_dataset.balance_classes();
+        info!("Dataset balanced: {} samples", training_dataset.len());
 
-        // Balance classes
-        dataset.balance_classes();
-        info!("Dataset balanced: {} samples", dataset.len());
-
-        // Train predictor
+        // Train predictor con el dataset acumulativo
         if let Some(ref mut predictor) = self.predictor {
-            predictor.train(&dataset)?;
+            predictor.train(&training_dataset)?;
             self.model_accuracy = predictor.ensemble_accuracy();
             info!(
-                "✅ V3 models trained! Accuracy: {:.2}%",
+                "✅ V3 models trained with {} total samples! Accuracy: {:.2}%",
+                training_dataset.len(),
                 self.model_accuracy * 100.0
             );
         }
@@ -350,6 +439,28 @@ impl V3Strategy {
         // Run walk-forward validation
         self.run_walk_forward()?;
 
+        // Save trained state
+        if let Some(ref predictor) = self.predictor {
+            if let Err(e) = self
+                .persistence
+                .save_ml_state(predictor, &self.state, &self.dataset)
+            {
+                warn!("Failed to save ML state after training: {}", e);
+            }
+
+            // Record training in history
+            let record = TrainingRecord {
+                timestamp: chrono::Utc::now().timestamp_millis(),
+                samples_count: self.dataset.len(),
+                accuracy: self.model_accuracy,
+                ensemble_weights: predictor.weights.clone(),
+            };
+            if let Err(e) = self.persistence.save_training_record(record) {
+                warn!("Failed to save training record: {}", e);
+            }
+        }
+
+        info!("💾 ML state saved after training");
         Ok(())
     }
 
@@ -398,6 +509,18 @@ impl V3Strategy {
             // Adjust weights periodically
             if self.total_predictions % 10 == 0 {
                 predictor.adjust_weights_dynamically();
+            }
+        }
+
+        // Auto-save ML state every 5 trades
+        if let Some(ref predictor) = self.predictor {
+            if self.total_predictions % 5 == 0 {
+                if let Err(e) =
+                    self.persistence
+                        .save_ml_state(predictor, &self.state, &self.dataset)
+                {
+                    warn!("Failed to auto-save ML state: {}", e);
+                }
             }
         }
 
@@ -463,6 +586,96 @@ impl V3Strategy {
             }),
         }
     }
+
+    /// Save ML state manually
+    pub fn save_state(&mut self) -> anyhow::Result<()> {
+        if let Some(ref predictor) = self.predictor {
+            self.persistence
+                .save_ml_state(predictor, &self.state, &self.dataset)?;
+            info!("💾 ML state saved manually");
+        }
+        Ok(())
+    }
+
+    /// Create a backup of current ML state
+    pub fn backup(&self) -> anyhow::Result<String> {
+        let backup_path = self.persistence.backup()?;
+        info!("💾 ML state backed up to: {}", backup_path);
+        Ok(backup_path)
+    }
+
+    /// List available backups
+    pub fn list_backups(&self) -> anyhow::Result<Vec<String>> {
+        self.persistence.list_backups()
+    }
+
+    /// Restore from a backup
+    pub fn restore_backup(&mut self, backup_name: &str) -> anyhow::Result<()> {
+        self.persistence.restore_backup(backup_name)?;
+
+        // Reload state after restore
+        if let Some((persisted, dataset)) = self.persistence.load_ml_state()? {
+            self.total_predictions = persisted.total_predictions;
+            self.correct_predictions = persisted.correct_predictions;
+            self.model_accuracy = if persisted.total_predictions > 0 {
+                persisted.correct_predictions as f64 / persisted.total_predictions as f64
+            } else {
+                0.5
+            };
+            self.dataset = dataset;
+            info!("🔄 ML state restored from backup: {}", backup_name);
+        }
+
+        Ok(())
+    }
+
+    /// Get training history
+    pub fn get_training_history(&self) -> Vec<TrainingRecord> {
+        self.persistence.load_training_history().unwrap_or_default()
+    }
+
+    /// Agregar un trade al dataset de entrenamiento (acumulativo)
+    pub fn add_trade_to_dataset(&mut self, trade: TradeSample) {
+        let previous_size = self.dataset.len();
+        self.dataset.add_trade(trade);
+
+        // Guardar dataset cada 10 trades nuevos
+        if self.dataset.len() % 10 == 0 {
+            if let Err(e) = self
+                .dataset
+                .save(&format!("{}/ml_engine/dataset.json", "./data"))
+            {
+                warn!("Failed to auto-save dataset: {}", e);
+            } else {
+                info!("💾 Dataset auto-saved: {} samples", self.dataset.len());
+            }
+        }
+
+        info!(
+            "📊 Trade added to dataset: {} → {} samples",
+            previous_size,
+            self.dataset.len()
+        );
+    }
+
+    /// Obtener estadísticas del dataset
+    pub fn get_dataset_stats(&self) -> DatasetStats {
+        DatasetStats {
+            total_samples: self.dataset.len(),
+            wins: self
+                .dataset
+                .samples
+                .iter()
+                .filter(|s| s.target > 0.5)
+                .count(),
+            losses: self
+                .dataset
+                .samples
+                .iter()
+                .filter(|s| s.target <= 0.5)
+                .count(),
+        }
+    }
 }
 
 /// ML State for dashboard
@@ -476,4 +689,12 @@ pub struct MLStateResponse {
     pub is_calibrated: bool,
     pub last_filter_reason: Option<String>,
     pub ensemble_weights: Option<Vec<f64>>,
+}
+
+/// Dataset statistics
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DatasetStats {
+    pub total_samples: usize,
+    pub wins: usize,
+    pub losses: usize,
 }

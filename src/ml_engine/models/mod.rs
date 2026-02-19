@@ -30,6 +30,17 @@ pub struct EnsembleWeights {
     pub dynamic_weight_adjustment: bool,
 }
 
+impl Default for EnsembleWeights {
+    fn default() -> Self {
+        Self {
+            random_forest: 0.4,
+            gradient_boosting: 0.35,
+            logistic_regression: 0.25,
+            dynamic_weight_adjustment: true,
+        }
+    }
+}
+
 impl EnsembleWeights {
     pub fn from_config(config: &crate::ml_engine::EnsembleConfig) -> Self {
         Self {
@@ -51,7 +62,7 @@ impl EnsembleWeights {
 }
 
 /// Trait base para todos los modelos
-pub trait MLModel {
+pub trait MLModel: Send + Sync {
     fn train(&mut self, x: &DenseMatrix<f64>, y: &Vec<i64>) -> anyhow::Result<()>;
     fn predict(&self, features: &MLFeatureVector) -> f64;
     fn name(&self) -> &str;

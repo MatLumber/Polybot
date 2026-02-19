@@ -20,7 +20,10 @@ pub use calibrator::{
 };
 
 pub mod v3_strategy;
-pub use v3_strategy::V3Strategy;
+pub use v3_strategy::{DatasetStats, MLStateResponse, V3Strategy};
+
+pub mod strategy_trait;
+pub use strategy_trait::Strategy;
 
 use anyhow::Result;
 use std::collections::HashMap;
