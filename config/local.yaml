@@ -40,12 +40,37 @@ ml_engine:
   logistic_regression_weight: 0.25
   dynamic_weight_adjustment: true
   
-  # Smart filters
-  max_spread_bps_15m: 100
-  max_spread_bps_1h: 150
-  min_depth_usdc: 5000
-  max_volatility_5m: 0.02
+  # Smart filters - PERMISIVOS para paper trading
+  max_spread_bps_15m: 300
+  max_spread_bps_1h: 400
+  min_depth_usdc: 500
+  max_volatility_5m: 0.08
   optimal_hours_only: false
+
+# ============================================================================
+# ORACLE - Fuentes de precios
+# ============================================================================
+# IMPORTANTE: Configuración para fallback cuando RTDS falla
+oracle:
+  # RTDS (Polymarket) - Fuente principal para precios nativos
+  rtds_enabled: true
+  
+  # Binance - Fallback cuando RTDS está lento o caído
+  binance_enabled: true
+  
+  # Otras fuentes (opcional)
+  bybit_enabled: false
+  coinbase_enabled: false
+  
+  # Configuración de staleness - MÁS PERMISIVO para paper trading
+  # Si el precio tiene >60 segundos, se considera stale
+  staleness_ms: 60000
+  
+  # Mínimo de fuentes requeridas (1 = permitir trading con 1 fuente)
+  min_sources: 1
+  
+  # Reconectar después de 5 segundos si hay desconexión
+  reconnect_delay_ms: 5000
 
 # ============================================================================
 # STRATEGY
