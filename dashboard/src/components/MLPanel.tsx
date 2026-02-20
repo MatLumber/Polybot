@@ -105,6 +105,12 @@ export function MLPanel({ mlState, mlMetrics, mlPrediction }: MLPanelProps) {
           <span className="ml-metric-label">Correct</span>
           <span className="ml-metric-value text-positive">{mlMetrics.correctPredictions}</span>
         </div>
+
+        <div className="ml-metric-card">
+          <TrendingUp size={14} style={{ transform: 'rotate(180deg)' }} />
+          <span className="ml-metric-label">Loss</span>
+          <span className="ml-metric-value text-negative">{mlMetrics.incorrectPredictions}</span>
+        </div>
       </div>
 
       {/* Ensemble Weights */}

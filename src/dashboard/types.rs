@@ -320,8 +320,10 @@ pub struct MLPredictionPayload {
 pub struct MLMetricsPayload {
     pub accuracy: f64,
     pub win_rate: f64,
+    pub loss_rate: f64,
     pub total_predictions: usize,
     pub correct_predictions: usize,
+    pub incorrect_predictions: usize,
     pub ensemble_weights: Vec<ModelWeightInfo>,
     pub timestamp: i64,
 }

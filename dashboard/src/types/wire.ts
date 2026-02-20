@@ -177,8 +177,10 @@ export interface MLStateWire {
 export interface MLMetricsWire {
   accuracy: number
   win_rate: number
+  loss_rate: number
   total_predictions: number
   correct_predictions: number
+  incorrect_predictions: number
   ensemble_weights: MLModelInfoWire[]
   timestamp: number
 }

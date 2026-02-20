@@ -79,6 +79,7 @@ impl V3Strategy {
                 let mut ml_state = MLEngineState::new(ml_config.clone());
                 ml_state.total_predictions = persisted.total_predictions;
                 ml_state.correct_predictions = persisted.correct_predictions;
+                ml_state.incorrect_predictions = persisted.incorrect_predictions;
                 ml_state.last_retraining = persisted.last_retraining;
 
                 let accuracy = if persisted.total_predictions > 0 {
@@ -753,13 +754,23 @@ impl V3Strategy {
             ])
         };
 
+        let incorrect = self.state.incorrect_predictions;
+        let correct = self.state.correct_predictions;
+        let total = self.state.total_predictions;
+        
         MLStateResponse {
             enabled: self.config.enabled,
             model_accuracy: self.model_accuracy,
-            total_predictions: self.total_predictions,
-            correct_predictions: self.correct_predictions,
-            win_rate: if self.total_predictions > 0 {
-                self.correct_predictions as f64 / self.total_predictions as f64
+            total_predictions: total,
+            correct_predictions: correct,
+            incorrect_predictions: incorrect,
+            win_rate: if total > 0 {
+                correct as f64 / total as f64
+            } else {
+                0.0
+            },
+            loss_rate: if total > 0 {
+                incorrect as f64 / total as f64
             } else {
                 0.0
             },
@@ -868,7 +879,9 @@ pub struct MLStateResponse {
     pub model_accuracy: f64,
     pub total_predictions: usize,
     pub correct_predictions: usize,
+    pub incorrect_predictions: usize,
     pub win_rate: f64,
+    pub loss_rate: f64,
     pub is_calibrated: bool,
     pub last_filter_reason: Option<String>,
     pub ensemble_weights: Option<Vec<f64>>,

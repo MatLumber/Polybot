@@ -18,6 +18,7 @@ pub struct MLPersistenceState {
     pub ensemble_weights: EnsembleWeights,
     pub total_predictions: usize,
     pub correct_predictions: usize,
+    pub incorrect_predictions: usize,
     pub last_retraining: Option<i64>,
     pub feature_importance: HashMap<String, f64>,
     pub model_performances: Vec<ModelPerformance>,
@@ -49,6 +50,7 @@ impl Default for MLPersistenceState {
             ensemble_weights: EnsembleWeights::default(),
             total_predictions: 0,
             correct_predictions: 0,
+            incorrect_predictions: 0,
             last_retraining: None,
             feature_importance: HashMap::new(),
             model_performances: Vec::new(),
@@ -66,6 +68,7 @@ impl MLPersistenceState {
             ensemble_weights: EnsembleWeights::default(),
             total_predictions: 0,
             correct_predictions: 0,
+            incorrect_predictions: 0,
             last_retraining: None,
             feature_importance: HashMap::new(),
             model_performances: Vec::new(),
@@ -140,6 +143,7 @@ impl MLPersistenceManager {
             ensemble_weights: predictor.weights.clone(),
             total_predictions: state.total_predictions,
             correct_predictions: state.correct_predictions,
+            incorrect_predictions: state.incorrect_predictions,
             last_retraining: state.last_retraining,
             feature_importance: predictor.feature_importance.clone(),
             model_performances: predictor
@@ -195,9 +199,12 @@ impl MLPersistenceManager {
             Dataset::new()
         };
 
+        let loss_count = state.incorrect_predictions;
         info!(
-            "🧠 ML state restored: {} predictions, {:.1}% accuracy",
+            "🧠 ML state restored: {} predictions, {} correct, {} incorrect, {:.1}% accuracy",
             state.total_predictions,
+            state.correct_predictions,
+            loss_count,
             if state.total_predictions > 0 {
                 (state.correct_predictions as f64 / state.total_predictions as f64) * 100.0
             } else {

@@ -185,8 +185,10 @@ export interface MLState {
 export interface MLMetrics {
   accuracy: number
   winRate: number
+  lossRate: number
   totalPredictions: number
   correctPredictions: number
+  incorrectPredictions: number
   ensembleWeights: MLModelInfo[]
   timestamp: number
 }

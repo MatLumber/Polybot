@@ -324,8 +324,10 @@ export function mapMLMetrics(metrics: MLMetricsWire): MLMetrics {
   return {
     accuracy: metrics.accuracy,
     winRate: metrics.win_rate,
+    lossRate: metrics.loss_rate,
     totalPredictions: metrics.total_predictions,
     correctPredictions: metrics.correct_predictions,
+    incorrectPredictions: metrics.incorrect_predictions,
     ensembleWeights: (metrics.ensemble_weights || []).map(mapMLModelInfo),
     timestamp: metrics.timestamp,
   }

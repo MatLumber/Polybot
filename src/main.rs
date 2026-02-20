@@ -971,20 +971,17 @@ async fn main() -> Result<()> {
                         features_triggered,
                     );
 
-                    // Broadcast ML metrics every 5 predictions
-                    let count =
-                        ml_broadcast_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    if count % 5 == 0 {
-                        let metrics = strategy_inner.lock().await.get_ml_state();
-
-                        strategy_dashboard_broadcaster.broadcast_ml_metrics(
-                            metrics.model_accuracy,
-                            metrics.win_rate,
-                            metrics.total_predictions,
-                            metrics.correct_predictions,
-                            metrics.model_info,
-                        );
-                    }
+                    // Broadcast ML metrics en tiempo real (cada predicción)
+                    let metrics = strategy_inner.lock().await.get_ml_state();
+                    strategy_dashboard_broadcaster.broadcast_ml_metrics(
+                        metrics.model_accuracy,
+                        metrics.win_rate,
+                        metrics.loss_rate,
+                        metrics.total_predictions,
+                        metrics.correct_predictions,
+                        metrics.incorrect_predictions,
+                        metrics.model_info,
+                    );
                 }
 
                 // Save signal to CSV

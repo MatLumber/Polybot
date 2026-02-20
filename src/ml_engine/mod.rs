@@ -140,6 +140,7 @@ pub struct MLEngineState {
     pub filter_stats: HashMap<String, FilterStats>,
     pub total_predictions: usize,
     pub correct_predictions: usize,
+    pub incorrect_predictions: usize,
     pub last_retraining: Option<i64>,
 }
 
@@ -162,6 +163,7 @@ impl MLEngineState {
             filter_stats: HashMap::new(),
             total_predictions: 0,
             correct_predictions: 0,
+            incorrect_predictions: 0,
             last_retraining: None,
         }
     }
@@ -171,6 +173,25 @@ impl MLEngineState {
             0.5
         } else {
             self.correct_predictions as f64 / self.total_predictions as f64
+        }
+    }
+
+    /// Loss rate = incorrect / total
+    pub fn loss_rate(&self) -> f64 {
+        if self.total_predictions == 0 {
+            0.0
+        } else {
+            self.incorrect_predictions as f64 / self.total_predictions as f64
+        }
+    }
+
+    /// Win rate = correct / (correct + incorrect)
+    pub fn win_rate(&self) -> f64 {
+        let decided = self.correct_predictions + self.incorrect_predictions;
+        if decided == 0 {
+            0.0
+        } else {
+            self.correct_predictions as f64 / decided as f64
         }
     }
 
@@ -184,10 +205,14 @@ impl MLEngineState {
         }
     }
 
-    /// Add a prediction for tracking
-    pub fn add_prediction(&mut self, prediction: Prediction) {
+    /// Add a prediction result (correct or incorrect)
+    pub fn add_prediction_result(&mut self, was_correct: bool) {
         self.total_predictions += 1;
-        // In a full implementation, this would store predictions for later validation
+        if was_correct {
+            self.correct_predictions += 1;
+        } else {
+            self.incorrect_predictions += 1;
+        }
     }
 }
 

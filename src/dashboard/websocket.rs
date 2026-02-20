@@ -123,8 +123,10 @@ impl WebSocketBroadcaster {
         &self,
         accuracy: f64,
         win_rate: f64,
+        loss_rate: f64,
         total_predictions: usize,
         correct_predictions: usize,
+        incorrect_predictions: usize,
         weights: Vec<(String, f64, f64)>,
     ) {
         let ensemble_weights = weights
@@ -140,8 +142,10 @@ impl WebSocketBroadcaster {
             super::types::MLMetricsPayload {
                 accuracy,
                 win_rate,
+                loss_rate,
                 total_predictions,
                 correct_predictions,
+                incorrect_predictions,
                 ensemble_weights,
                 timestamp: chrono::Utc::now().timestamp_millis(),
             },

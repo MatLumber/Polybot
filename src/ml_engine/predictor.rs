@@ -199,10 +199,7 @@ impl MLStrategyPredictor {
             .add_observation(trade.entry_features.calibrator_confidence, trade.is_win);
 
         // Actualizar estadísticas
-        self.state.total_predictions += 1;
-        if trade.is_win {
-            self.state.correct_predictions += 1;
-        }
+        self.state.add_prediction_result(trade.is_win);
 
         // Actualizar predictor
         if let Some(ref mut predictor) = self.ml_predictor {
