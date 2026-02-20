@@ -292,7 +292,7 @@ impl AppConfig {
             // Load default config
             .set_default("bot.tag", env!("CARGO_PKG_VERSION"))?
             .set_default("bot.dry_run", true)?
-            .set_default("bot.assets", vec!["BTC", "ETH"])?
+            .set_default("bot.assets", vec!["BTC"])?
             .set_default("bot.timeframes", vec!["15m", "1h"])?
             // Oracle defaults
             .set_default("oracle.binance_enabled", false)?
@@ -391,7 +391,7 @@ impl AppConfig {
             .set_default("ml_engine.dynamic_weight_adjustment", true)?
             .set_default("ml_engine.max_spread_bps_15m", 100.0)?
             .set_default("ml_engine.max_spread_bps_1h", 150.0)?
-            .set_default("ml_engine.min_depth_usdc", 2000.0)?
+            .set_default("ml_engine.min_depth_usdc", 0.0)?
             .set_default("ml_engine.max_volatility_5m", 0.02)?
             .set_default("ml_engine.optimal_hours_only", false)?
             // Load config file if exists
