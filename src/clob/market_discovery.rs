@@ -304,10 +304,12 @@ impl MarketDiscovery {
                 };
                 
                 if !is_updown || !asset_match {
-                    debug!("Skipping {}: not up/down or wrong asset (slug='{}')", 
-                        condition_id, slug);
+                    info!("⏭️ Skipping {}: updown={} asset_match={} (slug='{}')", 
+                        condition_id, is_updown, asset_match, slug);
                     continue;
                 }
+                
+                info!("🎯 Processing: {} (slug='{}')", condition_id, slug);
                 
                 if let Some(discovered) = self.convert_market_response(market, asset) {
                     info!("✅ Converted market: {} (tf={:?}, end={})", 
