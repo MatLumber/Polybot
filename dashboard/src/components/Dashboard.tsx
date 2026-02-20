@@ -19,7 +19,7 @@ import { ChartErrorBoundary } from './charts/ChartErrorBoundary'
 import { PriceStreamChart } from './charts/PriceStreamChart'
 import { useDashboardStream } from '../hooks/useDashboardStream'
 import { MLPanel } from './MLPanel'
-import type { AssetPrice, AssetStats, MarketLearningProgress, Position, Trade } from '../types/ui'
+import type { AssetPrice, AssetStats, Position, Trade } from '../types/ui'
 
 const RECENT_TRADES_WINDOW_MS = 24 * 60 * 60 * 1000
 
@@ -224,59 +224,6 @@ function TradeTable({ trades }: { trades: Trade[] }) {
   )
 }
 
-function learningStatusLabel(status: MarketLearningProgress['status']): string {
-  if (status === 'ready') return 'Listo'
-  if (status === 'warming_up') return 'Calentando'
-  return 'Sin datos'
-}
-
-function learningStatusClass(status: MarketLearningProgress['status']): string {
-  if (status === 'ready') return 'learning-ready'
-  if (status === 'warming_up') return 'learning-warming'
-  return 'learning-idle'
-}
-
-function learningSemaphoreClass(status: MarketLearningProgress['status']): string {
-  if (status === 'ready') return 'learning-semaphore-green'
-  if (status === 'warming_up') return 'learning-semaphore-yellow'
-  return 'learning-semaphore-red'
-}
-
-function formatLearningTimeframe(timeframe: string): string {
-  if (timeframe === '15M') return '15 minutos'
-  if (timeframe === '1H') return '1 hora'
-  return timeframe
-}
-
-function toMsFromSeconds(ts: number): number {
-  return ts > 0 && ts < 10_000_000_000 ? ts * 1000 : ts
-}
-
-function sortLearningMarkets(items: MarketLearningProgress[]): MarketLearningProgress[] {
-  const rank: Record<string, number> = {
-    BTC_15M: 1,
-    BTC_1H: 2,
-    ETH_15M: 3,
-    ETH_1H: 4,
-  }
-  return [...items].sort((a, b) => (rank[a.marketKey] ?? 99) - (rank[b.marketKey] ?? 99))
-}
-
-function trainingHint(item: MarketLearningProgress): string {
-  if (item.status === 'ready') {
-    if (item.avgWinRatePct >= 55) return 'Modelo listo y estable para este mercado.'
-    if (item.avgWinRatePct >= 50) return 'Modelo listo; sigue ajustando en tiempo real.'
-    return 'Modelo listo, pero con precisión baja por ahora.'
-  }
-
-  if (item.sampleCount === 0) {
-    return 'Esperando los primeros cierres para empezar a calibrar.'
-  }
-
-  const remaining = Math.max(0, item.targetSamples - item.sampleCount)
-  return `Faltan ${remaining} cierres para desbloquear métricas avanzadas.`
-}
-
 function formatRejectionReason(reason: string): string {
   return reason.replaceAll('_', ' ').replaceAll('-', ' ')
 }
@@ -392,103 +339,6 @@ function RejectionDiagnosticsPanel({
   )
 }
 
-function LearningPanel({ items }: { items: MarketLearningProgress[] }) {
-  if (items.length === 0) {
-    return <div className="empty-state">Waiting for training data...</div>
-  }
-
-  const sorted = sortLearningMarkets(items)
-  const readyCount = sorted.filter((item) => item.status === 'ready').length
-  const totalSamples = sorted.reduce(
-    (acc, item) => acc + Math.min(item.sampleCount, item.targetSamples),
-    0,
-  )
-  const totalTargets = sorted.reduce((acc, item) => acc + item.targetSamples, 0)
-  const globalProgressPct = totalTargets > 0 ? (totalSamples / totalTargets) * 100 : 0
-
-  return (
-    <div className="learning-list">
-      <div className="learning-global">
-        <div className="learning-global-meta">
-          <span>Global Training Progress</span>
-          <span>{readyCount}/{sorted.length} markets ready</span>
-        </div>
-        <div className="learning-bar learning-bar-global">
-          <span className="learning-bar-fill" style={{ width: `${globalProgressPct}%` }} />
-        </div>
-      </div>
-
-      <div className="learning-grid">
-        {sorted.map((item) => (
-          <div className="learning-row" key={item.marketKey}>
-            <div className="learning-headline">
-              <div className="learning-title-wrap">
-                <span
-                  className={`learning-semaphore ${learningSemaphoreClass(item.status)}`}
-                  title={`Status: ${learningStatusLabel(item.status)}`}
-                />
-                <strong>{item.asset}</strong>
-                <span>{formatLearningTimeframe(item.timeframe)}</span>
-              </div>
-              <span className={`learning-status ${learningStatusClass(item.status)}`}>
-                {learningStatusLabel(item.status)}
-              </span>
-            </div>
-
-            {item.status !== 'ready' ? (
-              <>
-                <div className="learning-meta">
-                  <span>{item.sampleCount}/{item.targetSamples} trades</span>
-                  <span>{item.progressPct.toFixed(0)}%</span>
-                </div>
-                <div className="learning-bar">
-                  <span className="learning-bar-fill" style={{ width: `${item.progressPct}%` }} />
-                </div>
-                <p className="learning-hint">{trainingHint(item)}</p>
-                <div className="learning-foot">
-                  <span>{item.indicatorsActive} indicators</span>
-                  <span>
-                    Updated{' '}
-                    {item.lastUpdatedTs > 0
-                      ? new Date(toMsFromSeconds(item.lastUpdatedTs)).toLocaleTimeString()
-                      : '--:--:--'}
-                  </span>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="learning-ready-grid">
-                  <div className="learning-ready-kpi">
-                    <span>Avg. Accuracy</span>
-                    <strong>{item.avgWinRatePct.toFixed(1)}%</strong>
-                  </div>
-                  <div className="learning-ready-kpi">
-                    <span>Indicators</span>
-                    <strong>{item.indicatorsActive}</strong>
-                  </div>
-                  <div className="learning-ready-kpi">
-                    <span>Trades</span>
-                    <strong>{item.sampleCount}</strong>
-                  </div>
-                </div>
-                <p className="learning-hint">{trainingHint(item)}</p>
-                <div className="learning-foot">
-                  <span>
-                    Updated{' '}
-                    {item.lastUpdatedTs > 0
-                      ? new Date(toMsFromSeconds(item.lastUpdatedTs)).toLocaleTimeString()
-                      : '--:--:--'}
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 export function Dashboard() {
   const stream = useDashboardStream()
   const [mode, setMode] = useState<Mode>('paper')
@@ -550,7 +400,6 @@ export function Dashboard() {
   const stats = dashboard.paper.stats
   const priceMap = dashboard.prices.prices
   const execution = dashboard.execution
-  const marketLearning = stream.marketLearning
   const selectedChartPrice = priceMap[chartAsset]
   const chartWindowSeconds = chartStyle === 'polymarket' ? 86_400 : 3600
   const chartPeriodLabel = chartStyle === 'polymarket' ? '15m · 24h' : '1h'
@@ -762,19 +611,6 @@ export function Dashboard() {
               lastTs={execution.lastRejectionTs}
             />
           </div>
-        </section>
-
-        <section className="glass-panel learning-panel">
-          <div className="panel-head">
-            <div className="panel-title">
-              <Activity size={14} />
-              <span>Market Training</span>
-            </div>
-          </div>
-          <p className="learning-help">
-            Each market trains independently. Target: 30 closed trades per market for full calibration.
-          </p>
-          <LearningPanel items={marketLearning} />
         </section>
 
         <section className="glass-panel ml-panel-container">
