@@ -376,13 +376,14 @@ impl RestClient {
     }
 
     /// Get events with date filtering for BTC/ETH up/down markets
+    /// Uses Unix timestamps for date parameters
     pub async fn get_events_with_date_filter(
         &self,
         gamma_url: &str,
         limit: usize,
         offset: usize,
-        end_date_min: Option<&str>,
-        end_date_max: Option<&str>,
+        end_date_min: Option<i64>,
+        end_date_max: Option<i64>,
     ) -> Result<Vec<EventResponse>> {
         let mut url = format!(
             "{}/events?closed=false&active=true&limit={}&offset={}",
