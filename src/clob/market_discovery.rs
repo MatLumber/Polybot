@@ -285,6 +285,7 @@ impl MarketDiscovery {
             info!("Tag '{}' returned {} markets", tag, markets.len());
             
             for market in markets {
+                let condition_id = market.condition_id.clone();
                 let q_preview: String = market.question.chars().take(60).collect();
                 let slug = market.slug.clone().unwrap_or_default();
                 
@@ -304,7 +305,7 @@ impl MarketDiscovery {
                 
                 if !is_updown || !asset_match {
                     debug!("Skipping {}: not up/down or wrong asset (slug='{}')", 
-                        market.condition_id, slug);
+                        condition_id, slug);
                     continue;
                 }
                 
@@ -314,7 +315,7 @@ impl MarketDiscovery {
                     all_markets.push(discovered);
                 } else {
                     info!("❌ Failed to convert: {} q='{}' slug='{}'", 
-                        market.condition_id, q_preview, slug);
+                        condition_id, q_preview, slug);
                 }
             }
         }
