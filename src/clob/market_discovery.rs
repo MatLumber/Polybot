@@ -269,85 +269,66 @@ impl MarketDiscovery {
     ) -> Result<Vec<DiscoveredMarket>> {
         let mut all_markets = Vec::new();
         
-        // Build search query based on asset and timeframe
-        let search_query = match (asset, timeframe) {
-            (Asset::BTC, Timeframe::Min15) => "btc updown 15m",
-            (Asset::BTC, Timeframe::Hour1) => "bitcoin up or down",
-            (Asset::ETH, Timeframe::Min15) => "eth updown 15m",
-            (Asset::ETH, Timeframe::Hour1) => "ethereum up or down",
-            _ => return Ok(Vec::new()),
-        };
-        
-        info!("🔍 Searching with query: '{}' for {:?} {:?}", search_query, asset, timeframe);
-        
-        // Use public-search endpoint
-        let search_result = self.rest_client
-            .search_public(&self.gamma_url, search_query, 50)
+        // Use events endpoint with filtering
+        info!("🔍 Fetching events for {:?} {:?}", asset, timeframe);
+        let events = self.rest_client
+            .get_events_page(&self.gamma_url, 200, 0)
             .await?;
-        
-        // Extract events from search results
-        let events = search_result.get("events")
-            .and_then(|e| e.as_array())
-            .map(|arr| arr.to_vec())
-            .unwrap_or_default();
-        
-        info!("📊 Search returned {} events", events.len());
+        info!("📊 Events endpoint returned {} events", events.len());
         
         let now = Utc::now();
         
-        for event_json in events {
-            // Parse event fields from JSON
-            let event_slug = event_json.get("slug")
-                .and_then(|s| s.as_str())
-                .unwrap_or("");
-            let event_title = event_json.get("title")
-                .and_then(|t| t.as_str())
-                .unwrap_or("");
-            let active = event_json.get("active")
-                .and_then(|a| a.as_bool())
-                .unwrap_or(false);
-            let closed = event_json.get("closed")
-                .and_then(|c| c.as_bool())
-                .unwrap_or(true);
-            let end_date_str = event_json.get("endDate")
-                .and_then(|d| d.as_str());
+        for event in events {
+            let event_slug = event.slug.clone().unwrap_or_default();
+            let event_title = &event.title;
+            
+            // Check if asset matches
+            let asset_match = match asset {
+                Asset::BTC => event_slug.to_lowercase().contains("btc") 
+                    || event_title.to_lowercase().contains("btc")
+                    || event_title.to_lowercase().contains("bitcoin"),
+                Asset::ETH => event_slug.to_lowercase().contains("eth")
+                    || event_title.to_lowercase().contains("eth")
+                    || event_title.to_lowercase().contains("ethereum"),
+                _ => false,
+            };
+            
+            // Check if it's an up/down market
+            let is_updown = event_slug.to_lowercase().contains("updown")
+                || event_title.to_lowercase().contains("up or down")
+                || event_slug.to_lowercase().contains("up-or-down");
+            
+            if !asset_match || !is_updown {
+                continue;
+            }
             
             // Parse end date
-            let end_date = end_date_str
+            let end_date = event.end_date.as_deref()
                 .and_then(|d| DateTime::parse_from_rfc3339(d).ok())
                 .map(|dt| dt.with_timezone(&Utc));
             
             // Skip if not active
-            if !active {
+            if !event.active {
                 info!("⏭️ Skipping '{}': not active", event_title);
                 continue;
             }
             
-            // Skip if end date is in the past (accept even if closed=true if end_date is in future)
+            // Skip if end date is in the past
             if let Some(ed) = end_date {
                 if ed <= now {
-                    info!("⏭️ Skipping '{}': already ended (end={} now={}) closed={}", 
-                        event_title, ed, now, closed);
                     continue;
                 }
             } else {
-                info!("⏭️ Skipping '{}': no end date", event_title);
                 continue;
             }
             
-            // Log if closed but still in future (shouldn't happen but handle it)
-            if closed {
-                info!("⚠️ Event '{}' is closed=true but end_date is in future, trying anyway", event_title);
-            }
+            info!("🎯 Found candidate: '{}' (slug='{}') active={} closed={:?}", 
+                event_title, event_slug, event.active, event.closed);
             
-            info!("🎯 Found candidate: '{}' (slug='{}')", event_title, event_slug);
-            
-            // Extract markets from event
-            if let Some(markets_json) = event_json.get("markets").and_then(|m| m.as_array()) {
-                for market_json in markets_json {
-                    if let Some(market) = self.parse_market_from_json(market_json, asset, timeframe) {
-                        all_markets.push(market);
-                    }
+            // Process markets in this event
+            for market in event.markets {
+                if let Some(discovered) = self.convert_market_response(market, asset) {
+                    all_markets.push(discovered);
                 }
             }
         }
