@@ -384,14 +384,14 @@ impl RestClient {
         limit: usize,
     ) -> Result<serde_json::Value> {
         // Encode query manually to avoid urlencoding dependency
-        let encoded_query: String = query
-            .chars()
-            .map(|c| match c {
-                ' ' => '+',
-                c if c.is_ascii_alphanumeric() || "-_.~".contains(c) => c,
-                c => format!("%{:02X}", c as u8),
-            })
-            .collect();
+        let mut encoded_query = String::new();
+        for c in query.chars() {
+            match c {
+                ' ' => encoded_query.push('+'),
+                c if c.is_ascii_alphanumeric() || "-_.~".contains(c) => encoded_query.push(c),
+                c => encoded_query.push_str(&format!("%{:02X}", c as u8)),
+            }
+        }
         
         let url = format!(
             "{}/public-search?q={}&limit={}",
