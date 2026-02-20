@@ -282,21 +282,30 @@ impl MarketDiscovery {
             let event_slug = event.slug.clone().unwrap_or_default();
             let event_title = &event.title;
             
+            let slug_lower = event_slug.to_lowercase();
+            let title_lower = event_title.to_lowercase();
+            
             // Check if asset matches
             let asset_match = match asset {
-                Asset::BTC => event_slug.to_lowercase().contains("btc") 
-                    || event_title.to_lowercase().contains("btc")
-                    || event_title.to_lowercase().contains("bitcoin"),
-                Asset::ETH => event_slug.to_lowercase().contains("eth")
-                    || event_title.to_lowercase().contains("eth")
-                    || event_title.to_lowercase().contains("ethereum"),
+                Asset::BTC => slug_lower.contains("btc") 
+                    || title_lower.contains("btc")
+                    || title_lower.contains("bitcoin"),
+                Asset::ETH => slug_lower.contains("eth")
+                    || title_lower.contains("eth")
+                    || title_lower.contains("ethereum"),
                 _ => false,
             };
             
             // Check if it's an up/down market
-            let is_updown = event_slug.to_lowercase().contains("updown")
-                || event_title.to_lowercase().contains("up or down")
-                || event_slug.to_lowercase().contains("up-or-down");
+            let is_updown = slug_lower.contains("updown")
+                || title_lower.contains("up or down")
+                || slug_lower.contains("up-or-down");
+            
+            // Log BTC/ETH up/down events for debugging
+            if asset_match && is_updown {
+                info!("🔎 BTC/ETH up/down found: '{}' slug='{}' active={} closed={:?}", 
+                    event_title, event_slug, event.active, event.closed);
+            }
             
             if !asset_match || !is_updown {
                 continue;
