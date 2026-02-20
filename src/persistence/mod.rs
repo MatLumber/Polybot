@@ -794,7 +794,6 @@ impl CsvPersistence {
 
         let mut trades = Vec::new();
         for path in self.collect_dashboard_csv_files("paper_analytics", "paper_analytics_") {
-
             let file = std::fs::File::open(&path)
                 .with_context(|| format!("Failed to open {}", path.display()))?;
             let mut reader = ReaderBuilder::new().has_headers(false).from_reader(file);
@@ -848,17 +847,22 @@ impl CsvPersistence {
         // Limit to N most recent trades
         trades.truncate(limit);
 
-        info!("Loaded {} recent paper trades for dashboard session", trades.len());
+        info!(
+            "Loaded {} recent paper trades for dashboard session",
+            trades.len()
+        );
         Ok(trades)
     }
 
-        #[cfg(feature = "dashboard")]
+    #[cfg(feature = "dashboard")]
     fn load_recent_trades_fallback_session(&self) -> Result<Vec<crate::dashboard::TradeResponse>> {
         use crate::dashboard::TradeResponse;
 
         let mut trades = Vec::new();
-        let mut trade_meta: std::collections::HashMap<String, (i64, String, String, f64, f64, String, f64)> =
-            std::collections::HashMap::new();
+        let mut trade_meta: std::collections::HashMap<
+            String,
+            (i64, String, String, f64, f64, String, f64),
+        > = std::collections::HashMap::new();
 
         for path in self.collect_dashboard_csv_files("trades", "trades_") {
             let content = std::fs::read_to_string(&path)
@@ -881,7 +885,15 @@ impl CsvPersistence {
                 let pnl = cols[7].parse::<f64>().unwrap_or(0.0);
                 trade_meta.insert(
                     trade_id,
-                    (timestamp, direction, market_slug, price, size_usdc, result, pnl),
+                    (
+                        timestamp,
+                        direction,
+                        market_slug,
+                        price,
+                        size_usdc,
+                        result,
+                        pnl,
+                    ),
                 );
             }
         }
@@ -1025,7 +1037,7 @@ impl CsvPersistence {
         files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
         files
     }
-#[cfg(feature = "dashboard")]
+    #[cfg(feature = "dashboard")]
     fn parse_market_slug(raw: &str) -> (String, String) {
         let lower = raw.trim().to_ascii_lowercase();
         let parts: Vec<&str> = lower.split('-').collect();
@@ -1799,9 +1811,11 @@ mod tests {
             "unexpected header line: {}",
             header
         );
-        assert!(lines.next().is_some(), "expected one rejection row after header");
+        assert!(
+            lines.next().is_some(),
+            "expected one rejection row after header"
+        );
 
         let _ = fs::remove_dir_all(&data_dir);
     }
 }
-

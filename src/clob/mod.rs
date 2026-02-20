@@ -972,8 +972,8 @@ impl ClobClient {
                 let question = market.question.to_ascii_lowercase();
                 let text = format!("{} {}", slug, question);
 
-                let exact_slug = !slug.is_empty()
-                    && (slug.contains(&slug_lower) || slug_lower.contains(&slug));
+                let exact_slug =
+                    !slug.is_empty() && (slug.contains(&slug_lower) || slug_lower.contains(&slug));
                 let keyword_match = asset_keywords.iter().any(|k| text.contains(k));
                 if !exact_slug && !keyword_match {
                     return None;
@@ -1222,8 +1222,8 @@ impl ClobClient {
                     && market.best_ask <= 1.0
                 {
                     score += 20;
-                    score -= (((market.best_ask - market.best_bid).max(0.0) * 1000.0) as i32)
-                        .min(200);
+                    score -=
+                        (((market.best_ask - market.best_bid).max(0.0) * 1000.0) as i32).min(200);
                 }
                 if market.liquidity_num > 0.0 {
                     score += (market.liquidity_num.log10().max(0.0) * 10.0) as i32;
@@ -1340,7 +1340,11 @@ impl ClobClient {
 fn market_market_text(market: &MarketInfo) -> String {
     format!(
         "{} {} {}",
-        market.slug.as_deref().unwrap_or_default().to_ascii_lowercase(),
+        market
+            .slug
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase(),
         market.question.to_ascii_lowercase(),
         market.outcomes.join(" ").to_ascii_lowercase()
     )
@@ -1738,7 +1742,9 @@ mod tests {
         ];
 
         for (asset, timeframe) in lanes {
-            let market = client.find_tradeable_market_for_signal(asset, timeframe).await;
+            let market = client
+                .find_tradeable_market_for_signal(asset, timeframe)
+                .await;
             assert!(
                 market.is_some(),
                 "expected tradeable market for {:?} {:?}, cache={}",

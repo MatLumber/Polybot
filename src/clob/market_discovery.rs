@@ -66,10 +66,7 @@ pub struct MarketDiscovery {
 impl MarketDiscovery {
     pub fn new(gamma_url: impl Into<String>) -> Self {
         Self {
-            rest_client: RestClient::new(
-                "https://clob.polymarket.com",
-                None, None, None, None,
-            ),
+            rest_client: RestClient::new("https://clob.polymarket.com", None, None, None, None),
             gamma_url: gamma_url.into(),
             tracked_markets: HashMap::new(),
             last_update: None,
@@ -120,7 +117,7 @@ impl MarketDiscovery {
                 match self.discover_market(asset, timeframe).await {
                     Ok(Some(new_market)) => {
                         let key = (asset, timeframe);
-                        
+
                         // Check if market changed
                         match self.tracked_markets.get(&key) {
                             Some(existing) => {
@@ -134,13 +131,11 @@ impl MarketDiscovery {
                                         new_end = %new_market.end_date,
                                         "🔄 Market rollover detected"
                                     );
-                                    
+
                                     // Mark old market as expired
-                                    self.expired_cache.insert(
-                                        existing.condition_id.clone(),
-                                        now,
-                                    );
-                                    
+                                    self.expired_cache
+                                        .insert(existing.condition_id.clone(), now);
+
                                     changes.push(MarketChange::Rollover {
                                         asset,
                                         timeframe,
@@ -171,7 +166,7 @@ impl MarketDiscovery {
                                 });
                             }
                         }
-                        
+
                         self.tracked_markets.insert(key, new_market);
                     }
                     Ok(None) => {
@@ -221,19 +216,19 @@ impl MarketDiscovery {
         timeframe: Timeframe,
     ) -> Result<Option<DiscoveredMarket>> {
         let now = Utc::now();
-        
+
         // Calculate expected window
         let _window_duration = match timeframe {
             Timeframe::Min15 => chrono::Duration::minutes(15),
             Timeframe::Hour1 => chrono::Duration::hours(1),
         };
-        
+
         // Look for markets ending in the next 2 hours that match our criteria
         let _lookahead = chrono::Duration::hours(2);
-        
+
         // Fetch markets from Gamma API
         let markets = self.fetch_candidate_markets(asset, timeframe).await?;
-        
+
         debug!(
             asset = ?asset,
             timeframe = ?timeframe,
@@ -250,11 +245,13 @@ impl MarketDiscovery {
                 // 1. Have more liquidity
                 // 2. End sooner (more immediate relevance)
                 // 3. Have valid up/down outcomes
-                let score_a = a.liquidity + a.volume * 0.1 
+                let score_a = a.liquidity + a.volume * 0.1
                     - (a.end_date.signed_duration_since(now).num_seconds().abs() as f64 * 0.001);
-                let score_b = b.liquidity + b.volume * 0.1 
+                let score_b = b.liquidity + b.volume * 0.1
                     - (b.end_date.signed_duration_since(now).num_seconds().abs() as f64 * 0.001);
-                score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+                score_a
+                    .partial_cmp(&score_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
 
         Ok(best_market)
@@ -268,60 +265,69 @@ impl MarketDiscovery {
         timeframe: Timeframe,
     ) -> Result<Vec<DiscoveredMarket>> {
         let mut all_markets = Vec::new();
-        
+
         // Use events endpoint with filtering
         info!("🔍 Fetching events for {:?} {:?}", asset, timeframe);
-        let events = self.rest_client
+        let events = self
+            .rest_client
             .get_events_page(&self.gamma_url, 200, 0)
             .await?;
         info!("📊 Events endpoint returned {} events", events.len());
-        
+
         let now = Utc::now();
-        
+
         for event in events {
             let event_slug = event.slug.clone().unwrap_or_default();
             let event_title = &event.title;
-            
+
             let slug_lower = event_slug.to_lowercase();
             let title_lower = event_title.to_lowercase();
-            
+
             // Check if asset matches
             let asset_match = match asset {
-                Asset::BTC => slug_lower.contains("btc") 
-                    || title_lower.contains("btc")
-                    || title_lower.contains("bitcoin"),
-                Asset::ETH => slug_lower.contains("eth")
-                    || title_lower.contains("eth")
-                    || title_lower.contains("ethereum"),
+                Asset::BTC => {
+                    slug_lower.contains("btc")
+                        || title_lower.contains("btc")
+                        || title_lower.contains("bitcoin")
+                }
+                Asset::ETH => {
+                    slug_lower.contains("eth")
+                        || title_lower.contains("eth")
+                        || title_lower.contains("ethereum")
+                }
                 _ => false,
             };
-            
+
             // Check if it's an up/down market
             let is_updown = slug_lower.contains("updown")
                 || title_lower.contains("up or down")
                 || slug_lower.contains("up-or-down");
-            
+
             // Log BTC/ETH up/down events for debugging
             if asset_match && is_updown {
-                info!("🔎 BTC/ETH up/down found: '{}' slug='{}' active={} closed={:?}", 
-                    event_title, event_slug, event.active, event.closed);
+                info!(
+                    "🔎 BTC/ETH up/down found: '{}' slug='{}' active={} closed={:?}",
+                    event_title, event_slug, event.active, event.closed
+                );
             }
-            
+
             if !asset_match || !is_updown {
                 continue;
             }
-            
+
             // Parse end date
-            let end_date = event.end_date.as_deref()
+            let end_date = event
+                .end_date
+                .as_deref()
                 .and_then(|d| DateTime::parse_from_rfc3339(d).ok())
                 .map(|dt| dt.with_timezone(&Utc));
-            
+
             // Skip if not active
             if !event.active {
                 info!("⏭️ Skipping '{}': not active", event_title);
                 continue;
             }
-            
+
             // Skip if end date is in the past
             if let Some(ed) = end_date {
                 if ed <= now {
@@ -330,10 +336,12 @@ impl MarketDiscovery {
             } else {
                 continue;
             }
-            
-            info!("🎯 Found candidate: '{}' (slug='{}') active={} closed={:?}", 
-                event_title, event_slug, event.active, event.closed);
-            
+
+            info!(
+                "🎯 Found candidate: '{}' (slug='{}') active={} closed={:?}",
+                event_title, event_slug, event.active, event.closed
+            );
+
             // Process markets in this event
             for market in event.markets {
                 if let Some(discovered) = self.convert_market_response(market, asset) {
@@ -341,23 +349,26 @@ impl MarketDiscovery {
                 }
             }
         }
-        
+
         // Sort by end_date (closest first) and take the best candidate
         all_markets.sort_by(|a, b| a.end_date.cmp(&b.end_date));
-        
+
         // Keep only the market with the closest end date (the "current" one)
-        let result: Vec<DiscoveredMarket> = all_markets.into_iter()
-            .take(1)
-            .collect();
-        
-        info!("🎯 Selected {} current market(s) for {:?} {:?}", result.len(), asset, timeframe);
+        let result: Vec<DiscoveredMarket> = all_markets.into_iter().take(1).collect();
+
+        info!(
+            "🎯 Selected {} current market(s) for {:?} {:?}",
+            result.len(),
+            asset,
+            timeframe
+        );
         for m in &result {
             info!("   ✅ {} (ends at {})", m.condition_id, m.end_date);
         }
-        
+
         Ok(result)
     }
-    
+
     /// Parse market from JSON search result
     fn parse_market_from_json(
         &self,
@@ -365,78 +376,80 @@ impl MarketDiscovery {
         asset: Asset,
         timeframe: Timeframe,
     ) -> Option<DiscoveredMarket> {
-        let condition_id = json.get("conditionId")
-            .and_then(|c| c.as_str())?;
-        let slug = json.get("slug")
-            .and_then(|s| s.as_str())
-            .unwrap_or("");
-        let question = json.get("question")
-            .and_then(|q| q.as_str())?;
-        let active = json.get("active")
+        let condition_id = json.get("conditionId").and_then(|c| c.as_str())?;
+        let slug = json.get("slug").and_then(|s| s.as_str()).unwrap_or("");
+        let question = json.get("question").and_then(|q| q.as_str())?;
+        let active = json
+            .get("active")
             .and_then(|a| a.as_bool())
             .unwrap_or(false);
-        let closed = json.get("closed")
-            .and_then(|c| c.as_bool())
-            .unwrap_or(true);
-        let end_date_str = json.get("endDate")
-            .and_then(|d| d.as_str())?;
-        
+        let closed = json.get("closed").and_then(|c| c.as_bool()).unwrap_or(true);
+        let end_date_str = json.get("endDate").and_then(|d| d.as_str())?;
+
         // Parse end date
         let end_date = DateTime::parse_from_rfc3339(end_date_str)
             .ok()
             .map(|dt| dt.with_timezone(&Utc))?;
-        
+
         // Skip if not active or closed
         if !active || closed {
             return None;
         }
-        
+
         // Parse token IDs from clobTokenIds
-        let token_ids: Vec<String> = json.get("clobTokenIds")
+        let token_ids: Vec<String> = json
+            .get("clobTokenIds")
             .and_then(|t| t.as_array())
-            .map(|arr| arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
-        
+
         if token_ids.len() != 2 {
             return None;
         }
-        
+
         // Parse outcomes
-        let outcomes: Vec<String> = json.get("outcomes")
+        let outcomes: Vec<String> = json
+            .get("outcomes")
             .and_then(|o| o.as_array())
-            .map(|arr| arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
-        
+
         if outcomes.len() != 2 {
             return None;
         }
-        
+
         // Parse outcome prices
-        let outcome_prices: Vec<f64> = json.get("outcomePrices")
+        let outcome_prices: Vec<f64> = json
+            .get("outcomePrices")
             .and_then(|p| p.as_array())
-            .map(|arr| arr.iter()
-                .filter_map(|v| v.as_str().and_then(|s| s.parse().ok()))
-                .collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().and_then(|s| s.parse().ok()))
+                    .collect()
+            })
             .unwrap_or_default();
-        
-        let liquidity = json.get("liquidityNum")
+
+        let liquidity = json
+            .get("liquidityNum")
             .and_then(|l| l.as_f64())
             .unwrap_or(0.0);
-        
-        let best_bid = json.get("bestBid")
-            .and_then(|b| b.as_f64());
-        let best_ask = json.get("bestAsk")
-            .and_then(|a| a.as_f64());
-        
+
+        let best_bid = json.get("bestBid").and_then(|b| b.as_f64());
+        let best_ask = json.get("bestAsk").and_then(|a| a.as_f64());
+
         let spread = match (best_bid, best_ask) {
             (Some(bid), Some(ask)) if ask > bid => ask - bid,
             _ => 0.0,
         };
-        
+
         Some(DiscoveredMarket {
             condition_id: condition_id.to_string(),
             slug: slug.to_string(),
@@ -462,9 +475,11 @@ impl MarketDiscovery {
         asset: Asset,
     ) -> Option<DiscoveredMarket> {
         let condition_id = &market.condition_id;
-        
+
         // Parse end date
-        let end_date = market.end_date.as_deref()
+        let end_date = market
+            .end_date
+            .as_deref()
             .and_then(|d| {
                 DateTime::parse_from_rfc3339(d)
                     .or_else(|_| DateTime::parse_from_str(d, "%Y-%m-%dT%H:%M:%S%.fZ"))
@@ -474,26 +489,35 @@ impl MarketDiscovery {
             .unwrap_or_else(|| Utc::now() + chrono::Duration::hours(1));
 
         // Parse outcome prices
-        let outcome_prices: Vec<f64> = market.outcome_prices
+        let outcome_prices: Vec<f64> = market
+            .outcome_prices
             .iter()
             .filter_map(|p| p.parse::<f64>().ok())
             .collect();
 
         // Determine timeframe from question/slug/end_date
-        let text = format!("{} {}", market.slug.as_deref().unwrap_or(""), market.question)
-            .to_lowercase();
-        
+        let text = format!(
+            "{} {}",
+            market.slug.as_deref().unwrap_or(""),
+            market.question
+        )
+        .to_lowercase();
+
         // Calculate time until expiry
         let now = Utc::now();
         let duration_to_end = end_date.signed_duration_since(now);
         let minutes_to_end = duration_to_end.num_minutes();
-        
+
         // Detect timeframe
-        let timeframe = if text.contains("15m") || text.contains("15-minute") || text.contains("15 minute") {
+        let timeframe = if text.contains("15m")
+            || text.contains("15-minute")
+            || text.contains("15 minute")
+        {
             Timeframe::Min15
         } else if text.contains("1h") || text.contains("1-hour") || text.contains("hourly") {
             Timeframe::Hour1
-        } else if text.contains("up or down") || text.contains("updown") || text.contains("up-down") {
+        } else if text.contains("up or down") || text.contains("updown") || text.contains("up-down")
+        {
             // For up/down markets, infer from end_date
             if minutes_to_end > 0 && minutes_to_end <= 20 {
                 Timeframe::Min15
@@ -503,8 +527,10 @@ impl MarketDiscovery {
                 // Could be 1h market with more time remaining
                 Timeframe::Hour1
             } else {
-                info!("Market {} rejected: up/down market but invalid expiry ({} min)", 
-                    condition_id, minutes_to_end);
+                info!(
+                    "Market {} rejected: up/down market but invalid expiry ({} min)",
+                    condition_id, minutes_to_end
+                );
                 return None;
             }
         } else if minutes_to_end > 0 && minutes_to_end <= 20 {
@@ -512,21 +538,33 @@ impl MarketDiscovery {
         } else if minutes_to_end > 0 && minutes_to_end <= 90 {
             Timeframe::Hour1
         } else {
-            info!("Market {} rejected: can't determine timeframe (text='{}' expires_in={}min)", 
-                condition_id, text.chars().take(60).collect::<String>(), minutes_to_end);
+            info!(
+                "Market {} rejected: can't determine timeframe (text='{}' expires_in={}min)",
+                condition_id,
+                text.chars().take(60).collect::<String>(),
+                minutes_to_end
+            );
             return None;
         };
-        
+
         // Check token_ids
         if market.clob_token_ids.len() != 2 {
-            info!("Market {} rejected: expected 2 token_ids, got {}", 
-                condition_id, market.clob_token_ids.len());
+            info!(
+                "Market {} rejected: expected 2 token_ids, got {}",
+                condition_id,
+                market.clob_token_ids.len()
+            );
             return None;
         }
-        
-        info!("Market {} CONVERTED: slug='{}' tf={:?} tokens={} outcomes={:?}",
-            condition_id, market.slug.as_deref().unwrap_or(""), timeframe,
-            market.clob_token_ids.len(), market.outcomes);
+
+        info!(
+            "Market {} CONVERTED: slug='{}' tf={:?} tokens={} outcomes={:?}",
+            condition_id,
+            market.slug.as_deref().unwrap_or(""),
+            timeframe,
+            market.clob_token_ids.len(),
+            market.outcomes
+        );
 
         Some(DiscoveredMarket {
             condition_id: market.condition_id,
@@ -558,7 +596,7 @@ impl MarketDiscovery {
         now: DateTime<Utc>,
     ) -> bool {
         let condition_id = &market.condition_id;
-        
+
         // Must not be in expired cache
         if self.expired_cache.contains_key(condition_id) {
             debug!("Market {} rejected: in expired cache", condition_id);
@@ -567,20 +605,30 @@ impl MarketDiscovery {
 
         // Must be active and not closed
         if !market.active || market.closed {
-            debug!("Market {} rejected: active={} closed={}", condition_id, market.active, market.closed);
+            debug!(
+                "Market {} rejected: active={} closed={}",
+                condition_id, market.active, market.closed
+            );
             return false;
         }
 
         // Must not have ended
         if now > market.end_date {
-            debug!("Market {} rejected: already ended (end={} now={})", condition_id, market.end_date, now);
+            debug!(
+                "Market {} rejected: already ended (end={} now={})",
+                condition_id, market.end_date, now
+            );
             return false;
         }
 
         // Must have exactly 2 outcomes/tokens
         if market.token_ids.len() != 2 || market.outcomes.len() != 2 {
-            debug!("Market {} rejected: token_ids={} outcomes={}", 
-                condition_id, market.token_ids.len(), market.outcomes.len());
+            debug!(
+                "Market {} rejected: token_ids={} outcomes={}",
+                condition_id,
+                market.token_ids.len(),
+                market.outcomes.len()
+            );
             return false;
         }
 
@@ -597,15 +645,19 @@ impl MarketDiscovery {
             _ => false,
         };
         if !asset_match {
-            debug!("Market {} rejected: asset mismatch (slug='{}' question='{}')", 
-                condition_id, market.slug, market.question);
+            debug!(
+                "Market {} rejected: asset mismatch (slug='{}' question='{}')",
+                condition_id, market.slug, market.question
+            );
             return false;
         }
 
         // Verify timeframe match
         if market.timeframe != timeframe {
-            debug!("Market {} rejected: timeframe mismatch (market={:?} requested={:?})", 
-                condition_id, market.timeframe, timeframe);
+            debug!(
+                "Market {} rejected: timeframe mismatch (market={:?} requested={:?})",
+                condition_id, market.timeframe, timeframe
+            );
             return false;
         }
 
@@ -618,10 +670,12 @@ impl MarketDiscovery {
             let ol = o.to_lowercase();
             ol.contains("down") || ol.contains("no") || ol.contains("lower")
         });
-        
+
         if !has_up || !has_down {
-            debug!("Market {} rejected: outcomes missing up={} down={} (outcomes={:?})", 
-                condition_id, has_up, has_down, market.outcomes);
+            debug!(
+                "Market {} rejected: outcomes missing up={} down={} (outcomes={:?})",
+                condition_id, has_up, has_down, market.outcomes
+            );
             return false;
         }
 
@@ -632,14 +686,19 @@ impl MarketDiscovery {
             Timeframe::Min15 => chrono::Duration::hours(24),
             Timeframe::Hour1 => chrono::Duration::hours(24),
         };
-        
+
         if time_to_end > max_lookahead {
-            debug!("Market {} rejected: ends too far in future ({} > {:?})", 
-                condition_id, time_to_end, max_lookahead);
+            debug!(
+                "Market {} rejected: ends too far in future ({} > {:?})",
+                condition_id, time_to_end, max_lookahead
+            );
             return false;
         }
 
-        info!("Market {} VALIDATED for {:?} {:?}", condition_id, asset, timeframe);
+        info!(
+            "Market {} VALIDATED for {:?} {:?}",
+            condition_id, asset, timeframe
+        );
         true
     }
 
@@ -674,7 +733,7 @@ impl MarketDiscovery {
                 } else {
                     continue;
                 };
-                
+
                 if let Some(token_id) = market.token_ids.get(idx) {
                     map.insert(token_id.clone(), (*asset, *timeframe, direction));
                 }
@@ -696,12 +755,10 @@ impl MarketDiscovery {
     /// Check if any market expires within the given duration
     pub fn has_market_expiring_within(&self, duration: chrono::Duration) -> bool {
         let now = Utc::now();
-        self.tracked_markets
-            .values()
-            .any(|m| {
-                let time_left = m.end_date.signed_duration_since(now);
-                time_left.num_seconds() > 0 && time_left <= duration
-            })
+        self.tracked_markets.values().any(|m| {
+            let time_left = m.end_date.signed_duration_since(now);
+            time_left.num_seconds() > 0 && time_left <= duration
+        })
     }
 
     /// Get last update time
@@ -752,6 +809,9 @@ impl MarketChange {
     }
 
     pub fn requires_reconnect(&self) -> bool {
-        matches!(self, MarketChange::Rollover { .. } | MarketChange::NewMarket { .. })
+        matches!(
+            self,
+            MarketChange::Rollover { .. } | MarketChange::NewMarket { .. }
+        )
     }
 }

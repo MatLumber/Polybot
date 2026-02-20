@@ -390,7 +390,8 @@ impl WsClient {
     }
 
     async fn handle_book_update(&self, update: BookUpdateData) -> Result<()> {
-        let book = build_normalized_book(update.token_id, update.bids, update.asks, update.timestamp);
+        let book =
+            build_normalized_book(update.token_id, update.bids, update.asks, update.timestamp);
 
         let _ = self.event_tx.send(WsEvent::BookUpdate(book)).await;
         Ok(())
@@ -544,8 +545,7 @@ impl MarketFeedClient {
 
             info!(
                 attempt = reconnect_attempt + 1,
-                "Connecting to market feed WebSocket: {}",
-                self.url
+                "Connecting to market feed WebSocket: {}", self.url
             );
 
             let (ws_stream, _) = match connect_async(&self.url).await {
@@ -554,9 +554,7 @@ impl MarketFeedClient {
                     warn!(error = %e, "Failed to connect market feed WebSocket");
                     let _ = self
                         .event_tx
-                        .send(WsEvent::Error(format!(
-                            "market_feed_connect_failed: {e}"
-                        )))
+                        .send(WsEvent::Error(format!("market_feed_connect_failed: {e}")))
                         .await;
                     let _ = self.event_tx.send(WsEvent::Disconnected).await;
                     reconnect_attempt = reconnect_attempt.saturating_add(1);
@@ -584,9 +582,7 @@ impl MarketFeedClient {
                     );
                     let _ = self
                         .event_tx
-                        .send(WsEvent::Error(format!(
-                            "market_feed_subscribe_failed: {e}"
-                        )))
+                        .send(WsEvent::Error(format!("market_feed_subscribe_failed: {e}")))
                         .await;
                     let _ = self.event_tx.send(WsEvent::Disconnected).await;
                     reconnect_attempt = reconnect_attempt.saturating_add(1);

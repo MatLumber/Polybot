@@ -610,7 +610,8 @@ impl DashboardMemory {
         source: PriceSource,
     ) {
         let now = chrono::Utc::now().timestamp_millis();
-        self.update_price_at(asset, price, bid, ask, source, now).await;
+        self.update_price_at(asset, price, bid, ask, source, now)
+            .await;
     }
 
     /// Update price for an asset with explicit event timestamp.
@@ -803,11 +804,7 @@ impl DashboardMemory {
         signals.truncate(50);
     }
 
-    pub async fn record_strategy_evaluation(
-        &self,
-        generated: bool,
-        filter_reason: Option<String>,
-    ) {
+    pub async fn record_strategy_evaluation(&self, generated: bool, filter_reason: Option<String>) {
         let mut diagnostics = self.execution_diagnostics.write().await;
         diagnostics.processed_features = diagnostics.processed_features.saturating_add(1);
         if generated {
@@ -834,7 +831,10 @@ impl DashboardMemory {
         let reason = reason.into();
         let mut diagnostics = self.execution_diagnostics.write().await;
         diagnostics.rejected_signals = diagnostics.rejected_signals.saturating_add(1);
-        *diagnostics.rejection_reasons.entry(reason.clone()).or_insert(0) += 1;
+        *diagnostics
+            .rejection_reasons
+            .entry(reason.clone())
+            .or_insert(0) += 1;
         if reason == "price_stale" {
             diagnostics.stale_rejections = diagnostics.stale_rejections.saturating_add(1);
         }
@@ -920,7 +920,7 @@ impl DashboardMemory {
     pub async fn get_ml_state(&self) -> serde_json::Value {
         let metrics = self.ml_metrics.read().await;
         let state = self.ml_state.read().await;
-        
+
         if let Some(ref metrics) = *metrics {
             serde_json::json!({
                 "enabled": metrics.enabled,
@@ -946,7 +946,7 @@ impl DashboardMemory {
     /// Get ML metrics
     pub async fn get_ml_metrics(&self) -> serde_json::Value {
         let metrics = self.ml_metrics.read().await;
-        
+
         if let Some(ref m) = *metrics {
             serde_json::json!({
                 "accuracy": m.model_accuracy,
@@ -969,17 +969,21 @@ impl DashboardMemory {
     /// Get ML models info
     pub async fn get_ml_models(&self) -> serde_json::Value {
         let state = self.ml_state.read().await;
-        
+
         if let Some(ref s) = *state {
-            let models: Vec<_> = s.model_performances.iter().map(|m| {
-                serde_json::json!({
-                    "name": m.model_name.clone(),
-                    "weight": s.ensemble_weights.random_forest, // Simplificado
-                    "accuracy": m.accuracy,
-                    "status": "active"
+            let models: Vec<_> = s
+                .model_performances
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "name": m.model_name.clone(),
+                        "weight": s.ensemble_weights.random_forest, // Simplificado
+                        "accuracy": m.accuracy,
+                        "status": "active"
+                    })
                 })
-            }).collect();
-            
+                .collect();
+
             serde_json::json!({
                 "models": models,
                 "dynamic_weights_enabled": s.ensemble_weights.dynamic_weight_adjustment,
@@ -1001,24 +1005,24 @@ impl DashboardMemory {
     /// Get ML feature importance
     pub async fn get_ml_features(&self) -> serde_json::Value {
         let state = self.ml_state.read().await;
-        
+
         if let Some(ref s) = *state {
             let mut features: Vec<_> = s.feature_importance.iter()
                 .map(|(name, importance)| {
                     serde_json::json!({"name": name.clone(), "importance": importance})
                 })
                 .collect();
-            
+
             // Ordenar por importancia
             features.sort_by(|a, b| {
                 let a_imp: f64 = a["importance"].as_f64().unwrap_or(0.0);
                 let b_imp: f64 = b["importance"].as_f64().unwrap_or(0.0);
                 b_imp.partial_cmp(&a_imp).unwrap()
             });
-            
+
             // Tomar top 10
             let top_features: Vec<_> = features.into_iter().take(10).collect();
-            
+
             serde_json::json!({
                 "total_features": s.feature_importance.len(),
                 "top_features": top_features,
@@ -1038,10 +1042,10 @@ impl DashboardMemory {
         let history = self.ml_training_history.read().await;
         let dataset_stats = self.ml_dataset_stats.read().await;
         let state = self.ml_state.read().await;
-        
+
         let last_training = history.last().map(|t| t.timestamp);
         let samples_trained = dataset_stats.as_ref().map(|s| s.total_samples).unwrap_or(0);
-        
+
         serde_json::json!({
             "status": if history.is_empty() { "waiting_data" } else { "ready" },
             "last_training": last_training,
@@ -1066,7 +1070,10 @@ impl DashboardMemory {
     }
 
     /// Update ML training history
-    pub async fn update_ml_training_history(&self, history: Vec<crate::ml_engine::persistence::TrainingRecord>) {
+    pub async fn update_ml_training_history(
+        &self,
+        history: Vec<crate::ml_engine::persistence::TrainingRecord>,
+    ) {
         let mut h = self.ml_training_history.write().await;
         *h = history;
     }

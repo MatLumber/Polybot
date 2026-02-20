@@ -4,7 +4,9 @@
 //! Esto permite cargar configuración desde archivos YAML/env vars.
 
 use crate::config::MLConfig;
-use crate::ml_engine::{EnsembleConfig, FeatureConfig, FilterConfig, MLEngineConfig, ModelType, TrainingConfig};
+use crate::ml_engine::{
+    EnsembleConfig, FeatureConfig, FilterConfig, MLEngineConfig, ModelType, TrainingConfig,
+};
 
 /// Trait para convertir configuración del sistema de config a MLEngineConfig
 pub trait MLConfigConvertible {
@@ -104,7 +106,7 @@ mod tests {
         };
 
         let engine_config = ml_config.to_ml_engine_config();
-        
+
         assert!(engine_config.enabled);
         assert!(matches!(engine_config.model_type, ModelType::Ensemble));
         assert_eq!(engine_config.min_confidence, 0.52);
@@ -113,8 +115,17 @@ mod tests {
     #[test]
     fn test_parse_model_types() {
         assert!(matches!(parse_model_type("ensemble"), ModelType::Ensemble));
-        assert!(matches!(parse_model_type("random_forest"), ModelType::RandomForest));
-        assert!(matches!(parse_model_type("gb"), ModelType::GradientBoosting));
-        assert!(matches!(parse_model_type("LR"), ModelType::LogisticRegression));
+        assert!(matches!(
+            parse_model_type("random_forest"),
+            ModelType::RandomForest
+        ));
+        assert!(matches!(
+            parse_model_type("gb"),
+            ModelType::GradientBoosting
+        ));
+        assert!(matches!(
+            parse_model_type("LR"),
+            ModelType::LogisticRegression
+        ));
     }
 }

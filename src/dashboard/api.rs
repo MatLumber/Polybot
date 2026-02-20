@@ -23,7 +23,11 @@ pub struct DataDir(pub String);
 pub type AppState = (Arc<DashboardMemory>, WebSocketBroadcaster, DataDir);
 
 /// Create the API router with all endpoints
-pub fn create_router(memory: Arc<DashboardMemory>, broadcaster: WebSocketBroadcaster, data_dir: String) -> Router {
+pub fn create_router(
+    memory: Arc<DashboardMemory>,
+    broadcaster: WebSocketBroadcaster,
+    data_dir: String,
+) -> Router {
     Router::new()
         // Main endpoints
         .route("/api/stats", get(get_stats))
@@ -56,7 +60,10 @@ pub fn create_router(memory: Arc<DashboardMemory>, broadcaster: WebSocketBroadca
         // NEW v3.0: Temporal patterns, settlement predictor, cross-asset
         .route("/api/data/temporal-patterns", get(get_temporal_patterns))
         .route("/api/data/settlement-metrics", get(get_settlement_metrics))
-        .route("/api/data/cross-asset-correlations", get(get_cross_asset_correlations))
+        .route(
+            "/api/data/cross-asset-correlations",
+            get(get_cross_asset_correlations),
+        )
         // NEW v3.0: ML Engine endpoints
         .route("/api/ml/state", get(get_ml_state))
         .route("/api/ml/metrics", get(get_ml_metrics))
@@ -81,41 +88,31 @@ pub fn create_router(memory: Arc<DashboardMemory>, broadcaster: WebSocketBroadca
 // ─────────────────────────────────────────────────────────────────
 
 /// GET /api/stats - Complete dashboard state
-async fn get_stats(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_stats(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let state = memory.get_state().await;
     Json(ApiResponse::success(state))
 }
 
 /// GET /api/trades - Recent trades
-async fn get_trades(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_trades(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let paper = memory.get_paper_state().await;
     Json(ApiResponse::success(paper.recent_trades))
 }
 
 /// GET /api/signals - Recent signals
-async fn get_signals(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_signals(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let signals = memory.signals.read().await.clone();
     Json(ApiResponse::success(signals))
 }
 
 /// GET /api/prices - Current prices by asset
-async fn get_prices(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_prices(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let prices = memory.get_prices().await;
     Json(ApiResponse::success(prices.prices))
 }
 
 /// GET /api/health - Feed health/staleness/reconnect status.
-async fn get_health(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_health(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let health = memory.get_health().await;
     Json(ApiResponse::success(health))
 }
@@ -171,9 +168,7 @@ async fn get_prices_history(
 }
 
 /// GET /api/positions - Open positions (paper + live)
-async fn get_positions(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_positions(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let paper_positions = memory.paper_positions.read().await.clone();
     let live_positions = memory.live_positions.read().await.clone();
 
@@ -190,33 +185,25 @@ async fn get_positions(
 }
 
 /// GET /api/analytics - Per-asset analytics
-async fn get_analytics(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_analytics(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let paper = memory.get_paper_state().await;
     Json(ApiResponse::success(paper.asset_stats))
 }
 
 /// GET /api/indicator-stats - Indicator calibration statistics
-async fn get_indicator_stats(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_indicator_stats(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let stats = memory.indicator_stats.read().await.clone();
     Json(ApiResponse::success(stats))
 }
 
 /// GET /api/calibration/markets - Market-level training progress
-async fn get_market_learning_progress(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_market_learning_progress(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let stats = memory.get_market_learning_progress().await;
     Json(ApiResponse::success(stats))
 }
 
 /// GET /api/calibration/quality - ECE/Brier quality by market
-async fn get_calibration_quality(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_calibration_quality(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let stats = memory.get_calibration_quality().await;
     Json(ApiResponse::success(stats))
 }
@@ -320,34 +307,34 @@ async fn handle_websocket(
 // ─────────────────────────────────────────────────────────────────
 
 /// GET /api/data/calibrator - Returns calibrator_state_v2.json
-async fn get_calibrator_state(
-    State((_, _, data_dir)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_calibrator_state(State((_, _, data_dir)): State<AppState>) -> impl IntoResponse {
     let path = format!("{}/calibrator_state_v2.json", data_dir.0);
     match std::fs::read_to_string(&path) {
-        Ok(content) => {
-            match serde_json::from_str::<serde_json::Value>(&content) {
-                Ok(json) => Json(ApiResponse::success(json)),
-                Err(_) => Json(ApiResponse::<serde_json::Value>::error("Failed to parse calibrator JSON")),
-            }
-        }
-        Err(_) => Json(ApiResponse::<serde_json::Value>::error("Calibrator state file not found")),
+        Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
+            Ok(json) => Json(ApiResponse::success(json)),
+            Err(_) => Json(ApiResponse::<serde_json::Value>::error(
+                "Failed to parse calibrator JSON",
+            )),
+        },
+        Err(_) => Json(ApiResponse::<serde_json::Value>::error(
+            "Calibrator state file not found",
+        )),
     }
 }
 
 /// GET /api/data/paper-state - Returns paper_trading_state.json
-async fn get_paper_trading_state(
-    State((_, _, data_dir)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_paper_trading_state(State((_, _, data_dir)): State<AppState>) -> impl IntoResponse {
     let path = format!("{}/paper_trading_state.json", data_dir.0);
     match std::fs::read_to_string(&path) {
-        Ok(content) => {
-            match serde_json::from_str::<serde_json::Value>(&content) {
-                Ok(json) => Json(ApiResponse::success(json)),
-                Err(_) => Json(ApiResponse::<serde_json::Value>::error("Failed to parse paper state JSON")),
-            }
-        }
-        Err(_) => Json(ApiResponse::<serde_json::Value>::error("Paper trading state file not found")),
+        Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
+            Ok(json) => Json(ApiResponse::success(json)),
+            Err(_) => Json(ApiResponse::<serde_json::Value>::error(
+                "Failed to parse paper state JSON",
+            )),
+        },
+        Err(_) => Json(ApiResponse::<serde_json::Value>::error(
+            "Paper trading state file not found",
+        )),
     }
 }
 
@@ -356,7 +343,12 @@ fn find_latest_csv(data_dir: &str, subfolder: &str, prefix: &str) -> Option<Stri
     if let Ok(entries) = std::fs::read_dir(&folder_path) {
         let mut files: Vec<String> = entries
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map(|ext| ext == "csv").unwrap_or(false))
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .map(|ext| ext == "csv")
+                    .unwrap_or(false)
+            })
             .filter(|e| e.file_name().to_string_lossy().starts_with(prefix))
             .map(|e| e.path().to_string_lossy().to_string())
             .collect();
@@ -372,7 +364,10 @@ fn serve_csv_file(path: &str, filename: &str) -> Response {
         Ok(content) => Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "text/csv")
-            .header(header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", filename))
+            .header(
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{}\"", filename),
+            )
             .body(Body::from(content))
             .unwrap(),
         Err(_) => Response::builder()
@@ -393,9 +388,7 @@ async fn get_trades_csv(
 }
 
 /// GET /api/data/trades - Returns latest trades CSV
-async fn get_latest_trades_csv(
-    State((_, _, data_dir)): State<AppState>,
-) -> Response {
+async fn get_latest_trades_csv(State((_, _, data_dir)): State<AppState>) -> Response {
     if let Some(path) = find_latest_csv(&data_dir.0, "trades", "trades_") {
         let filename = path.rsplit('/').next().unwrap_or("trades.csv");
         serve_csv_file(&path, filename)
@@ -418,9 +411,7 @@ async fn get_signals_csv(
 }
 
 /// GET /api/data/signals - Returns latest signals CSV
-async fn get_latest_signals_csv(
-    State((_, _, data_dir)): State<AppState>,
-) -> Response {
+async fn get_latest_signals_csv(State((_, _, data_dir)): State<AppState>) -> Response {
     if let Some(path) = find_latest_csv(&data_dir.0, "signals", "signals_") {
         let filename = path.rsplit('/').next().unwrap_or("signals.csv");
         serve_csv_file(&path, filename)
@@ -443,9 +434,7 @@ async fn get_prices_csv(
 }
 
 /// GET /api/data/prices - Returns latest prices CSV
-async fn get_latest_prices_csv(
-    State((_, _, data_dir)): State<AppState>,
-) -> Response {
+async fn get_latest_prices_csv(State((_, _, data_dir)): State<AppState>) -> Response {
     if let Some(path) = find_latest_csv(&data_dir.0, "prices", "prices_") {
         let filename = path.rsplit('/').next().unwrap_or("prices.csv");
         serve_csv_file(&path, filename)
@@ -468,9 +457,7 @@ async fn get_rejections_csv(
 }
 
 /// GET /api/data/rejections - Returns latest rejections CSV
-async fn get_latest_rejections_csv(
-    State((_, _, data_dir)): State<AppState>,
-) -> Response {
+async fn get_latest_rejections_csv(State((_, _, data_dir)): State<AppState>) -> Response {
     if let Some(path) = find_latest_csv(&data_dir.0, "rejections", "rejections_") {
         let filename = path.rsplit('/').next().unwrap_or("rejections.csv");
         serve_csv_file(&path, filename)
@@ -501,12 +488,12 @@ struct DataFilesResponse {
 }
 
 /// GET /api/data/files - Lists all available data files
-async fn list_data_files(
-    State((_, _, data_dir)): State<AppState>,
-) -> impl IntoResponse {
+async fn list_data_files(State((_, _, data_dir)): State<AppState>) -> impl IntoResponse {
     let get_file_info = |path: &str| -> Option<DataFileInfo> {
         let metadata = std::fs::metadata(path).ok()?;
-        let modified: String = metadata.modified().ok()
+        let modified: String = metadata
+            .modified()
+            .ok()
             .map(|t| {
                 let datetime: chrono::DateTime<chrono::Utc> = t.into();
                 datetime.to_rfc3339()
@@ -525,7 +512,12 @@ async fn list_data_files(
         if let Ok(entries) = std::fs::read_dir(&folder_path) {
             entries
                 .filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().map(|ext| ext == "csv").unwrap_or(false))
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .map(|ext| ext == "csv")
+                        .unwrap_or(false)
+                })
                 .filter_map(|e| get_file_info(&e.path().to_string_lossy()))
                 .collect()
         } else {
@@ -551,9 +543,7 @@ async fn list_data_files(
 // ─────────────────────────────────────────────────────────────────
 
 /// GET /api/data/temporal-patterns - Returns time-of-day performance stats
-async fn get_temporal_patterns(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_temporal_patterns(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     // TODO: Connect to actual temporal analyzer
     // For now, return placeholder
     let placeholder = serde_json::json!({
@@ -572,9 +562,7 @@ async fn get_temporal_patterns(
 }
 
 /// GET /api/data/settlement-metrics - Returns settlement prediction metrics
-async fn get_settlement_metrics(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_settlement_metrics(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     // TODO: Connect to actual settlement predictor
     let placeholder = serde_json::json!({
         "message": "Settlement metrics endpoint - connect to SettlementPricePredictor",
@@ -586,9 +574,7 @@ async fn get_settlement_metrics(
 }
 
 /// GET /api/data/cross-asset-correlations - Returns BTC/ETH correlation data
-async fn get_cross_asset_correlations(
-    State((memory, _, _)): State<AppState>,
-) -> impl IntoResponse {
+async fn get_cross_asset_correlations(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     // TODO: Connect to actual cross-asset analyzer
     let placeholder = serde_json::json!({
         "message": "Cross-asset correlations endpoint - connect to CrossAssetAnalyzer",

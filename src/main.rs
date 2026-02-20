@@ -187,11 +187,20 @@ async fn main() -> Result<()> {
         let strat = strategy.lock().await;
         let snapshot = strat.export_calibrator_state_v2();
         let quality = strat.export_calibration_quality_by_market();
+        let initial_ml_metrics = strat.get_ml_state();
+        let initial_dataset_stats = strat.get_dataset_stats();
         drop(strat);
         dashboard_memory.set_market_learning_stats(snapshot).await;
         dashboard_memory
             .set_calibration_quality_stats(quality)
             .await;
+        dashboard_memory
+            .update_ml_metrics(initial_ml_metrics)
+            .await;
+        dashboard_memory
+            .update_ml_dataset_stats(initial_dataset_stats)
+            .await;
+        tracing::info!("📊 Dashboard seeded with initial ML metrics");
     }
     #[cfg(feature = "dashboard")]
     let dashboard_handle = {
@@ -966,29 +975,14 @@ async fn main() -> Result<()> {
                     let count =
                         ml_broadcast_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     if count % 5 == 0 {
-                        let guard = strategy_inner.lock().await;
-                        let metrics = crate::strategy::v3_strategy::MLStateResponse {
-                            enabled: true,
-                            model_accuracy: 0.58,
-                            total_predictions: count + 1,
-                            correct_predictions: (count + 1) / 2,
-                            win_rate: 0.58,
-                            is_calibrated: guard.is_calibrated(),
-                            last_filter_reason: None,
-                            ensemble_weights: Some(vec![0.4, 0.35, 0.25]),
-                        };
-                        drop(guard);
+                        let metrics = strategy_inner.lock().await.get_ml_state();
 
                         strategy_dashboard_broadcaster.broadcast_ml_metrics(
                             metrics.model_accuracy,
                             metrics.win_rate,
                             metrics.total_predictions,
                             metrics.correct_predictions,
-                            vec![
-                                ("Random Forest".to_string(), 0.4, 0.60),
-                                ("Gradient Boosting".to_string(), 0.35, 0.57),
-                                ("Logistic Regression".to_string(), 0.25, 0.55),
-                            ],
+                            metrics.model_info,
                         );
                     }
                 }
@@ -1618,6 +1612,8 @@ async fn main() -> Result<()> {
     #[cfg(feature = "dashboard")]
     let orderbook_sync_dashboard = dashboard_memory.clone();
     let orderbook_sync_strategy = strategy.clone();
+    let paper_ml_strategy = orderbook_sync_strategy.clone();
+    let expired_ml_strategy = orderbook_sync_strategy.clone();
     let orderbook_sync_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
         loop {
@@ -1678,20 +1674,39 @@ async fn main() -> Result<()> {
                 // Update the paper engine with the new price
                 let exits = engine.update_price(tick.asset, tick.mid, tick.source);
                 #[cfg(feature = "dashboard")]
-                let mut closed_trades: Vec<TradeResponse> = Vec::new(); // Close any positions that hit exit conditions (with full analytics)
+                let mut closed_dashboard_trades: Vec<TradeResponse> = Vec::new();
+                
+                let mut closed_ml_trades: Vec<crate::paper_trading::PaperTradeRecord> = Vec::new();
+                
                 let had_exits = !exits.is_empty();
                 for ((asset, timeframe), reason) in exits {
                     if let Some(record) = engine.close_and_save(asset, timeframe, reason).await {
+                        closed_ml_trades.push(record.clone());
                         #[cfg(feature = "dashboard")]
-                        closed_trades.push(paper_trade_record_to_dashboard_trade(&record));
+                        closed_dashboard_trades.push(paper_trade_record_to_dashboard_trade(&record));
                     }
-                } // Broadcast position updates if any positions were closed
+                }
+                
+                // Allow V3 ML Strategy to learn continuously from paper trading resolved outcomes
+                if !closed_ml_trades.is_empty() {
+                    let mut strat = paper_ml_strategy.lock().await;
+                    for record in &closed_ml_trades {
+                        // Register trade outcome into the ML model so it can learn continuously
+                        strat.register_closed_trade_result(record);
+                    }
+                }
+
+                // Broadcast position updates if any positions were closed
                 #[cfg(feature = "dashboard")]
-                if had_exits {
-                    for trade in &closed_trades {
+                if !closed_dashboard_trades.is_empty() {
+                    for trade in &closed_dashboard_trades {
                         paper_dashboard_memory.add_trade(trade.clone()).await;
                         paper_dashboard_broadcaster.broadcast_trade(trade.clone());
                     }
+                }
+
+                #[cfg(feature = "dashboard")]
+                if had_exits {
                     let positions: Vec<PositionResponse> = engine
                         .get_positions()
                         .into_iter()
@@ -1727,7 +1742,8 @@ async fn main() -> Result<()> {
                         })
                         .collect();
                     *paper_dashboard_memory.paper_positions.write().await = positions.clone();
-                    paper_dashboard_broadcaster.broadcast_positions(positions.clone()); // Broadcast stats immediately after position closed
+                    paper_dashboard_broadcaster.broadcast_positions(positions.clone());
+                    // Broadcast stats immediately after position closed
                     let stats = engine.get_stats();
                     let balance = engine.get_balance();
                     let locked = engine.get_locked_balance();
@@ -1781,7 +1797,7 @@ async fn main() -> Result<()> {
                         exits_time_expiry: stats.exits_time_expiry,
                     };
                     paper_dashboard_broadcaster.broadcast_stats(stats_response);
-                } // Periodically print dashboard
+                }
                 engine.maybe_print_dashboard(); // ── Update Dashboard API ──
                 #[cfg(feature = "dashboard")]
                 {
@@ -1940,6 +1956,14 @@ async fn main() -> Result<()> {
                     let closed_trades = engine.close_all_expired_positions().await;
                     if !closed_trades.is_empty() {
                         tracing::info!(count = closed_trades.len(), "📋 Closed expired positions");
+                        
+                        let mut strat = expired_ml_strategy.lock().await;
+                        for record in &closed_trades {
+                            // Register trade outcome into the ML model so it can learn continuously
+                            strat.register_closed_trade_result(record);
+                        }
+                        drop(strat);
+
                         #[cfg(feature = "dashboard")]
                         {
                             use crate::dashboard::TradeResponse;

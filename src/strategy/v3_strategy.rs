@@ -637,6 +637,62 @@ impl V3Strategy {
         );
     }
 
+    /// Feed closed paper trade outcome back into ML predictor to improve probability calibration over time
+    pub fn register_closed_trade_result(&mut self, record: &crate::paper_trading::PaperTradeRecord) {
+        if record.asset.is_empty() || record.timeframe.is_empty() {
+            return;
+        }
+
+        let asset = match crate::types::Asset::from_str(&record.asset) {
+            Some(a) => a,
+            None => return,
+        };
+
+        let timeframe = match crate::types::Timeframe::from_str(&record.timeframe) {
+            Some(t) => t,
+            None => return,
+        };
+        
+        let direction = if record.direction.eq_ignore_ascii_case("up") || record.direction.eq_ignore_ascii_case("buy") {
+            crate::types::Direction::Up
+        } else {
+            crate::types::Direction::Down
+        };
+
+        // We require features to be re-assembled or we pass a dummy if missing from the paper record directly
+        // The predictor relies on the calibrator confidence to adjust the outcome mapping
+        let mut entry_features = crate::ml_engine::features::MLFeatureVector::default();
+        entry_features.calibrator_confidence = record.confidence;
+        
+        let trade_sample = crate::ml_engine::dataset::TradeSample {
+            trade_id: record.trade_id.clone(),
+            entry_ts: record.market_open_ts.max(record.timestamp),
+            exit_ts: record.market_close_ts.max(record.timestamp + record.hold_duration_ms),
+            asset,
+            timeframe,
+            direction,
+            is_win: record.pnl >= 0.0,
+            entry_features,
+            entry_price: record.entry_price,
+            exit_price: record.exit_price,
+            pnl: record.pnl,
+            estimated_edge: record.edge_net,
+            indicators_triggered: record.indicators_used.clone(),
+        };
+
+        if let Some(ref mut predictor) = self.predictor {
+            predictor.record_outcome(trade_sample.entry_features.calibrator_confidence, trade_sample.is_win);
+            predictor.adjust_weights_dynamically();
+            self.add_trade_to_dataset(trade_sample);
+            info!(
+                asset = ?asset,
+                timeframe = ?timeframe,
+                pnl = record.pnl,
+                "✅ Trade outcome successfully registered in V3 Predictor for dynamic continuous learning"
+            );
+        }
+    }
+
     /// Trigger retraining if needed
     pub fn maybe_retrain(&mut self) -> anyhow::Result<()> {
         if self
@@ -673,6 +729,30 @@ impl V3Strategy {
 
     /// Get ML state for dashboard
     pub fn get_ml_state(&self) -> MLStateResponse {
+        let (ensemble_weights, model_info) = if let Some(ref p) = self.predictor {
+            let weights = vec![
+                p.weights.random_forest,
+                p.weights.gradient_boosting,
+                p.weights.logistic_regression,
+            ];
+            let info: Vec<(String, f64, f64)> = p.models.iter().enumerate().map(|(i, m)| {
+                let weight = match i {
+                    0 => p.weights.random_forest,
+                    1 => p.weights.gradient_boosting,
+                    2 => p.weights.logistic_regression,
+                    _ => 0.0,
+                };
+                (m.name().to_string(), weight, m.accuracy())
+            }).collect();
+            (Some(weights), info)
+        } else {
+            (None, vec![
+                ("Random Forest".to_string(), 0.40, 0.0),
+                ("Gradient Boosting".to_string(), 0.35, 0.0),
+                ("Logistic Regression".to_string(), 0.25, 0.0),
+            ])
+        };
+
         MLStateResponse {
             enabled: self.config.enabled,
             model_accuracy: self.model_accuracy,
@@ -685,10 +765,8 @@ impl V3Strategy {
             },
             is_calibrated: self.is_calibrated(),
             last_filter_reason: self.last_filter_reason.clone(),
-            ensemble_weights: self.predictor.as_ref().map(|p| {
-                // This would need to expose weights from predictor
-                vec![0.4, 0.35, 0.25]
-            }),
+            ensemble_weights,
+            model_info,
         }
     }
 
@@ -794,6 +872,8 @@ pub struct MLStateResponse {
     pub is_calibrated: bool,
     pub last_filter_reason: Option<String>,
     pub ensemble_weights: Option<Vec<f64>>,
+    /// Per-model info: (name, weight, accuracy)
+    pub model_info: Vec<(String, f64, f64)>,
 }
 
 /// Dataset statistics

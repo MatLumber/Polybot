@@ -28,7 +28,6 @@ fn parse_book_level(price: &str, size: &str) -> Option<BookLevel> {
     Some(BookLevel { price, size })
 }
 
-
 fn build_normalized_order_book(
     token_id: String,
     bids: Vec<(String, String)>,
@@ -392,7 +391,7 @@ impl RestClient {
                 c => encoded_query.push_str(&format!("%{:02X}", c as u8)),
             }
         }
-        
+
         let url = format!(
             "{}/public-search?q={}&limit={}",
             gamma_url.trim_end_matches('/'),

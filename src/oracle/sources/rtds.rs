@@ -314,9 +314,8 @@ impl PriceSource for RtdsClient {
                     let mut ping_interval =
                         tokio::time::interval(tokio::time::Duration::from_secs(PING_INTERVAL_SECS));
                     ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                    let mut watchdog_interval = tokio::time::interval(tokio::time::Duration::from_secs(
-                        WATCHDOG_TICK_SECS,
-                    ));
+                    let mut watchdog_interval =
+                        tokio::time::interval(tokio::time::Duration::from_secs(WATCHDOG_TICK_SECS));
                     watchdog_interval
                         .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                     let mut last_useful_message = Instant::now();
@@ -555,7 +554,8 @@ impl RtdsClient {
         };
 
         // Use payload timestamp, fallback to current timestamp.
-        let ts = normalize_epoch_millis(ts_opt.unwrap_or_else(|| chrono::Utc::now().timestamp_millis()));
+        let ts =
+            normalize_epoch_millis(ts_opt.unwrap_or_else(|| chrono::Utc::now().timestamp_millis()));
 
         let effective_source = Self::infer_source_from_symbol(price_source, symbol);
 
@@ -671,4 +671,3 @@ fn parse_rtds_asset(s: &str) -> Result<Asset> {
         _ => bail!("Unknown RTDS asset: {}", s),
     }
 }
-

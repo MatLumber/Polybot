@@ -106,17 +106,17 @@ impl Default for MLEngineConfig {
             // FILTERS: More permissive defaults for paper trading
             // These can be overridden in config/local.yaml
             filters: FilterConfig {
-                max_spread_bps_15m: 200.0,    // Was 100 - too restrictive
-                max_spread_bps_1h: 300.0,     // Was 150 - too restrictive
-                min_depth_usdc: 1000.0,       // Was 5000 - too restrictive for some markets
-                max_volatility_5m: 0.05,      // Was 0.02 - too restrictive
-                min_volatility_5m: 0.0001,    // Was 0.001 - allow very low vol
-                optimal_hours_only: false,    // Was true - don't restrict by hour
-                min_btc_eth_correlation: 0.0, // Was 0.6 - correlation not required
-                max_btc_eth_correlation: 1.0, // Was 0.95 - allow any correlation
-                max_window_progress: 0.90,    // Was 0.70 - allow later entries
+                max_spread_bps_15m: 200.0,      // Was 100 - too restrictive
+                max_spread_bps_1h: 300.0,       // Was 150 - too restrictive
+                min_depth_usdc: 1000.0,         // Was 5000 - too restrictive for some markets
+                max_volatility_5m: 0.05,        // Was 0.02 - too restrictive
+                min_volatility_5m: 0.0001,      // Was 0.001 - allow very low vol
+                optimal_hours_only: false,      // Was true - don't restrict by hour
+                min_btc_eth_correlation: 0.0,   // Was 0.6 - correlation not required
+                max_btc_eth_correlation: 1.0,   // Was 0.95 - allow any correlation
+                max_window_progress: 0.90,      // Was 0.70 - allow later entries
                 min_time_to_close_minutes: 2.0, // Was 3.0 - slightly more permissive
-                min_model_confidence: 0.52,   // Was 0.55 - lower threshold for exploration
+                min_model_confidence: 0.52,     // Was 0.55 - lower threshold for exploration
             },
             training: TrainingConfig {
                 retrain_interval_trades: 50,
@@ -173,7 +173,7 @@ impl MLEngineState {
             self.correct_predictions as f64 / self.total_predictions as f64
         }
     }
-    
+
     /// Check if retraining is needed
     pub fn should_retrain(&self, interval: usize) -> bool {
         if let Some(last) = self.last_retraining {
@@ -183,7 +183,7 @@ impl MLEngineState {
             true
         }
     }
-    
+
     /// Add a prediction for tracking
     pub fn add_prediction(&mut self, prediction: Prediction) {
         self.total_predictions += 1;

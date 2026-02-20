@@ -36,10 +36,10 @@ pub use orderbook_tracker::{MicrostructureFeatures, OrderbookImbalanceTracker, P
 
 // NEW v3.0: Temporal patterns, settlement prediction, cross-asset analysis
 pub mod temporal_patterns;
-pub use temporal_patterns::{TemporalPatternAnalyzer, HourlyStats, TemporalStatsSummary};
+pub use temporal_patterns::{HourlyStats, TemporalPatternAnalyzer, TemporalStatsSummary};
 
 pub mod settlement_predictor;
-pub use settlement_predictor::{SettlementPricePredictor, SettlementPrediction, SettlementEdge};
+pub use settlement_predictor::{SettlementEdge, SettlementPrediction, SettlementPricePredictor};
 
 pub mod cross_asset;
 pub use cross_asset::{CrossAssetAnalyzer, CrossAssetSignal, CrossAssetSignalType};
@@ -89,7 +89,7 @@ pub struct FeatureEngine {
     orderbook_data: HashMap<(Asset, Timeframe), InternalOrderbookSnapshot>,
     /// External orderbook tracker for advanced microstructure analysis
     orderbook_tracker: Option<std::sync::Arc<std::sync::Mutex<OrderbookImbalanceTracker>>>,
-    
+
     // ============================================
     // NEW v3.0: Advanced pattern analysis
     // ============================================
@@ -293,27 +293,27 @@ impl FeatureEngine {
             cross_asset_analyzer: CrossAssetAnalyzer::new(50),
         }
     }
-    
+
     /// Get mutable reference to temporal analyzer for recording trades
     pub fn temporal_analyzer_mut(&mut self) -> &mut TemporalPatternAnalyzer {
         &mut self.temporal_analyzer
     }
-    
+
     /// Get reference to settlement predictor
     pub fn settlement_predictor(&self) -> &SettlementPricePredictor {
         &self.settlement_predictor
     }
-    
+
     /// Get mutable reference to settlement predictor
     pub fn settlement_predictor_mut(&mut self) -> &mut SettlementPricePredictor {
         &mut self.settlement_predictor
     }
-    
+
     /// Get reference to cross-asset analyzer
     pub fn cross_asset_analyzer(&self) -> &CrossAssetAnalyzer {
         &self.cross_asset_analyzer
     }
-    
+
     /// Get mutable reference to cross-asset analyzer
     pub fn cross_asset_analyzer_mut(&mut self) -> &mut CrossAssetAnalyzer {
         &mut self.cross_asset_analyzer
@@ -381,7 +381,7 @@ impl FeatureEngine {
 
         let last = candles.last()?;
         let key = (last.asset, last.timeframe);
-        
+
         tracing::debug!(
             asset = ?last.asset,
             timeframe = ?last.timeframe,
@@ -808,7 +808,7 @@ impl FeatureEngine {
         }
 
         let has_prev_state = self.rsi_state.contains_key(&key);
-        
+
         tracing::debug!(
             asset = ?key.0,
             timeframe = ?key.1,

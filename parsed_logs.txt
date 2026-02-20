@@ -1,0 +1,134 @@
+[2m2026-02-19T07:04:19.991904Z[0m [33m WARN[0m Failed to deserialize paper_analytics record: CSV deserialize error: record 0 (line: 1, byte: 0): field 0: invalid digit found in string
+{"timestamp":"2026-02-19T07:04:19.991911Z","level":"WARN","fields":{"message":"Failed to deserialize paper_analytics record: CSV deserialize error: record 0 (line: 1, byte: 0): field 0: invalid digit found in string"},"target":"polybot::persistence"}
+[2m2026-02-19T07:04:19.991999Z[0m [33m WARN[0m Failed to deserialize paper_analytics record: CSV deserialize error: record 0 (line: 1, byte: 0): field 0: invalid digit found in string
+{"timestamp":"2026-02-19T07:04:19.992003Z","level":"WARN","fields":{"message":"Failed to deserialize paper_analytics record: CSV deserialize error: record 0 (line: 1, byte: 0): field 0: invalid digit found in string"},"target":"polybot::persistence"}
+[2m2026-02-19T07:04:20.210625Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:04:20.211824Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:04:20.214216Z[0m [31mERROR[0m Dashboard server failed to start [3merror[0m[2m=[0mAddress already in use (os error 98)
+{"timestamp":"2026-02-19T07:04:20.214240Z","level":"ERROR","fields":{"message":"Dashboard server failed to start","error":"Address already in use (os error 98)"},"target":"polybot"}
+[2m2026-02-19T07:05:20.001512Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:05:20.001550Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:06:20.002020Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:06:20.002060Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:07:20.001580Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:07:20.001620Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:08:20.001332Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:08:20.001382Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:09:20.001609Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:09:20.001674Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:10:20.001282Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:10:20.001336Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:11:20.001550Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:11:20.001603Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:12:20.002102Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:12:20.002162Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:13:20.001940Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:13:20.001976Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:13:31.760266Z[0m [31mERROR[0m Market feed WebSocket error: WebSocket protocol error: Connection reset without closing handshake
+{"timestamp":"2026-02-19T07:13:31.760304Z","level":"ERROR","fields":{"message":"Market feed WebSocket error: WebSocket protocol error: Connection reset without closing handshake"},"target":"polybot::clob::websocket"}
+[2m2026-02-19T07:13:31.760325Z[0m [33m WARN[0m Market feed reconnect scheduled [3mreason[0m[2m=[0m"stream_error" [3mattempt[0m[2m=[0m1 [3msleep_secs[0m[2m=[0m2
+{"timestamp":"2026-02-19T07:13:31.760330Z","level":"WARN","fields":{"message":"Market feed reconnect scheduled","reason":"stream_error","attempt":1,"sleep_secs":2},"target":"polybot::clob::websocket"}
+[2m2026-02-19T07:13:31.760381Z[0m [31mERROR[0m 📊 Polymarket orderbook WebSocket error [3merror[0m[2m=[0mmarket_feed_stream_error: WebSocket protocol error: Connection reset without closing handshake
+{"timestamp":"2026-02-19T07:13:31.760387Z","level":"ERROR","fields":{"message":"📊 Polymarket orderbook WebSocket error","error":"market_feed_stream_error: WebSocket protocol error: Connection reset without closing handshake"},"target":"polybot"}
+[2m2026-02-19T07:13:31.760395Z[0m [33m WARN[0m 📊 Polymarket orderbook WebSocket disconnected
+{"timestamp":"2026-02-19T07:13:31.760398Z","level":"WARN","fields":{"message":"📊 Polymarket orderbook WebSocket disconnected"},"target":"polybot"}
+[2m2026-02-19T07:14:20.002086Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:14:20.002147Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:15:20.001500Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:15:20.001549Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:16:20.001383Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:16:20.001430Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:16:50.911315Z[0m [33m WARN[0m Failed to parse/process message [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBFeTck_rPECEjQ= request_id=ZBHTgEs9rPEEVIw=): Too Many Requests
+{"timestamp":"2026-02-19T07:16:50.911350Z","level":"WARN","fields":{"message":"Failed to parse/process message","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBFeTck_rPECEjQ= request_id=ZBHTgEs9rPEEVIw=): Too Many Requests"},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:16:50.911381Z[0m [33m WARN[0m RTDS rate-limited; backing off before reconnect [3msource[0m[2m=[0mRTDS [3mcooldown_secs[0m[2m=[0m30
+{"timestamp":"2026-02-19T07:16:50.911384Z","level":"WARN","fields":{"message":"RTDS rate-limited; backing off before reconnect","source":"RTDS","cooldown_secs":30},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:16:50.911394Z[0m [31mERROR[0m Oracle error [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBFeTck_rPECEjQ= request_id=ZBHTgEs9rPEEVIw=): Too Many Requests
+{"timestamp":"2026-02-19T07:16:50.911396Z","level":"ERROR","fields":{"message":"Oracle error","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBFeTck_rPECEjQ= request_id=ZBHTgEs9rPEEVIw=): Too Many Requests"},"target":"polybot"}
+[2m2026-02-19T07:17:20.001147Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:17:20.001199Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:17:20.914419Z[0m [33m WARN[0m 🔌 Oracle source disconnected [3msource[0m[2m=[0mRTDS
+{"timestamp":"2026-02-19T07:17:20.914423Z","level":"WARN","fields":{"message":"🔌 Oracle source disconnected","source":"RTDS"},"target":"polybot"}
+[2m2026-02-19T07:17:21.476333Z[0m [33m WARN[0m ⚠️ Price data gap detected - skipping signal generation [3masset[0m[2m=[0mETH [3mgap_ms[0m[2m=[0m775310
+{"timestamp":"2026-02-19T07:17:21.476337Z","level":"WARN","fields":{"message":"⚠️ Price data gap detected - skipping signal generation","asset":"ETH","gap_ms":775310},"target":"polybot"}
+[2m2026-02-19T07:17:51.891670Z[0m [33m WARN[0m Failed to parse/process message [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBHYQcA1rPECImg= request_id=ZBHdCEwhrPEEO9w=): Too Many Requests
+{"timestamp":"2026-02-19T07:17:51.891709Z","level":"WARN","fields":{"message":"Failed to parse/process message","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBHYQcA1rPECImg= request_id=ZBHdCEwhrPEEO9w=): Too Many Requests"},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:17:51.891733Z[0m [33m WARN[0m RTDS rate-limited; backing off before reconnect [3msource[0m[2m=[0mRTDS [3mcooldown_secs[0m[2m=[0m30
+{"timestamp":"2026-02-19T07:17:51.891739Z","level":"WARN","fields":{"message":"RTDS rate-limited; backing off before reconnect","source":"RTDS","cooldown_secs":30},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:17:51.892682Z[0m [31mERROR[0m Oracle error [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBHYQcA1rPECImg= request_id=ZBHdCEwhrPEEO9w=): Too Many Requests
+{"timestamp":"2026-02-19T07:17:51.892711Z","level":"ERROR","fields":{"message":"Oracle error","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBHYQcA1rPECImg= request_id=ZBHdCEwhrPEEO9w=): Too Many Requests"},"target":"polybot"}
+[2m2026-02-19T07:18:20.002894Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:18:20.003457Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:18:21.902875Z[0m [33m WARN[0m 🔌 Oracle source disconnected [3msource[0m[2m=[0mRTDS
+{"timestamp":"2026-02-19T07:18:21.902892Z","level":"WARN","fields":{"message":"🔌 Oracle source disconnected","source":"RTDS"},"target":"polybot"}
+[2m2026-02-19T07:18:37.600020Z[0m [33m WARN[0m Failed to parse/process message [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBHh0faqrPECHlg= request_id=ZBHkLGMKrPEEuSQ=): Too Many Requests
+{"timestamp":"2026-02-19T07:18:37.600056Z","level":"WARN","fields":{"message":"Failed to parse/process message","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBHh0faqrPECHlg= request_id=ZBHkLGMKrPEEuSQ=): Too Many Requests"},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:18:37.600071Z[0m [33m WARN[0m RTDS rate-limited; backing off before reconnect [3msource[0m[2m=[0mRTDS [3mcooldown_secs[0m[2m=[0m30
+{"timestamp":"2026-02-19T07:18:37.600075Z","level":"WARN","fields":{"message":"RTDS rate-limited; backing off before reconnect","source":"RTDS","cooldown_secs":30},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:18:37.600084Z[0m [31mERROR[0m Oracle error [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBHh0faqrPECHlg= request_id=ZBHkLGMKrPEEuSQ=): Too Many Requests
+{"timestamp":"2026-02-19T07:18:37.600103Z","level":"ERROR","fields":{"message":"Oracle error","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBHh0faqrPECHlg= request_id=ZBHkLGMKrPEEuSQ=): Too Many Requests"},"target":"polybot"}
+[2m2026-02-19T07:19:07.605854Z[0m [33m WARN[0m 🔌 Oracle source disconnected [3msource[0m[2m=[0mRTDS
+{"timestamp":"2026-02-19T07:19:07.605859Z","level":"WARN","fields":{"message":"🔌 Oracle source disconnected","source":"RTDS"},"target":"polybot"}
+[2m2026-02-19T07:19:20.002130Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:19:20.002180Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:20:20.024802Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:20:20.025078Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:21:20.002690Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:21:20.003084Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:22:20.002775Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:22:20.003048Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:23:20.003099Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:23:20.003303Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:24:20.007813Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:24:20.011070Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:25:20.004742Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:25:20.005073Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:25:23.176780Z[0m [33m WARN[0m Failed to parse/process message [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBHo8cqprPECGBw= request_id=ZBIjjE9iLPEEljQ=): Too Many Requests
+{"timestamp":"2026-02-19T07:25:23.176821Z","level":"WARN","fields":{"message":"Failed to parse/process message","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBHo8cqprPECGBw= request_id=ZBIjjE9iLPEEljQ=): Too Many Requests"},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:25:23.176841Z[0m [33m WARN[0m RTDS rate-limited; backing off before reconnect [3msource[0m[2m=[0mRTDS [3mcooldown_secs[0m[2m=[0m30
+{"timestamp":"2026-02-19T07:25:23.176855Z","level":"WARN","fields":{"message":"RTDS rate-limited; backing off before reconnect","source":"RTDS","cooldown_secs":30},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:25:23.176865Z[0m [31mERROR[0m Oracle error [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBHo8cqprPECGBw= request_id=ZBIjjE9iLPEEljQ=): Too Many Requests
+{"timestamp":"2026-02-19T07:25:23.176868Z","level":"ERROR","fields":{"message":"Oracle error","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBHo8cqprPECGBw= request_id=ZBIjjE9iLPEEljQ=): Too Many Requests"},"target":"polybot"}
+[2m2026-02-19T07:25:54.023015Z[0m [33m WARN[0m 🔌 Oracle source disconnected [3msource[0m[2m=[0mRTDS
+{"timestamp":"2026-02-19T07:25:54.023036Z","level":"WARN","fields":{"message":"🔌 Oracle source disconnected","source":"RTDS"},"target":"polybot"}
+[2m2026-02-19T07:25:54.881297Z[0m [33m WARN[0m ⚠️ Price data gap detected - skipping signal generation [3masset[0m[2m=[0mETH [3mgap_ms[0m[2m=[0m406659
+{"timestamp":"2026-02-19T07:25:54.881502Z","level":"WARN","fields":{"message":"⚠️ Price data gap detected - skipping signal generation","asset":"ETH","gap_ms":406659},"target":"polybot"}
+[2m2026-02-19T07:26:09.843459Z[0m [33m WARN[0m Failed to parse/process message [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBIoec2NLPECHWA= request_id=ZBIq1GaaLPEEoog=): Too Many Requests
+{"timestamp":"2026-02-19T07:26:09.843505Z","level":"WARN","fields":{"message":"Failed to parse/process message","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBIoec2NLPECHWA= request_id=ZBIq1GaaLPEEoog=): Too Many Requests"},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:26:09.843537Z[0m [33m WARN[0m RTDS rate-limited; backing off before reconnect [3msource[0m[2m=[0mRTDS [3mcooldown_secs[0m[2m=[0m30
+{"timestamp":"2026-02-19T07:26:09.843542Z","level":"WARN","fields":{"message":"RTDS rate-limited; backing off before reconnect","source":"RTDS","cooldown_secs":30},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:26:09.843556Z[0m [31mERROR[0m Oracle error [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBIoec2NLPECHWA= request_id=ZBIq1GaaLPEEoog=): Too Many Requests
+{"timestamp":"2026-02-19T07:26:09.843560Z","level":"ERROR","fields":{"message":"Oracle error","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBIoec2NLPECHWA= request_id=ZBIq1GaaLPEEoog=): Too Many Requests"},"target":"polybot"}
+[2m2026-02-19T07:26:20.003575Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:26:20.005435Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:26:40.655282Z[0m [33m WARN[0m 🔌 Oracle source disconnected [3msource[0m[2m=[0mRTDS
+{"timestamp":"2026-02-19T07:26:40.655322Z","level":"WARN","fields":{"message":"🔌 Oracle source disconnected","source":"RTDS"},"target":"polybot"}
+[2m2026-02-19T07:27:20.006171Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:27:20.007905Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:28:20.278681Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:28:20.279002Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:29:20.002084Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:29:20.002137Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:30:12.241243Z[0m [33m WARN[0m Failed to parse/process message [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBIv4c02LPECFsQ= request_id=ZBJQtHH_LPEEUtQ=): Too Many Requests
+{"timestamp":"2026-02-19T07:30:12.241295Z","level":"WARN","fields":{"message":"Failed to parse/process message","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBIv4c02LPECFsQ= request_id=ZBJQtHH_LPEEUtQ=): Too Many Requests"},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:30:12.241316Z[0m [33m WARN[0m RTDS rate-limited; backing off before reconnect [3msource[0m[2m=[0mRTDS [3mcooldown_secs[0m[2m=[0m30
+{"timestamp":"2026-02-19T07:30:12.241324Z","level":"WARN","fields":{"message":"RTDS rate-limited; backing off before reconnect","source":"RTDS","cooldown_secs":30},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:30:12.241339Z[0m [31mERROR[0m Oracle error [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBIv4c02LPECFsQ= request_id=ZBJQtHH_LPEEUtQ=): Too Many Requests
+{"timestamp":"2026-02-19T07:30:12.241344Z","level":"ERROR","fields":{"message":"Oracle error","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBIv4c02LPECFsQ= request_id=ZBJQtHH_LPEEUtQ=): Too Many Requests"},"target":"polybot"}
+[2m2026-02-19T07:30:20.007817Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:30:20.007866Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:30:42.250076Z[0m [33m WARN[0m 🔌 Oracle source disconnected [3msource[0m[2m=[0mRTDS
+{"timestamp":"2026-02-19T07:30:42.250092Z","level":"WARN","fields":{"message":"🔌 Oracle source disconnected","source":"RTDS"},"target":"polybot"}
+[2m2026-02-19T07:30:42.881668Z[0m [33m WARN[0m ⚠️ Price data gap detected - skipping signal generation [3masset[0m[2m=[0mETH [3mgap_ms[0m[2m=[0m240551
+{"timestamp":"2026-02-19T07:30:42.881878Z","level":"WARN","fields":{"message":"⚠️ Price data gap detected - skipping signal generation","asset":"ETH","gap_ms":240551},"target":"polybot"}
+[2m2026-02-19T07:31:12.860682Z[0m [33m WARN[0m Failed to parse/process message [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBJVec0tLPECGYQ= request_id=ZBJaMHjQLPEEt5g=): Too Many Requests
+{"timestamp":"2026-02-19T07:31:12.860732Z","level":"WARN","fields":{"message":"Failed to parse/process message","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBJVec0tLPECGYQ= request_id=ZBJaMHjQLPEEt5g=): Too Many Requests"},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:31:12.860753Z[0m [33m WARN[0m RTDS rate-limited; backing off before reconnect [3msource[0m[2m=[0mRTDS [3mcooldown_secs[0m[2m=[0m30
+{"timestamp":"2026-02-19T07:31:12.860759Z","level":"WARN","fields":{"message":"RTDS rate-limited; backing off before reconnect","source":"RTDS","cooldown_secs":30},"target":"polybot::oracle::sources::rtds"}
+[2m2026-02-19T07:31:12.860795Z[0m [31mERROR[0m Oracle error [3msource[0m[2m=[0mRTDS [3merror[0m[2m=[0mRTDS server error (status=0 connection_id=ZBJVec0tLPECGYQ= request_id=ZBJaMHjQLPEEt5g=): Too Many Requests
+{"timestamp":"2026-02-19T07:31:12.860799Z","level":"ERROR","fields":{"message":"Oracle error","source":"RTDS","error":"RTDS server error (status=0 connection_id=ZBJVec0tLPECGYQ= request_id=ZBJaMHjQLPEEt5g=): Too Many Requests"},"target":"polybot"}
+[2m2026-02-19T07:31:20.001898Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:31:20.001949Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}
+[2m2026-02-19T07:31:42.867188Z[0m [33m WARN[0m 🔌 Oracle source disconnected [3msource[0m[2m=[0mRTDS
+{"timestamp":"2026-02-19T07:31:42.867195Z","level":"WARN","fields":{"message":"🔌 Oracle source disconnected","source":"RTDS"},"target":"polybot"}
+[2m2026-02-19T07:32:20.001690Z[0m [33m WARN[0m Failed to fetch balance [3merror[0m[2m=[0mPOLY_API_KEY not configured for authenticated CLOB requests
+{"timestamp":"2026-02-19T07:32:20.001742Z","level":"WARN","fields":{"message":"Failed to fetch balance","error":"POLY_API_KEY not configured for authenticated CLOB requests"},"target":"polybot"}

@@ -257,11 +257,11 @@ impl Default for PaperTradingConfig {
             kelly_fraction_1h: 0.50,
             kelly_cap_15m: 0.05,
             kelly_cap_1h: 0.10,
-            min_edge_net: 0.05,  // v2.0: 5% edge mínimo (era 0.0)
+            min_edge_net: 0.05, // v2.0: 5% edge mínimo (era 0.0)
             // NUEVO v2.0
             hard_stop_atr_multiplier: 1.5,
             adaptive_stops_enabled: true,
-            eth_size_multiplier: 0.8,  // Reducir sizing ETH 20%
+            eth_size_multiplier: 0.8, // Reducir sizing ETH 20%
             atr_period: 14,
         }
     }
@@ -996,7 +996,10 @@ impl PaperTradingEngine {
             let mut bias_map = self.window_bias.write().unwrap();
             bias_map.clear();
             for pos in &restored_positions {
-                bias_map.insert((pos.asset, pos.timeframe, pos.market_open_ts), pos.direction);
+                bias_map.insert(
+                    (pos.asset, pos.timeframe, pos.market_open_ts),
+                    pos.direction,
+                );
             }
         }
 
@@ -1005,8 +1008,7 @@ impl PaperTradingEngine {
 
         info!(
             restored_positions = restored_positions.len(),
-            skipped_positions,
-            "💾 [PAPER] Positions restored from persisted state"
+            skipped_positions, "💾 [PAPER] Positions restored from persisted state"
         );
     }
 
@@ -1566,9 +1568,7 @@ impl PaperTradingEngine {
                         q.depth_top5.max(0.0),
                         "orderbook".to_string(),
                     )
-                } else if signal.quote_bid > 0.0
-                    && signal.quote_ask > 0.0
-                    && signal.quote_mid > 0.0
+                } else if signal.quote_bid > 0.0 && signal.quote_ask > 0.0 && signal.quote_mid > 0.0
                 {
                     (
                         signal.quote_bid.clamp(0.01, 0.99),
@@ -2427,13 +2427,16 @@ impl PaperTradingEngine {
     pub async fn close_all_expired_positions(&self) -> Vec<PaperTradeRecord> {
         let expired = self.get_expired_positions();
         let mut closed_trades = Vec::new();
-        
+
         for (asset, timeframe) in expired {
-            if let Some(record) = self.close_and_save(asset, timeframe, PaperExitReason::MarketExpiry).await {
+            if let Some(record) = self
+                .close_and_save(asset, timeframe, PaperExitReason::MarketExpiry)
+                .await
+            {
                 closed_trades.push(record);
             }
         }
-        
+
         closed_trades
     }
 

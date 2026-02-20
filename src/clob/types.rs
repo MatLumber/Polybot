@@ -165,10 +165,18 @@ impl OrderBook {
     /// - sort bids descending (best first)
     /// - sort asks ascending (best first)
     pub fn normalize_levels(&mut self) {
-        self.bids
-            .retain(|level| level.price.is_finite() && level.size.is_finite() && level.price > 0.0 && level.size > 0.0);
-        self.asks
-            .retain(|level| level.price.is_finite() && level.size.is_finite() && level.price > 0.0 && level.size > 0.0);
+        self.bids.retain(|level| {
+            level.price.is_finite()
+                && level.size.is_finite()
+                && level.price > 0.0
+                && level.size > 0.0
+        });
+        self.asks.retain(|level| {
+            level.price.is_finite()
+                && level.size.is_finite()
+                && level.price > 0.0
+                && level.size > 0.0
+        });
 
         self.bids
             .sort_by(|a, b| b.price.partial_cmp(&a.price).unwrap_or(Ordering::Equal));

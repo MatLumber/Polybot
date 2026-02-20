@@ -1,0 +1,17 @@
+    // Connects to Polymarket's WebSocket with dynamic market discovery
+    // Automatically detects when markets expire and rolls over to new ones
+    let orderbook_feed_tracker = orderbook_tracker.clone();
+    let orderbook_share_prices = share_prices_for_orderbook.clone();
+    let gamma_url = config.execution.gamma_url.clone();
+    
+    let orderbook_feed_handle = tokio::spawn(async move {
+        use crate::clob::DynamicOrderbookFeed;
+        
+        let feed = DynamicOrderbookFeed::new(
+            gamma_url,
+            orderbook_feed_tracker,
+            orderbook_share_prices,
+        );
+        
+        feed.run().await;
+    });

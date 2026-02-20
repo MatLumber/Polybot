@@ -56,6 +56,33 @@ pub trait Strategy: Send + Sync {
 
     /// Obtener estadísticas de indicadores (V2 feature, V3 devuelve vacío)
     fn get_indicator_stats(&self) -> Vec<crate::strategy::IndicatorStats>;
+
+    /// Get ML state for dashboard (V3 only, V2 returns defaults)
+    fn get_ml_state(&self) -> crate::strategy::v3_strategy::MLStateResponse {
+        crate::strategy::v3_strategy::MLStateResponse {
+            enabled: false,
+            model_accuracy: 0.0,
+            total_predictions: 0,
+            correct_predictions: 0,
+            win_rate: 0.0,
+            is_calibrated: false,
+            last_filter_reason: None,
+            ensemble_weights: None,
+            model_info: vec![],
+        }
+    }
+
+    /// Get dataset statistics (V3 only, V2 returns defaults)
+    fn get_dataset_stats(&self) -> crate::strategy::v3_strategy::DatasetStats {
+        crate::strategy::v3_strategy::DatasetStats {
+            total_samples: 0,
+            wins: 0,
+            losses: 0,
+        }
+    }
+
+    /// Register closed trade result for continuous ML learning (V3 only, V2 no-op)
+    fn register_closed_trade_result(&mut self, _record: &crate::paper_trading::PaperTradeRecord) {}
 }
 
 // Implementación para StrategyEngine (V2)
@@ -120,6 +147,8 @@ impl Strategy for crate::strategy::StrategyEngine {
     fn get_indicator_stats(&self) -> Vec<crate::strategy::IndicatorStats> {
         self.get_indicator_stats()
     }
+
+    // V2 uses defaults for ML methods (inherited from trait defaults)
 }
 
 // Implementación para V3Strategy
@@ -194,5 +223,17 @@ impl Strategy for crate::strategy::V3Strategy {
     fn get_indicator_stats(&self) -> Vec<crate::strategy::IndicatorStats> {
         // V3 usa ML ensemble, no indicadores individuales - devuelve vacío
         Vec::new()
+    }
+
+    fn get_ml_state(&self) -> crate::strategy::v3_strategy::MLStateResponse {
+        crate::strategy::V3Strategy::get_ml_state(self)
+    }
+
+    fn get_dataset_stats(&self) -> crate::strategy::v3_strategy::DatasetStats {
+        crate::strategy::V3Strategy::get_dataset_stats(self)
+    }
+
+    fn register_closed_trade_result(&mut self, record: &crate::paper_trading::PaperTradeRecord) {
+        crate::strategy::V3Strategy::register_closed_trade_result(self, record)
     }
 }

@@ -85,7 +85,7 @@ impl DynamicOrderbookFeed {
 
             // Sleep before next check
             let sleep_duration = tokio::time::Duration::from_secs(
-                self.market_discovery.seconds_until_refresh().max(5) as u64
+                self.market_discovery.seconds_until_refresh().max(5) as u64,
             );
             tokio::time::sleep(sleep_duration).await;
         }
@@ -94,14 +94,11 @@ impl DynamicOrderbookFeed {
     /// Discover markets and connect WebSocket
     async fn discover_and_connect(&mut self) -> anyhow::Result<()> {
         info!("🔍 Discovering active markets...");
-        
+
         let changes = self.market_discovery.refresh_markets().await?;
-        
+
         let tracked = self.market_discovery.get_tracked_markets();
-        info!(
-            count = tracked.len(),
-            "📊 Markets discovered"
-        );
+        info!(count = tracked.len(), "📊 Markets discovered");
 
         for ((asset, timeframe), market) in tracked {
             info!(
@@ -131,12 +128,17 @@ impl DynamicOrderbookFeed {
     /// Check for market changes
     async fn check_market_changes(&mut self) -> anyhow::Result<bool> {
         let changes = self.market_discovery.refresh_markets().await?;
-        
+
         let needs_reconnect = changes.iter().any(|c| c.requires_reconnect());
-        
+
         for change in &changes {
             match change {
-                MarketChange::Rollover { asset, timeframe, old_market, new_market } => {
+                MarketChange::Rollover {
+                    asset,
+                    timeframe,
+                    old_market,
+                    new_market,
+                } => {
                     info!(
                         asset = ?asset,
                         timeframe = ?timeframe,
@@ -145,7 +147,11 @@ impl DynamicOrderbookFeed {
                         "🔄 Market rollover"
                     );
                 }
-                MarketChange::Expired { asset, timeframe, market } => {
+                MarketChange::Expired {
+                    asset,
+                    timeframe,
+                    market,
+                } => {
                     warn!(
                         asset = ?asset,
                         timeframe = ?timeframe,
@@ -192,7 +198,9 @@ impl DynamicOrderbookFeed {
 
         // Spawn WebSocket connection in a separate task
         tokio::spawn(async move {
-            if let Err(e) = run_websocket_connection(ws_url, token_ids, token_map, tracker, share_prices).await {
+            if let Err(e) =
+                run_websocket_connection(ws_url, token_ids, token_map, tracker, share_prices).await
+            {
                 error!(error = %e, "WebSocket connection error");
             }
         });
@@ -249,12 +257,7 @@ async fn run_websocket_connection(
                             let ask = book.best_ask().map(|a| a.price).unwrap_or(midpoint);
                             let bid_size = book.best_bid().map(|b| b.size).unwrap_or(0.0);
                             let ask_size = book.best_ask().map(|a| a.size).unwrap_or(0.0);
-                            let depth_top5 = book
-                                .bids
-                                .iter()
-                                .take(5)
-                                .map(|b| b.size)
-                                .sum::<f64>()
+                            let depth_top5 = book.bids.iter().take(5).map(|b| b.size).sum::<f64>()
                                 + book.asks.iter().take(5).map(|a| a.size).sum::<f64>();
 
                             let direction_str = match direction {
@@ -263,7 +266,14 @@ async fn run_websocket_connection(
                             };
 
                             share_prices.update_quote_with_depth(
-                                asset, tf, direction_str, bid, ask, midpoint, bid_size, ask_size,
+                                asset,
+                                tf,
+                                direction_str,
+                                bid,
+                                ask,
+                                midpoint,
+                                bid_size,
+                                ask_size,
                                 depth_top5,
                             );
 
@@ -293,13 +303,9 @@ async fn run_websocket_connection(
                                 let ask = book.best_ask().map(|a| a.price).unwrap_or(midpoint);
                                 let bid_size = book.best_bid().map(|b| b.size).unwrap_or(0.0);
                                 let ask_size = book.best_ask().map(|a| a.size).unwrap_or(0.0);
-                                let depth_top5 = book
-                                    .bids
-                                    .iter()
-                                    .take(5)
-                                    .map(|b| b.size)
-                                    .sum::<f64>()
-                                    + book.asks.iter().take(5).map(|a| a.size).sum::<f64>();
+                                let depth_top5 =
+                                    book.bids.iter().take(5).map(|b| b.size).sum::<f64>()
+                                        + book.asks.iter().take(5).map(|a| a.size).sum::<f64>();
 
                                 let direction_str = match direction {
                                     Direction::Up => "UP",
@@ -307,7 +313,14 @@ async fn run_websocket_connection(
                                 };
 
                                 share_prices.update_quote_with_depth(
-                                    asset, tf, direction_str, bid, ask, midpoint, bid_size, ask_size,
+                                    asset,
+                                    tf,
+                                    direction_str,
+                                    bid,
+                                    ask,
+                                    midpoint,
+                                    bid_size,
+                                    ask_size,
                                     depth_top5,
                                 );
                             }
