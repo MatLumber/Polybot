@@ -958,6 +958,8 @@ impl DashboardMemory {
             }).collect();
 
             serde_json::json!({
+                "model_type": m.model_type,
+                "version": m.version,
                 "accuracy": m.model_accuracy,
                 "win_rate": m.win_rate,
                 "total_predictions": m.total_predictions,
