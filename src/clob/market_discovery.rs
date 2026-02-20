@@ -260,122 +260,200 @@ impl MarketDiscovery {
         Ok(best_market)
     }
 
-    /// Fetch candidate markets from Gamma API
-    /// Uses /events endpoint which is more effective for discovering up/down markets
+    /// Fetch candidate markets from Gamma API using /public-search
+    /// Searches for up/down markets with queries like "btc updown 15m" or "bitcoin up or down"
     async fn fetch_candidate_markets(
         &self,
         asset: Asset,
-        _timeframe: Timeframe,
+        timeframe: Timeframe,
     ) -> Result<Vec<DiscoveredMarket>> {
         let mut all_markets = Vec::new();
-
-        // PRIMARY: Use events endpoint - most effective for discovering active markets
-        info!("📡 Fetching events from Gamma API for {:?}...", asset);
-        let events = self.rest_client
-            .get_events_page(&self.gamma_url, 200, 0)
+        
+        // Build search query based on asset and timeframe
+        let search_query = match (asset, timeframe) {
+            (Asset::BTC, Timeframe::Min15) => "btc updown 15m",
+            (Asset::BTC, Timeframe::Hour1) => "bitcoin up or down",
+            (Asset::ETH, Timeframe::Min15) => "eth updown 15m",
+            (Asset::ETH, Timeframe::Hour1) => "ethereum up or down",
+            _ => return Ok(Vec::new()),
+        };
+        
+        info!("🔍 Searching with query: '{}' for {:?} {:?}", search_query, asset, timeframe);
+        
+        // Use public-search endpoint
+        let search_result = self.rest_client
+            .search_public(&self.gamma_url, search_query, 50)
             .await?;
         
-        info!("📊 Events endpoint returned {} events", events.len());
+        // Extract events from search results
+        let events = search_result.get("events")
+            .and_then(|e| e.as_array())
+            .map(|arr| arr.to_vec())
+            .unwrap_or_default();
         
-        // Log first few events to debug
-        for (i, event) in events.iter().take(5).enumerate() {
-            info!("📋 Event {}: slug='{}' title='{}' markets={}", 
-                i, 
-                event.slug.as_deref().unwrap_or("N/A"),
-                event.title,
-                event.markets.len());
-        }
+        info!("📊 Search returned {} events", events.len());
         
-        for event in events {
-            let event_slug = event.slug.clone().unwrap_or_default();
-            let event_text = format!("{} {}", event_slug, event.title).to_lowercase();
+        let now = Utc::now();
+        
+        for event_json in events {
+            // Parse event fields from JSON
+            let event_slug = event_json.get("slug")
+                .and_then(|s| s.as_str())
+                .unwrap_or("");
+            let event_title = event_json.get("title")
+                .and_then(|t| t.as_str())
+                .unwrap_or("");
+            let active = event_json.get("active")
+                .and_then(|a| a.as_bool())
+                .unwrap_or(false);
+            let closed = event_json.get("closed")
+                .and_then(|c| c.as_bool())
+                .unwrap_or(true);
+            let end_date_str = event_json.get("endDate")
+                .and_then(|d| d.as_str());
             
-            // Check if event matches BTC/ETH
-            let asset_match = match asset {
-                Asset::BTC => event_text.contains("btc") || event_text.contains("bitcoin"),
-                Asset::ETH => event_text.contains("eth") || event_text.contains("ethereum"),
-                _ => false,
-            };
+            // Parse end date
+            let end_date = end_date_str
+                .and_then(|d| DateTime::parse_from_rfc3339(d).ok())
+                .map(|dt| dt.with_timezone(&Utc));
             
-            // Check if it's an up/down market
-            let is_updown = event_text.contains("up or down") 
-                || event_text.contains("updown") 
-                || event_slug.contains("updown");
-            
-            if !asset_match || !is_updown {
-                debug!("⏭️ Skipping event '{}': asset_match={} is_updown={}", 
-                    event.title, asset_match, is_updown);
+            // Skip if not active or closed
+            if !active || closed {
+                debug!("⏭️ Skipping '{}': active={} closed={}", event_title, active, closed);
                 continue;
             }
             
-            info!("🎯 Found {} up/down event: '{}' with {} markets", 
-                match asset { Asset::BTC => "BTC", Asset::ETH => "ETH", _ => "?" },
-                event.title, 
-                event.markets.len());
-            
-            // Process markets in this event
-            for market in event.markets {
-                let condition_id = market.condition_id.clone();
-                let q_preview: String = market.question.chars().take(60).collect();
-                let slug = market.slug.clone().unwrap_or_default();
-                
-                if market.outcomes.len() != 2 {
-                    debug!("⏭️ Market {} doesn't have 2 outcomes", condition_id);
+            // Skip if end date is in the past
+            if let Some(ed) = end_date {
+                if ed <= now {
+                    debug!("⏭️ Skipping '{}': already ended", event_title);
                     continue;
                 }
-                
-                info!("🔄 Converting market: {} (slug='{}')", condition_id, slug);
-                
-                if let Some(discovered) = self.convert_market_response(market, asset) {
-                    info!("✅ Converted: {} (tf={:?}, end={})", 
-                        discovered.condition_id, discovered.timeframe, discovered.end_date);
-                    all_markets.push(discovered);
-                } else {
-                    info!("❌ Failed to convert: {} q='{}'", condition_id, q_preview);
-                }
             }
-        }
-
-        // FALLBACK: Also try direct market search with tags
-        let search_tags: Vec<&str> = match asset {
-            Asset::BTC => vec!["Bitcoin", "BTC"],
-            Asset::ETH => vec!["Ethereum", "ETH"],
-            _ => vec![],
-        };
-
-        for tag in search_tags {
-            info!("🔍 Fallback: fetching markets with tag '{}' for {:?}", tag, asset);
-            let markets = self.rest_client
-                .get_markets_page(&self.gamma_url, Some(tag), 100, 0)
-                .await?;
             
-            for market in markets {
-                let text = format!("{} {}", 
-                    market.slug.as_deref().unwrap_or(""), 
-                    market.question
-                ).to_lowercase();
-                
-                let is_updown = text.contains("up or down") || text.contains("updown");
-                let asset_match = match asset {
-                    Asset::BTC => text.contains("btc") || text.contains("bitcoin"),
-                    Asset::ETH => text.contains("eth") || text.contains("ethereum"),
-                    _ => false,
-                };
-                
-                if is_updown && asset_match && market.outcomes.len() == 2 {
-                    if let Some(discovered) = self.convert_market_response(market, asset) {
-                        if !all_markets.iter().any(|m| m.condition_id == discovered.condition_id) {
-                            info!("✅ Converted from fallback: {} (tf={:?})", 
-                                discovered.condition_id, discovered.timeframe);
-                            all_markets.push(discovered);
-                        }
+            info!("🎯 Found candidate: '{}' (slug='{}')", event_title, event_slug);
+            
+            // Extract markets from event
+            if let Some(markets_json) = event_json.get("markets").and_then(|m| m.as_array()) {
+                for market_json in markets_json {
+                    if let Some(market) = self.parse_market_from_json(market_json, asset, timeframe) {
+                        all_markets.push(market);
                     }
                 }
             }
         }
-
-        info!("🎯 Total candidate markets for {:?}: {}", asset, all_markets.len());
-        Ok(all_markets)
+        
+        // Sort by end_date (closest first) and take the best candidate
+        all_markets.sort_by(|a, b| a.end_date.cmp(&b.end_date));
+        
+        // Keep only the market with the closest end date (the "current" one)
+        let result: Vec<DiscoveredMarket> = all_markets.into_iter()
+            .take(1)
+            .collect();
+        
+        info!("🎯 Selected {} current market(s) for {:?} {:?}", result.len(), asset, timeframe);
+        for m in &result {
+            info!("   ✅ {} (ends at {})", m.condition_id, m.end_date);
+        }
+        
+        Ok(result)
+    }
+    
+    /// Parse market from JSON search result
+    fn parse_market_from_json(
+        &self,
+        json: &serde_json::Value,
+        asset: Asset,
+        timeframe: Timeframe,
+    ) -> Option<DiscoveredMarket> {
+        let condition_id = json.get("conditionId")
+            .and_then(|c| c.as_str())?;
+        let slug = json.get("slug")
+            .and_then(|s| s.as_str())
+            .unwrap_or("");
+        let question = json.get("question")
+            .and_then(|q| q.as_str())?;
+        let active = json.get("active")
+            .and_then(|a| a.as_bool())
+            .unwrap_or(false);
+        let closed = json.get("closed")
+            .and_then(|c| c.as_bool())
+            .unwrap_or(true);
+        let end_date_str = json.get("endDate")
+            .and_then(|d| d.as_str())?;
+        
+        // Parse end date
+        let end_date = DateTime::parse_from_rfc3339(end_date_str)
+            .ok()
+            .map(|dt| dt.with_timezone(&Utc))?;
+        
+        // Skip if not active or closed
+        if !active || closed {
+            return None;
+        }
+        
+        // Parse token IDs from clobTokenIds
+        let token_ids: Vec<String> = json.get("clobTokenIds")
+            .and_then(|t| t.as_array())
+            .map(|arr| arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect())
+            .unwrap_or_default();
+        
+        if token_ids.len() != 2 {
+            return None;
+        }
+        
+        // Parse outcomes
+        let outcomes: Vec<String> = json.get("outcomes")
+            .and_then(|o| o.as_array())
+            .map(|arr| arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect())
+            .unwrap_or_default();
+        
+        if outcomes.len() != 2 {
+            return None;
+        }
+        
+        // Parse outcome prices
+        let outcome_prices: Vec<f64> = json.get("outcomePrices")
+            .and_then(|p| p.as_array())
+            .map(|arr| arr.iter()
+                .filter_map(|v| v.as_str().and_then(|s| s.parse().ok()))
+                .collect())
+            .unwrap_or_default();
+        
+        let liquidity = json.get("liquidityNum")
+            .and_then(|l| l.as_f64())
+            .unwrap_or(0.0);
+        
+        let best_bid = json.get("bestBid")
+            .and_then(|b| b.as_f64());
+        let best_ask = json.get("bestAsk")
+            .and_then(|a| a.as_f64());
+        
+        let spread = match (best_bid, best_ask) {
+            (Some(bid), Some(ask)) if ask > bid => ask - bid,
+            _ => 0.0,
+        };
+        
+        Some(DiscoveredMarket {
+            condition_id: condition_id.to_string(),
+            slug: slug.to_string(),
+            question: question.to_string(),
+            end_date,
+            active,
+            closed,
+            token_ids,
+            outcomes,
+            outcome_prices,
+            volume: 0.0,
+            liquidity,
+            spread,
+            asset,
+            timeframe,
+        })
     }
 
     /// Convert MarketResponse to DiscoveredMarket

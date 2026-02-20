@@ -376,6 +376,49 @@ impl RestClient {
         Ok(events)
     }
 
+    /// Search markets/events using public-search endpoint
+    pub async fn search_public(
+        &self,
+        gamma_url: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<serde_json::Value> {
+        // Encode query manually to avoid urlencoding dependency
+        let encoded_query: String = query
+            .chars()
+            .map(|c| match c {
+                ' ' => '+',
+                c if c.is_ascii_alphanumeric() || "-_.~".contains(c) => c,
+                c => format!("%{:02X}", c as u8),
+            })
+            .collect();
+        
+        let url = format!(
+            "{}/public-search?q={}&limit={}",
+            gamma_url.trim_end_matches('/'),
+            encoded_query,
+            limit.max(1)
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to fetch public search")?;
+
+        if !response.status().is_success() {
+            bail!("Failed to search: {}", response.status());
+        }
+
+        let result: serde_json::Value = response
+            .json()
+            .await
+            .context("Failed to parse search response")?;
+
+        Ok(result)
+    }
+
     /// Get market by condition ID
     pub async fn get_market(&self, gamma_url: &str, condition_id: &str) -> Result<MarketResponse> {
         let url = format!(
