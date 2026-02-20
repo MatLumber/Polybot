@@ -268,8 +268,8 @@ impl MarketDiscovery {
     ) -> Result<Vec<DiscoveredMarket>> {
         // Search tags for up/down markets - these rotate every 15m/1h
         let search_tags: Vec<&str> = match asset {
-            Asset::BTC => vec!["Bitcoin", "BTC", "updown", "up-down"],
-            Asset::ETH => vec!["Ethereum", "ETH", "updown", "up-down"],
+            Asset::BTC => vec!["Bitcoin", "BTC", "updown", "up-down", "higher", "lower"],
+            Asset::ETH => vec!["Ethereum", "ETH", "updown", "up-down", "higher", "lower"],
             _ => return Ok(Vec::new()),
         };
 
@@ -289,12 +289,8 @@ impl MarketDiscovery {
                 let q_preview: String = market.question.chars().take(60).collect();
                 let slug = market.slug.clone().unwrap_or_default();
                 
-                // Pre-filter: only process markets that look like up/down predictions
+                // Pre-filter: only process markets for this asset with 2 outcomes
                 let text = format!("{} {}", slug, market.question).to_lowercase();
-                let is_updown = text.contains("up or down") 
-                    || text.contains("updown") 
-                    || text.contains("up-down")
-                    || (text.contains("up") && text.contains("down"));
                 
                 // Check if asset matches
                 let asset_match = match asset {
@@ -303,13 +299,17 @@ impl MarketDiscovery {
                     _ => false,
                 };
                 
-                if !is_updown || !asset_match {
-                    info!("⏭️ Skipping {}: updown={} asset_match={} (slug='{}')", 
-                        condition_id, is_updown, asset_match, slug);
+                // Must have exactly 2 outcomes (binary markets)
+                let is_binary = market.outcomes.len() == 2;
+                
+                if !asset_match || !is_binary {
+                    debug!("⏭️ Skipping {}: asset_match={} is_binary={} (slug='{}')", 
+                        condition_id, asset_match, is_binary, slug);
                     continue;
                 }
                 
-                info!("🎯 Processing: {} (slug='{}')", condition_id, slug);
+                info!("🎯 Processing binary BTC/ETH market: {} (slug='{}' outcomes={:?})", 
+                    condition_id, slug, market.outcomes);
                 
                 if let Some(discovered) = self.convert_market_response(market, asset) {
                     info!("✅ Converted market: {} (tf={:?}, end={})", 
