@@ -394,6 +394,21 @@ impl From<MarketResponse> for super::MarketInfo {
     }
 }
 
+/// Event response from Gamma API (for discovering markets)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventResponse {
+    pub id: String,
+    pub slug: Option<String>,
+    pub title: String,
+    pub description: Option<String>,
+    pub active: bool,
+    pub closed: Option<bool>,
+    pub end_date: Option<String>,
+    #[serde(default)]
+    pub markets: Vec<MarketResponse>,
+}
+
 /// Order creation request
 #[derive(Debug, Clone, Serialize)]
 pub struct CreateOrderRequest {

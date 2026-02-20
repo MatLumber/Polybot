@@ -17,7 +17,7 @@ use sha2::Sha256;
 use std::collections::HashMap;
 use std::time::Duration;
 
-use super::types::{BookLevel, MarketResponse, Order, OrderBook, Side};
+use super::types::{BookLevel, EventResponse, MarketResponse, Order, OrderBook, Side};
 
 fn parse_book_level(price: &str, size: &str) -> Option<BookLevel> {
     let price = price.parse::<f64>().ok()?;
@@ -341,6 +341,39 @@ impl RestClient {
             .context("Failed to parse markets response")?;
 
         Ok(markets)
+    }
+
+    /// Get events page from Gamma API (for discovering up/down markets)
+    pub async fn get_events_page(
+        &self,
+        gamma_url: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<EventResponse>> {
+        let url = format!(
+            "{}/events?closed=false&active=true&limit={}&offset={}",
+            gamma_url.trim_end_matches('/'),
+            limit.max(1),
+            offset
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to fetch events")?;
+
+        if !response.status().is_success() {
+            bail!("Failed to get events: {}", response.status());
+        }
+
+        let events: Vec<EventResponse> = response
+            .json()
+            .await
+            .context("Failed to parse events response")?;
+
+        Ok(events)
     }
 
     /// Get market by condition ID

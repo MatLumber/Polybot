@@ -261,95 +261,105 @@ impl MarketDiscovery {
     }
 
     /// Fetch candidate markets from Gamma API
+    /// Uses /events endpoint which is more effective for discovering up/down markets
     async fn fetch_candidate_markets(
         &self,
         asset: Asset,
         _timeframe: Timeframe,
     ) -> Result<Vec<DiscoveredMarket>> {
-        // Search tags for up/down markets - these rotate every 15m/1h
-        let search_tags: Vec<&str> = match asset {
-            Asset::BTC => vec!["Bitcoin", "BTC", "updown", "up-down", "Crypto", "crypto"],
-            Asset::ETH => vec!["Ethereum", "ETH", "updown", "up-down", "Crypto", "crypto"],
-            _ => return Ok(Vec::new()),
-        };
-
         let mut all_markets = Vec::new();
 
-        // Search using different tags
-        for tag in search_tags {
-            info!("Fetching markets with tag '{}' for {:?}", tag, asset);
-            let markets = self.rest_client
-                .get_markets_page(&self.gamma_url, Some(tag), 100, 0)
-                .await?;
+        // PRIMARY: Use events endpoint - most effective for discovering active markets
+        info!("📡 Fetching events from Gamma API for {:?}...", asset);
+        let events = self.rest_client
+            .get_events_page(&self.gamma_url, 200, 0)
+            .await?;
+        
+        info!("📊 Events endpoint returned {} events", events.len());
+        
+        for event in events {
+            let event_slug = event.slug.clone().unwrap_or_default();
+            let event_text = format!("{} {}", event_slug, event.title).to_lowercase();
             
-            info!("Tag '{}' returned {} markets", tag, markets.len());
+            // Check if event matches BTC/ETH
+            let asset_match = match asset {
+                Asset::BTC => event_text.contains("btc") || event_text.contains("bitcoin"),
+                Asset::ETH => event_text.contains("eth") || event_text.contains("ethereum"),
+                _ => false,
+            };
             
-            for market in markets {
+            // Check if it's an up/down market
+            let is_updown = event_text.contains("up or down") 
+                || event_text.contains("updown") 
+                || event_slug.contains("updown");
+            
+            if !asset_match || !is_updown {
+                debug!("⏭️ Skipping event '{}': asset_match={} is_updown={}", 
+                    event.title, asset_match, is_updown);
+                continue;
+            }
+            
+            info!("🎯 Found {} up/down event: '{}' with {} markets", 
+                match asset { Asset::BTC => "BTC", Asset::ETH => "ETH", _ => "?" },
+                event.title, 
+                event.markets.len());
+            
+            // Process markets in this event
+            for market in event.markets {
                 let condition_id = market.condition_id.clone();
                 let q_preview: String = market.question.chars().take(60).collect();
                 let slug = market.slug.clone().unwrap_or_default();
                 
-                // Pre-filter: only process markets for this asset with 2 outcomes
-                let text = format!("{} {}", slug, market.question).to_lowercase();
+                if market.outcomes.len() != 2 {
+                    debug!("⏭️ Market {} doesn't have 2 outcomes", condition_id);
+                    continue;
+                }
                 
-                // Check if asset matches
+                info!("🔄 Converting market: {} (slug='{}')", condition_id, slug);
+                
+                if let Some(discovered) = self.convert_market_response(market, asset) {
+                    info!("✅ Converted: {} (tf={:?}, end={})", 
+                        discovered.condition_id, discovered.timeframe, discovered.end_date);
+                    all_markets.push(discovered);
+                } else {
+                    info!("❌ Failed to convert: {} q='{}'", condition_id, q_preview);
+                }
+            }
+        }
+
+        // FALLBACK: Also try direct market search with tags
+        let search_tags: Vec<&str> = match asset {
+            Asset::BTC => vec!["Bitcoin", "BTC"],
+            Asset::ETH => vec!["Ethereum", "ETH"],
+            _ => vec![],
+        };
+
+        for tag in search_tags {
+            info!("🔍 Fallback: fetching markets with tag '{}' for {:?}", tag, asset);
+            let markets = self.rest_client
+                .get_markets_page(&self.gamma_url, Some(tag), 100, 0)
+                .await?;
+            
+            for market in markets {
+                let text = format!("{} {}", 
+                    market.slug.as_deref().unwrap_or(""), 
+                    market.question
+                ).to_lowercase();
+                
+                let is_updown = text.contains("up or down") || text.contains("updown");
                 let asset_match = match asset {
                     Asset::BTC => text.contains("btc") || text.contains("bitcoin"),
                     Asset::ETH => text.contains("eth") || text.contains("ethereum"),
                     _ => false,
                 };
                 
-                // Must have exactly 2 outcomes (binary markets)
-                let is_binary = market.outcomes.len() == 2;
-                
-                if !asset_match || !is_binary {
-                    debug!("⏭️ Skipping {}: asset_match={} is_binary={} (slug='{}')", 
-                        condition_id, asset_match, is_binary, slug);
-                    continue;
-                }
-                
-                info!("🎯 Processing binary BTC/ETH market: {} (slug='{}' outcomes={:?})", 
-                    condition_id, slug, market.outcomes);
-                
-                if let Some(discovered) = self.convert_market_response(market, asset) {
-                    info!("✅ Converted market: {} (tf={:?}, end={})", 
-                        discovered.condition_id, discovered.timeframe, discovered.end_date);
-                    all_markets.push(discovered);
-                } else {
-                    info!("❌ Failed to convert: {} q='{}' slug='{}'", 
-                        condition_id, q_preview, slug);
-                }
-            }
-        }
-
-        // Also search without tag - get active markets and filter
-        info!("Fetching active markets (no tag) for {:?}", asset);
-        let active_markets = self.rest_client
-            .get_markets_page(&self.gamma_url, None::<&str>, 200, 0)
-            .await?;
-        
-        info!("Active markets returned {} total", active_markets.len());
-        
-        for market in active_markets {
-            let text = format!("{} {}", 
-                market.slug.as_deref().unwrap_or(""), 
-                market.question
-            ).to_lowercase();
-            
-            // Filter for up/down BTC/ETH markets
-            let is_updown = text.contains("up or down") || text.contains("updown");
-            let asset_match = match asset {
-                Asset::BTC => text.contains("btc") || text.contains("bitcoin"),
-                Asset::ETH => text.contains("eth") || text.contains("ethereum"),
-                _ => false,
-            };
-            
-            if is_updown && asset_match {
-                if let Some(discovered) = self.convert_market_response(market, asset) {
-                    if !all_markets.iter().any(|m| m.condition_id == discovered.condition_id) {
-                        info!("✅ Converted from active search: {} (tf={:?})", 
-                            discovered.condition_id, discovered.timeframe);
-                        all_markets.push(discovered);
+                if is_updown && asset_match && market.outcomes.len() == 2 {
+                    if let Some(discovered) = self.convert_market_response(market, asset) {
+                        if !all_markets.iter().any(|m| m.condition_id == discovered.condition_id) {
+                            info!("✅ Converted from fallback: {} (tf={:?})", 
+                                discovered.condition_id, discovered.timeframe);
+                            all_markets.push(discovered);
+                        }
                     }
                 }
             }
