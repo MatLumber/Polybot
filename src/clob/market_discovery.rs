@@ -319,14 +319,14 @@ impl MarketDiscovery {
             
             // Skip if not active or closed
             if !active || closed {
-                debug!("⏭️ Skipping '{}': active={} closed={}", event_title, active, closed);
+                info!("⏭️ Skipping '{}': active={} closed={}", event_title, active, closed);
                 continue;
             }
             
             // Skip if end date is in the past
             if let Some(ed) = end_date {
                 if ed <= now {
-                    debug!("⏭️ Skipping '{}': already ended", event_title);
+                    info!("⏭️ Skipping '{}': already ended (end={} now={})", event_title, ed, now);
                     continue;
                 }
             }
