@@ -151,6 +151,7 @@ impl V3Strategy {
             calibrator,
             state,
             feature_history: HashMap::new(),
+            last_filter_reason: None,
             dataset,
             persistence,
         };
@@ -340,7 +341,7 @@ impl V3Strategy {
             ensemble_weight: 1.0,
         });
 
-        self.total_predictions += 1;
+        self.state.total_predictions += 1;
 
         // Build reasons
         let mut reasons = vec![

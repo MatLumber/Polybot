@@ -61,6 +61,8 @@ pub trait Strategy: Send + Sync {
     fn get_ml_state(&self) -> crate::strategy::v3_strategy::MLStateResponse {
         crate::strategy::v3_strategy::MLStateResponse {
             enabled: false,
+            model_type: "None".to_string(),
+            version: "0.0".to_string(),
             model_accuracy: 0.0,
             total_predictions: 0,
             correct_predictions: 0,
