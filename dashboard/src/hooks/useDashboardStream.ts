@@ -17,6 +17,8 @@ import type {
   ApiResponseWire,
   DashboardStateWire,
   MarketLearningProgressWire,
+  MLMetricsWire,
+  MLStateWire,
   PriceHistoryPointWire,
   WsMessageWire,
 } from '../types/wire'
@@ -27,11 +29,13 @@ const MAX_RECENT_TRADES = 100
 
 type StreamAction =
   | {
-      type: 'BOOTSTRAP_SUCCESS'
-      dashboard: DashboardStateWire
-      history: Record<string, PriceHistoryPointWire[]>
-      marketLearning: MarketLearningProgressWire[]
-    }
+    type: 'BOOTSTRAP_SUCCESS'
+    dashboard: DashboardStateWire
+    history: Record<string, PriceHistoryPointWire[]>
+    marketLearning: MarketLearningProgressWire[]
+    mlState: MLStateWire
+    mlMetrics: MLMetricsWire
+  }
   | { type: 'MARKET_LEARNING_UPDATE'; marketLearning: MarketLearningProgressWire[] }
   | { type: 'WS_CONNECTED' }
   | { type: 'WS_DISCONNECTED' }
@@ -65,6 +69,8 @@ function reducer(state: DashboardStreamState, action: StreamAction): DashboardSt
         dashboard: mapDashboardState(action.dashboard),
         priceHistory: mapPriceHistory(action.history),
         marketLearning: mapMarketLearningProgressList(action.marketLearning),
+        mlState: mapMLState(action.mlState),
+        mlMetrics: mapMLMetrics(action.mlMetrics),
         status: state.connected ? 'connected' : 'connecting',
         error: null,
       }
@@ -269,7 +275,7 @@ export function useDashboardStream() {
   const reconnectTimerRef = useRef<number | null>(null)
   const reconnectAttemptRef = useRef(0)
   const mountedRef = useRef(false)
-  const connectRef = useRef<() => void>(() => {})
+  const connectRef = useRef<() => void>(() => { })
 
   const apiBase = useMemo(
     () => normalizeBaseUrl(import.meta.env.VITE_API_BASE ?? DEFAULT_API_BASE),
@@ -278,19 +284,28 @@ export function useDashboardStream() {
   const wsUrl = useMemo(() => import.meta.env.VITE_WS_URL ?? DEFAULT_WS_URL, [])
 
   const bootstrap = useCallback(async () => {
-    const [dashboard, history, marketLearning] = await Promise.all([
+    const [dashboard, history, marketLearning, mlState, mlMetrics] = await Promise.all([
       fetchApi<DashboardStateWire>(`${apiBase}/api/stats`),
       fetchApi<Record<string, PriceHistoryPointWire[]>>(
         `${apiBase}/api/prices/history?assets=BTC,ETH&window_secs=86400&bucket_ms=1000`,
       ),
       fetchApi<MarketLearningProgressWire[]>(`${apiBase}/api/calibration/markets`),
+      fetchApi<MLStateWire>(`${apiBase}/api/ml/state`),
+      fetchApi<MLMetricsWire>(`${apiBase}/api/ml/metrics`),
     ])
 
     if (!mountedRef.current) {
       return
     }
 
-    dispatch({ type: 'BOOTSTRAP_SUCCESS', dashboard, history, marketLearning })
+    dispatch({
+      type: 'BOOTSTRAP_SUCCESS',
+      dashboard,
+      history,
+      marketLearning,
+      mlState,
+      mlMetrics
+    })
   }, [apiBase])
 
   const refreshMarketLearning = useCallback(async () => {
