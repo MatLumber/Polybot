@@ -37,12 +37,6 @@ pub struct V3Strategy {
     feature_history: HashMap<(Asset, Timeframe), Vec<crate::features::Features>>,
     /// Last filter reason for debugging
     last_filter_reason: Option<String>,
-    /// Current model accuracy
-    model_accuracy: f64,
-    /// Total predictions made
-    total_predictions: usize,
-    /// Correct predictions
-    correct_predictions: usize,
     /// Dataset for training
     dataset: Dataset,
     /// Persistence manager
@@ -61,9 +55,6 @@ impl V3Strategy {
             mut predictor,
             mut dataset,
             mut state,
-            mut model_accuracy,
-            mut total_predictions,
-            mut correct_predictions,
         ) = match persistence.load_ml_state() {
             Ok(Some((persisted, loaded_dataset))) => {
                 info!("🧠 Loading persisted ML state...");
@@ -99,9 +90,6 @@ impl V3Strategy {
                     pred,
                     loaded_dataset,
                     ml_state,
-                    accuracy,
-                    persisted.total_predictions,
-                    persisted.correct_predictions,
                 )
             }
             Ok(None) => {
@@ -116,9 +104,6 @@ impl V3Strategy {
                     pred,
                     Dataset::new(),
                     MLEngineState::new(ml_config.clone()),
-                    0.5,
-                    0,
-                    0,
                 )
             }
             Err(e) => {
@@ -133,9 +118,6 @@ impl V3Strategy {
                     pred,
                     Dataset::new(),
                     MLEngineState::new(ml_config.clone()),
-                    0.5,
-                    0,
-                    0,
                 )
             }
         };
@@ -600,27 +582,22 @@ impl V3Strategy {
         self.calibrator.record_trade(indicators, result);
         self.calibrator.recalibrate();
 
-        // Update accuracy tracking
-        if is_win {
-            self.correct_predictions += 1;
-        }
-        if self.total_predictions > 0 {
-            self.model_accuracy = self.correct_predictions as f64 / self.total_predictions as f64;
-        }
+        // Update accuracy tracking in ML state
+        self.state.add_prediction_result(is_win);
 
         // Record outcome for dynamic weight adjustment
         if let Some(ref mut predictor) = self.predictor {
             predictor.record_outcome(confidence, is_win);
 
             // Adjust weights periodically
-            if self.total_predictions % 10 == 0 {
+            if self.state.total_predictions % 10 == 0 {
                 predictor.adjust_weights_dynamically();
             }
         }
 
         // Auto-save ML state every 5 trades
         if let Some(ref predictor) = self.predictor {
-            if self.total_predictions % 5 == 0 {
+            if self.state.total_predictions % 5 == 0 {
                 if let Err(e) =
                     self.persistence
                         .save_ml_state(predictor, &self.state, &self.dataset)
@@ -632,8 +609,8 @@ impl V3Strategy {
 
         info!(
             is_win = is_win,
-            accuracy = self.model_accuracy,
-            total = self.total_predictions,
+            accuracy = self.state.accuracy(),
+            total = self.state.total_predictions,
             "🧠 V3 learned from trade"
         );
     }
@@ -684,6 +661,7 @@ impl V3Strategy {
         if let Some(ref mut predictor) = self.predictor {
             predictor.record_outcome(trade_sample.entry_features.calibrator_confidence, trade_sample.is_win);
             predictor.adjust_weights_dynamically();
+            self.state.add_prediction_result(trade_sample.is_win);
             self.add_trade_to_dataset(trade_sample);
             info!(
                 asset = ?asset,
@@ -760,20 +738,14 @@ impl V3Strategy {
         
         MLStateResponse {
             enabled: self.config.enabled,
-            model_accuracy: self.model_accuracy,
-            total_predictions: total,
-            correct_predictions: correct,
-            incorrect_predictions: incorrect,
-            win_rate: if total > 0 {
-                correct as f64 / total as f64
-            } else {
-                0.0
-            },
-            loss_rate: if total > 0 {
-                incorrect as f64 / total as f64
-            } else {
-                0.0
-            },
+            model_type: format!("{:?}", self.config.model_type),
+            version: "3.0".to_string(),
+            model_accuracy: self.state.accuracy(),
+            total_predictions: self.state.total_predictions,
+            correct_predictions: self.state.correct_predictions,
+            incorrect_predictions: self.state.incorrect_predictions,
+            win_rate: self.state.win_rate(),
+            loss_rate: self.state.loss_rate(),
             is_calibrated: self.is_calibrated(),
             last_filter_reason: self.last_filter_reason.clone(),
             ensemble_weights,
@@ -809,13 +781,10 @@ impl V3Strategy {
 
         // Reload state after restore
         if let Some((persisted, dataset)) = self.persistence.load_ml_state()? {
-            self.total_predictions = persisted.total_predictions;
-            self.correct_predictions = persisted.correct_predictions;
-            self.model_accuracy = if persisted.total_predictions > 0 {
-                persisted.correct_predictions as f64 / persisted.total_predictions as f64
-            } else {
-                0.5
-            };
+            self.state.total_predictions = persisted.total_predictions;
+            self.state.correct_predictions = persisted.correct_predictions;
+            self.state.incorrect_predictions = persisted.incorrect_predictions;
+            self.state.last_retraining = persisted.last_retraining;
             self.dataset = dataset;
             info!("🔄 ML state restored from backup: {}", backup_name);
         }
@@ -876,6 +845,8 @@ impl V3Strategy {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MLStateResponse {
     pub enabled: bool,
+    pub model_type: String,
+    pub version: String,
     pub model_accuracy: f64,
     pub total_predictions: usize,
     pub correct_predictions: usize,

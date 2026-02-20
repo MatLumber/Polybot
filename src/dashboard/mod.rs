@@ -924,8 +924,8 @@ impl DashboardMemory {
         if let Some(ref metrics) = *metrics {
             serde_json::json!({
                 "enabled": metrics.enabled,
-                "model_type": "Ensemble",
-                "version": "3.0",
+                "model_type": metrics.model_type,
+                "version": metrics.version,
                 "accuracy": metrics.model_accuracy,
                 "win_rate": metrics.win_rate,
                 "total_predictions": metrics.total_predictions,
