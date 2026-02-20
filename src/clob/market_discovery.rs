@@ -277,6 +277,15 @@ impl MarketDiscovery {
         
         info!("📊 Events endpoint returned {} events", events.len());
         
+        // Log first few events to debug
+        for (i, event) in events.iter().take(5).enumerate() {
+            info!("📋 Event {}: slug='{}' title='{}' markets={}", 
+                i, 
+                event.slug.as_deref().unwrap_or("N/A"),
+                event.title,
+                event.markets.len());
+        }
+        
         for event in events {
             let event_slug = event.slug.clone().unwrap_or_default();
             let event_text = format!("{} {}", event_slug, event.title).to_lowercase();
