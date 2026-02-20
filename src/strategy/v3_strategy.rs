@@ -191,7 +191,7 @@ impl V3Strategy {
     }
 
     /// Process features and generate ML-powered signal
-    /// 
+    ///
     /// Flow:
     /// 1. Apply smart filters (market conditions)
     /// 2. Try ML prediction if available and enabled
@@ -199,7 +199,7 @@ impl V3Strategy {
     /// 4. Return signal with metadata for tracking
     pub fn process(&mut self, features: &crate::features::Features) -> Option<GeneratedSignal> {
         self.last_filter_reason = None;
-        
+
         // Track this evaluation attempt
         let asset = features.asset;
         let timeframe = features.timeframe;
@@ -242,7 +242,7 @@ impl V3Strategy {
             }
             FilterDecision::Reject(reason) => {
                 let reason_str = format!("{:?}", reason);
-                tracing::debug!(?asset, ?timeframe, reason = %reason_str, "❌ Signal rejected by market filter");
+                tracing::info!(?asset, ?timeframe, reason = %reason_str, "❌ Signal rejected by market filter");
                 self.last_filter_reason = Some(reason_str);
                 return None;
             }
@@ -252,9 +252,10 @@ impl V3Strategy {
         let ml_available = self.config.enabled && self.predictor.is_some();
         let dataset_size = self.dataset.len();
         let min_samples = self.config.training.min_samples_for_training;
-        
+
         tracing::debug!(
-            ?asset, ?timeframe,
+            ?asset,
+            ?timeframe,
             ml_enabled = self.config.enabled,
             predictor_loaded = self.predictor.is_some(),
             dataset_size,
@@ -272,14 +273,16 @@ impl V3Strategy {
         // Fallback to rule-based if ML not available or rejected
         if dataset_size < min_samples {
             tracing::info!(
-                ?asset, ?timeframe,
+                ?asset,
+                ?timeframe,
                 dataset_size,
                 min_samples_required = min_samples,
                 "ML not ready (insufficient training data), using fallback"
             );
         } else if !ml_available {
             tracing::info!(
-                ?asset, ?timeframe,
+                ?asset,
+                ?timeframe,
                 "ML disabled or models not loaded, using fallback"
             );
         }
@@ -295,10 +298,14 @@ impl V3Strategy {
             return Some(signal);
         }
 
-        tracing::debug!(?asset, ?timeframe, "No signal generated (ML and fallback both failed)");
+        tracing::debug!(
+            ?asset,
+            ?timeframe,
+            "No signal generated (ML and fallback both failed)"
+        );
         None
     }
-    
+
     /// Try to generate ML prediction
     fn try_ml_prediction(
         &mut self,
@@ -308,7 +315,7 @@ impl V3Strategy {
     ) -> Option<GeneratedSignal> {
         let predictor = self.predictor.as_ref()?;
         let prediction = predictor.predict(ml_features);
-        
+
         tracing::debug!(
             asset = ?features.asset,
             timeframe = ?features.timeframe,
@@ -320,8 +327,10 @@ impl V3Strategy {
 
         // Check minimum confidence
         if prediction.confidence < self.config.min_confidence {
-            let reason = format!("low_ml_confidence: {:.2} < {:.2}", 
-                prediction.confidence, self.config.min_confidence);
+            let reason = format!(
+                "low_ml_confidence: {:.2} < {:.2}",
+                prediction.confidence, self.config.min_confidence
+            );
             tracing::debug!(%reason, "ML prediction rejected");
             self.last_filter_reason = Some(reason);
             return None;
@@ -418,6 +427,13 @@ impl V3Strategy {
         let confidence = ((score as f64).abs() / 3.0).min(1.0) * 0.5 + 0.5;
 
         if confidence < self.config.min_confidence {
+            tracing::info!(
+                ?features.asset,
+                ?features.timeframe,
+                confidence,
+                min_confidence = self.config.min_confidence,
+                "❌ Fallback signal rejected (low confidence)"
+            );
             self.last_filter_reason = Some("fallback_low_confidence".to_string());
             return None;
         }
