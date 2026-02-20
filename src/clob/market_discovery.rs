@@ -317,18 +317,27 @@ impl MarketDiscovery {
                 .and_then(|d| DateTime::parse_from_rfc3339(d).ok())
                 .map(|dt| dt.with_timezone(&Utc));
             
-            // Skip if not active or closed
-            if !active || closed {
-                info!("⏭️ Skipping '{}': active={} closed={}", event_title, active, closed);
+            // Skip if not active
+            if !active {
+                info!("⏭️ Skipping '{}': not active", event_title);
                 continue;
             }
             
-            // Skip if end date is in the past
+            // Skip if end date is in the past (accept even if closed=true if end_date is in future)
             if let Some(ed) = end_date {
                 if ed <= now {
-                    info!("⏭️ Skipping '{}': already ended (end={} now={})", event_title, ed, now);
+                    info!("⏭️ Skipping '{}': already ended (end={} now={}) closed={}", 
+                        event_title, ed, now, closed);
                     continue;
                 }
+            } else {
+                info!("⏭️ Skipping '{}': no end date", event_title);
+                continue;
+            }
+            
+            // Log if closed but still in future (shouldn't happen but handle it)
+            if closed {
+                info!("⚠️ Event '{}' is closed=true but end_date is in future, trying anyway", event_title);
             }
             
             info!("🎯 Found candidate: '{}' (slug='{}')", event_title, event_slug);
