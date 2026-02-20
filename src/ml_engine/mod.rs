@@ -214,6 +214,12 @@ impl MLEngineState {
             self.incorrect_predictions += 1;
         }
     }
+
+    /// Add a prediction for tracking (without result yet)
+    pub fn add_prediction(&mut self, _prediction: Prediction) {
+        // In a full implementation, this would store predictions for later validation
+        // For now, we just increment the counter when we have a result
+    }
 }
 
 /// Resultado de una predicción
