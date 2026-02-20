@@ -326,7 +326,7 @@ export function mapMLMetrics(metrics: MLMetricsWire): MLMetrics {
     winRate: metrics.win_rate,
     totalPredictions: metrics.total_predictions,
     correctPredictions: metrics.correct_predictions,
-    ensembleWeights: metrics.ensemble_weights.map(mapMLModelInfo),
+    ensembleWeights: (metrics.ensemble_weights || []).map(mapMLModelInfo),
     timestamp: metrics.timestamp,
   }
 }

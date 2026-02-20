@@ -948,11 +948,21 @@ impl DashboardMemory {
         let metrics = self.ml_metrics.read().await;
 
         if let Some(ref m) = *metrics {
+            let ensemble_weights: Vec<_> = m.model_info.iter().map(|(name, weight, accuracy)| {
+                serde_json::json!({
+                    "name": name,
+                    "weight": weight,
+                    "accuracy": accuracy,
+                    "status": "active"
+                })
+            }).collect();
+
             serde_json::json!({
                 "accuracy": m.model_accuracy,
                 "win_rate": m.win_rate,
                 "total_predictions": m.total_predictions,
                 "correct_predictions": m.correct_predictions,
+                "ensemble_weights": ensemble_weights,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })
         } else {
@@ -961,6 +971,7 @@ impl DashboardMemory {
                 "win_rate": 0.0,
                 "total_predictions": 0,
                 "correct_predictions": 0,
+                "ensemble_weights": [],
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })
         }
