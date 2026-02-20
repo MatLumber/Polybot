@@ -397,6 +397,7 @@ fn create_initial_ml_state(total_samples: usize) -> anyhow::Result<()> {
         ensemble_weights: polybot::ml_engine::models::EnsembleWeights::default(),
         total_predictions: 0,
         correct_predictions: 0,
+        incorrect_predictions: 0,
         last_retraining: None,
         feature_importance: HashMap::new(),
         model_performances: vec![
