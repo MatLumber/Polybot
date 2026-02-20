@@ -375,6 +375,88 @@ impl RestClient {
         Ok(events)
     }
 
+    /// Get events with date filtering for BTC/ETH up/down markets
+    pub async fn get_events_with_date_filter(
+        &self,
+        gamma_url: &str,
+        limit: usize,
+        offset: usize,
+        end_date_min: Option<&str>,
+        end_date_max: Option<&str>,
+    ) -> Result<Vec<EventResponse>> {
+        let mut url = format!(
+            "{}/events?closed=false&active=true&limit={}&offset={}",
+            gamma_url.trim_end_matches('/'),
+            limit.max(1),
+            offset
+        );
+
+        if let Some(min) = end_date_min {
+            url.push_str(&format!("&end_date_min={}", min));
+        }
+        if let Some(max) = end_date_max {
+            url.push_str(&format!("&end_date_max={}", max));
+        }
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to fetch events with date filter")?;
+
+        if !response.status().is_success() {
+            bail!("Failed to get events with date filter: {}", response.status());
+        }
+
+        let events: Vec<EventResponse> = response
+            .json()
+            .await
+            .context("Failed to parse events response")?;
+
+        Ok(events)
+    }
+
+    /// Search for up/down markets directly using slug patterns
+    pub async fn search_updown_markets(
+        &self,
+        gamma_url: &str,
+        asset: &str,
+        limit: usize,
+    ) -> Result<Vec<MarketResponse>> {
+        let slugs = if asset.to_lowercase() == "btc" || asset.to_lowercase() == "bitcoin" {
+            vec!["btc-updown", "bitcoin-up-or-down"]
+        } else {
+            vec!["eth-updown", "ethereum-up-or-down"]
+        };
+
+        let mut all_markets = Vec::new();
+
+        for slug_pattern in slugs {
+            let url = format!(
+                "{}/markets?closed=false&active=true&slug={}&limit={}",
+                gamma_url.trim_end_matches('/'),
+                slug_pattern,
+                limit
+            );
+
+            let response = self
+                .client
+                .get(&url)
+                .send()
+                .await
+                .context("Failed to search up/down markets")?;
+
+            if response.status().is_success() {
+                if let Ok(markets) = response.json::<Vec<MarketResponse>>().await {
+                    all_markets.extend(markets);
+                }
+            }
+        }
+
+        Ok(all_markets)
+    }
+
     /// Search markets/events using public-search endpoint
     pub async fn search_public(
         &self,

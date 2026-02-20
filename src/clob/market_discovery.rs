@@ -265,16 +265,37 @@ impl MarketDiscovery {
         timeframe: Timeframe,
     ) -> Result<Vec<DiscoveredMarket>> {
         let mut all_markets = Vec::new();
+        let now = Utc::now();
 
-        // Use events endpoint with filtering
-        info!("🔍 Fetching events for {:?} {:?}", asset, timeframe);
+        // Calculate expected window for this timeframe
+        let (window_start, window_end) = match timeframe {
+            Timeframe::Min15 => {
+                let start = now;
+                let end = now + chrono::Duration::hours(2);
+                (start, end)
+            }
+            Timeframe::Hour1 => {
+                let start = now;
+                let end = now + chrono::Duration::hours(3);
+                (start, end)
+            }
+        };
+
+        // Use events endpoint with date filtering
+        info!("🔍 Fetching events for {:?} {:?} (window: {} to {})", 
+              asset, timeframe, window_start, window_end);
+        
         let events = self
             .rest_client
-            .get_events_page(&self.gamma_url, 200, 0)
+            .get_events_with_date_filter(
+                &self.gamma_url, 
+                200, 
+                0,
+                Some(&now.to_rfc3339()),
+                Some(&window_end.to_rfc3339()),
+            )
             .await?;
         info!("📊 Events endpoint returned {} events", events.len());
-
-        let now = Utc::now();
 
         for event in events {
             let event_slug = event.slug.clone().unwrap_or_default();
@@ -303,15 +324,20 @@ impl MarketDiscovery {
                 || title_lower.contains("up or down")
                 || slug_lower.contains("up-or-down");
 
-            // Log BTC/ETH up/down events for debugging
+            // Log for debugging
             if asset_match && is_updown {
                 info!(
-                    "🔎 BTC/ETH up/down found: '{}' slug='{}' active={} closed={:?}",
-                    event_title, event_slug, event.active, event.closed
+                    "🔎 {:?} up/down found: '{}' slug='{}' active={} closed={:?}",
+                    asset, event_title, event_slug, event.active, event.closed
                 );
             }
 
             if !asset_match || !is_updown {
+                continue;
+            }
+
+            if !event.active {
+                debug!("⏭️ Skipping '{}': not active", event_title);
                 continue;
             }
 
@@ -322,29 +348,26 @@ impl MarketDiscovery {
                 .and_then(|d| DateTime::parse_from_rfc3339(d).ok())
                 .map(|dt| dt.with_timezone(&Utc));
 
-            // Skip if not active
-            if !event.active {
-                info!("⏭️ Skipping '{}': not active", event_title);
-                continue;
-            }
-
             // Skip if end date is in the past
             if let Some(ed) = end_date {
                 if ed <= now {
+                    debug!("⏭️ Skipping '{}': already ended", event_title);
                     continue;
                 }
             } else {
+                debug!("⏭️ Skipping '{}': no end date", event_title);
                 continue;
             }
 
             info!(
-                "🎯 Found candidate: '{}' (slug='{}') active={} closed={:?}",
-                event_title, event_slug, event.active, event.closed
+                "🎯 Found candidate event: '{}' (slug='{}') active={} ends={}",
+                event_title, event_slug, event.active, 
+                end_date.map(|d| d.to_string()).unwrap_or_default()
             );
 
             // Process markets in this event
             for market in event.markets {
-                if let Some(discovered) = self.convert_market_response(market, asset) {
+                if let Some(discovered) = self.convert_market_response(market, asset, timeframe) {
                     all_markets.push(discovered);
                 }
             }
@@ -473,6 +496,7 @@ impl MarketDiscovery {
         &self,
         market: MarketResponse,
         asset: Asset,
+        expected_timeframe: Timeframe,
     ) -> Option<DiscoveredMarket> {
         let condition_id = &market.condition_id;
 
@@ -495,7 +519,7 @@ impl MarketDiscovery {
             .filter_map(|p| p.parse::<f64>().ok())
             .collect();
 
-        // Determine timeframe from question/slug/end_date
+        // Build text for analysis
         let text = format!(
             "{} {}",
             market.slug.as_deref().unwrap_or(""),
@@ -508,48 +532,21 @@ impl MarketDiscovery {
         let duration_to_end = end_date.signed_duration_since(now);
         let minutes_to_end = duration_to_end.num_minutes();
 
-        // Detect timeframe
-        let timeframe = if text.contains("15m")
-            || text.contains("15-minute")
-            || text.contains("15 minute")
-        {
-            Timeframe::Min15
-        } else if text.contains("1h") || text.contains("1-hour") || text.contains("hourly") {
-            Timeframe::Hour1
-        } else if text.contains("up or down") || text.contains("updown") || text.contains("up-down")
-        {
-            // For up/down markets, infer from end_date
-            if minutes_to_end > 0 && minutes_to_end <= 20 {
-                Timeframe::Min15
-            } else if minutes_to_end > 20 && minutes_to_end <= 90 {
-                Timeframe::Hour1
-            } else if minutes_to_end > 90 && minutes_to_end <= 180 {
-                // Could be 1h market with more time remaining
-                Timeframe::Hour1
-            } else {
-                info!(
-                    "Market {} rejected: up/down market but invalid expiry ({} min)",
-                    condition_id, minutes_to_end
-                );
-                return None;
-            }
-        } else if minutes_to_end > 0 && minutes_to_end <= 20 {
-            Timeframe::Min15
-        } else if minutes_to_end > 0 && minutes_to_end <= 90 {
-            Timeframe::Hour1
-        } else {
-            info!(
-                "Market {} rejected: can't determine timeframe (text='{}' expires_in={}min)",
-                condition_id,
-                text.chars().take(60).collect::<String>(),
-                minutes_to_end
+        // Detect timeframe using multiple patterns
+        let detected_timeframe = self.detect_timeframe(&text, minutes_to_end)?;
+
+        // Verify timeframe matches what we're looking for
+        if detected_timeframe != expected_timeframe {
+            debug!(
+                "Market {} rejected: timeframe mismatch (detected={:?} expected={:?})",
+                condition_id, detected_timeframe, expected_timeframe
             );
             return None;
-        };
+        }
 
         // Check token_ids
         if market.clob_token_ids.len() != 2 {
-            info!(
+            debug!(
                 "Market {} rejected: expected 2 token_ids, got {}",
                 condition_id,
                 market.clob_token_ids.len()
@@ -558,12 +555,13 @@ impl MarketDiscovery {
         }
 
         info!(
-            "Market {} CONVERTED: slug='{}' tf={:?} tokens={} outcomes={:?}",
+            "✅ Market {} ACCEPTED: slug='{}' tf={:?} tokens={} outcomes={:?} ends_in={}min",
             condition_id,
             market.slug.as_deref().unwrap_or(""),
-            timeframe,
+            detected_timeframe,
             market.clob_token_ids.len(),
-            market.outcomes
+            market.outcomes,
+            minutes_to_end
         );
 
         Some(DiscoveredMarket {
@@ -576,15 +574,84 @@ impl MarketDiscovery {
             token_ids: market.clob_token_ids.clone(),
             outcomes: market.outcomes.clone(),
             outcome_prices,
-            volume: 0.0, // Not available in MarketResponse
+            volume: 0.0,
             liquidity: market.liquidity_num.unwrap_or(0.0),
             spread: match (market.best_bid, market.best_ask) {
                 (Some(bid), Some(ask)) if ask > bid => ask - bid,
                 _ => 0.0,
             },
             asset,
-            timeframe,
+            timeframe: detected_timeframe,
         })
+    }
+
+    /// Detect timeframe from market text and time to expiry
+    fn detect_timeframe(&self, text: &str, minutes_to_end: i64) -> Option<Timeframe> {
+        let text_lower = text.to_lowercase();
+
+        // Pattern matching for 15-minute markets
+        let is_15m_explicit = text_lower.contains("15m")
+            || text_lower.contains("15-minute")
+            || text_lower.contains("15 minute")
+            || text_lower.contains("min15")
+            || text_lower.contains("updown-15m")
+            || text_lower.contains("-15m-");
+
+        // Pattern matching for 1-hour markets
+        let is_1h_explicit = text_lower.contains("1h")
+            || text_lower.contains("1-hour")
+            || text_lower.contains("1 hour")
+            || text_lower.contains("hourly")
+            || text_lower.contains("-1h-")
+            || text_lower.contains("updown-1h");
+
+        // Hourly patterns like "2am-et", "3pm-et", etc.
+        let has_hour_pattern = text_lower.contains("am-et")
+            || text_lower.contains("pm-et")
+            || text_lower.contains(":00-et")
+            || text_lower.contains(":30-et");
+
+        // Check for up/down market without explicit timeframe
+        let is_updown = text_lower.contains("up or down")
+            || text_lower.contains("updown")
+            || text_lower.contains("up-down");
+
+        // Decision logic
+        if is_15m_explicit {
+            return Some(Timeframe::Min15);
+        }
+
+        if is_1h_explicit || has_hour_pattern {
+            return Some(Timeframe::Hour1);
+        }
+
+        // For generic up/down markets, infer from time to expiry
+        if is_updown {
+            // 15m markets typically expire within 30 minutes
+            // 1h markets typically expire within 90 minutes
+            if minutes_to_end > 0 && minutes_to_end <= 30 {
+                return Some(Timeframe::Min15);
+            } else if minutes_to_end > 30 && minutes_to_end <= 120 {
+                return Some(Timeframe::Hour1);
+            } else if minutes_to_end > 0 && minutes_to_end <= 180 {
+                // Could still be valid, default to 1h for longer windows
+                return Some(Timeframe::Hour1);
+            }
+        }
+
+        // Fallback: infer from time remaining
+        if minutes_to_end > 0 && minutes_to_end <= 25 {
+            return Some(Timeframe::Min15);
+        } else if minutes_to_end > 25 && minutes_to_end <= 120 {
+            return Some(Timeframe::Hour1);
+        }
+
+        debug!(
+            "Cannot detect timeframe: text='{}' minutes_to_end={}",
+            text.chars().take(80).collect::<String>(),
+            minutes_to_end
+        );
+        None
     }
 
     /// Validate if a market matches our criteria
