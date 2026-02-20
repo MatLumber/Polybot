@@ -646,8 +646,8 @@ impl V3Strategy {
             self.state.add_prediction_result(is_win);
             self.add_trade_to_dataset(trade_sample);
             
-            // Auto-save ML state every 5 trades
-            if self.state.total_predictions % 5 == 0 {
+            // Auto-save ML state after every trade so we don't lose data on crash/restart
+            if self.state.total_predictions % 1 == 0 {
                 if let Some(ref predictor) = self.predictor {
                     if let Err(e) =
                         self.persistence
@@ -664,6 +664,20 @@ impl V3Strategy {
                 pnl = record.pnl,
                 "✅ Trade outcome successfully registered in V3 Predictor for dynamic continuous learning"
             );
+        }
+    }
+
+    /// Force save state to disk gracefully
+    pub fn force_save_state(&mut self) {
+        if let Some(ref predictor) = self.predictor {
+            if let Err(e) =
+                self.persistence
+                    .save_ml_state(predictor, &self.state, &self.dataset)
+            {
+                tracing::warn!("Failed to auto-save ML state: {}", e);
+            } else {
+                tracing::info!("💾 V3 ML State safely persisted on shutdown");
+            }
         }
     }
 

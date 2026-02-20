@@ -1,0 +1,166 @@
+{
+  "BTC_15M": [
+    {
+      "name": "heikin_ashi",
+      "total_signals": 5,
+      "wins": 1,
+      "losses": 4,
+      "win_rate": 0.2,
+      "calibrated_weight": 1.0,
+      "default_weight": 1.0,
+      "last_updated": 1771389541
+    },
+    {
+      "name": "stoch_rsi",
+      "total_signals": 1,
+      "wins": 1,
+      "losses": 0,
+      "win_rate": 1.0,
+      "calibrated_weight": 1.0,
+      "default_weight": 1.0,
+      "last_updated": 1771388100
+    },
+    {
+      "name": "macd_histogram",
+      "total_signals": 5,
+      "wins": 1,
+      "losses": 4,
+      "win_rate": 0.2,
+      "calibrated_weight": 1.5,
+      "default_weight": 1.5,
+      "last_updated": 1771389541
+    },
+    {
+      "name": "ema_trend",
+      "total_signals": 1,
+      "wins": 0,
+      "losses": 1,
+      "win_rate": 0.0,
+      "calibrated_weight": 1.5,
+      "default_weight": 1.5,
+      "last_updated": 1771386300
+    },
+    {
+      "name": "adx_trend",
+      "total_signals": 4,
+      "wins": 0,
+      "losses": 4,
+      "win_rate": 0.0,
+      "calibrated_weight": 2.5,
+      "default_weight": 2.5,
+      "last_updated": 1771389541
+    },
+    {
+      "name": "bollinger_band",
+      "total_signals": 2,
+      "wins": 1,
+      "losses": 1,
+      "win_rate": 0.5,
+      "calibrated_weight": 2.0,
+      "default_weight": 2.0,
+      "last_updated": 1771389024
+    },
+    {
+      "name": "momentum_acceleration",
+      "total_signals": 4,
+      "wins": 1,
+      "losses": 3,
+      "win_rate": 0.25,
+      "calibrated_weight": 2.0,
+      "default_weight": 2.0,
+      "last_updated": 1771389541
+    },
+    {
+      "name": "rsi_extreme",
+      "total_signals": 5,
+      "wins": 1,
+      "losses": 4,
+      "win_rate": 0.2,
+      "calibrated_weight": 1.5,
+      "default_weight": 1.5,
+      "last_updated": 1771389541
+    }
+  ],
+  "ETH_15M": [
+    {
+      "name": "macd_histogram",
+      "total_signals": 4,
+      "wins": 3,
+      "losses": 1,
+      "win_rate": 0.75,
+      "calibrated_weight": 1.5,
+      "default_weight": 1.5,
+      "last_updated": 1771390042
+    },
+    {
+      "name": "rsi_extreme",
+      "total_signals": 3,
+      "wins": 2,
+      "losses": 1,
+      "win_rate": 0.6666666666666666,
+      "calibrated_weight": 1.5,
+      "default_weight": 1.5,
+      "last_updated": 1771390042
+    },
+    {
+      "name": "momentum_acceleration",
+      "total_signals": 4,
+      "wins": 3,
+      "losses": 1,
+      "win_rate": 0.75,
+      "calibrated_weight": 2.0,
+      "default_weight": 2.0,
+      "last_updated": 1771390042
+    },
+    {
+      "name": "heikin_ashi",
+      "total_signals": 4,
+      "wins": 3,
+      "losses": 1,
+      "win_rate": 0.75,
+      "calibrated_weight": 1.0,
+      "default_weight": 1.0,
+      "last_updated": 1771390042
+    },
+    {
+      "name": "stoch_rsi",
+      "total_signals": 2,
+      "wins": 1,
+      "losses": 1,
+      "win_rate": 0.5,
+      "calibrated_weight": 1.0,
+      "default_weight": 1.0,
+      "last_updated": 1771388192
+    },
+    {
+      "name": "adx_trend",
+      "total_signals": 1,
+      "wins": 0,
+      "losses": 1,
+      "win_rate": 0.0,
+      "calibrated_weight": 2.5,
+      "default_weight": 2.5,
+      "last_updated": 1771388192
+    },
+    {
+      "name": "bollinger_band",
+      "total_signals": 4,
+      "wins": 3,
+      "losses": 1,
+      "win_rate": 0.75,
+      "calibrated_weight": 2.0,
+      "default_weight": 2.0,
+      "last_updated": 1771390042
+    },
+    {
+      "name": "short_term_momentum",
+      "total_signals": 1,
+      "wins": 1,
+      "losses": 0,
+      "win_rate": 1.0,
+      "calibrated_weight": 1.5,
+      "default_weight": 1.5,
+      "last_updated": 1771389023
+    }
+  ]
+}

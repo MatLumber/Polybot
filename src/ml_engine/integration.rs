@@ -101,6 +101,15 @@ impl ActiveStrategy {
             ActiveStrategy::V3(engine) => engine.is_calibrated(),
         }
     }
+
+    pub fn force_save_state(&mut self) {
+        match self {
+            ActiveStrategy::V2(_) => {} // No explicit save needed for V2 (handled independently)
+            ActiveStrategy::V3(engine) => {
+                engine.force_save_state();
+            }
+        }
+    }
 }
 
 /// Inicializar estrategía según configuración

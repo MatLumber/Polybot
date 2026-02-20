@@ -89,6 +89,9 @@ pub trait Strategy: Send + Sync {
 
     /// Register closed trade result for continuous ML learning (V3 only, V2 no-op)
     fn register_closed_trade_result(&mut self, _record: &crate::paper_trading::PaperTradeRecord) {}
+
+    /// Force state save specifically for clean shutdowns
+    fn force_save_state(&mut self) {}
 }
 
 // Implementación para StrategyEngine (V2)
@@ -241,5 +244,9 @@ impl Strategy for crate::strategy::V3Strategy {
 
     fn register_closed_trade_result(&mut self, record: &crate::paper_trading::PaperTradeRecord) {
         crate::strategy::V3Strategy::register_closed_trade_result(self, record)
+    }
+
+    fn force_save_state(&mut self) {
+        crate::strategy::V3Strategy::force_save_state(self)
     }
 }

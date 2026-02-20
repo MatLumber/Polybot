@@ -2015,8 +2015,19 @@ async fn main() -> Result<()> {
         info!("📋 ═══ FINAL PAPER TRADING REPORT ═══");
         engine.print_dashboard();
         info!("{}", engine.summary_string());
-    } // Flush pending data
-      // csv_persistence automatically flushes on each write
+        if let Err(e) = engine.save_state() {
+            warn!("Failed to save paper engine state on shutdown: {}", e);
+        }
+    } 
+    
+    // Explicitly explicitly save ML state and calibrators for safe restarts
+    {
+        let mut s = strategy.lock().await;
+        s.force_save_state();
+    }
+    
+    // Flush pending data
+    // csv_persistence automatically flushes on each write
     info!("👋 PolyBot stopped");
     Ok(())
 }
