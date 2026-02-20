@@ -108,7 +108,7 @@ impl Default for MLEngineConfig {
             filters: FilterConfig {
                 max_spread_bps_15m: 200.0,      // Was 100 - too restrictive
                 max_spread_bps_1h: 300.0,       // Was 150 - too restrictive
-                min_depth_usdc: 1000.0,         // Was 5000 - too restrictive for some markets
+                min_depth_usdc: 0.0,            // Disabled: Polymarket has no orderbook depth data
                 max_volatility_5m: 0.05,        // Was 0.02 - too restrictive
                 min_volatility_5m: 0.0001,      // Was 0.001 - allow very low vol
                 optimal_hours_only: false,      // Was true - don't restrict by hour
@@ -142,6 +142,8 @@ pub struct MLEngineState {
     pub correct_predictions: usize,
     pub incorrect_predictions: usize,
     pub last_retraining: Option<i64>,
+    #[serde(default)]
+    pub training_epoch: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -165,6 +167,7 @@ impl MLEngineState {
             correct_predictions: 0,
             incorrect_predictions: 0,
             last_retraining: None,
+            training_epoch: 0,
         }
     }
 

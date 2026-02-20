@@ -5,7 +5,6 @@ bot:
   tag: "polybot-v2.0"
   assets:
     - "BTC"
-    - "ETH"
   timeframes:
     - "15m"
     - "1h"
@@ -187,7 +186,7 @@ ml_engine:
   # Smart filters
   max_spread_bps_15m: 100
   max_spread_bps_1h: 150
-  min_depth_usdc: 5000
+  min_depth_usdc: 0
   max_volatility_5m: 0.02
   optimal_hours_only: false
 
@@ -217,8 +216,8 @@ market_config:
   enabled_markets:
     - "BTC_15M"
     - "BTC_1H"
-    - "ETH_15M"
-    # ETH_1H desactivado hasta corrección de parámetros
+    # ETH removed - BTC only
+    # - "ETH_15M"
     # - "ETH_1H"
   
   # Volatilidad máxima permitida por mercado (basado en ATR)

@@ -190,6 +190,8 @@ export interface MLMetrics {
   correctPredictions: number
   incorrectPredictions: number
   ensembleWeights: MLModelInfo[]
+  epoch: number
+  datasetSize: number
   timestamp: number
 }
 

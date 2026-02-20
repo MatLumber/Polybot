@@ -182,6 +182,8 @@ export interface MLMetricsWire {
   correct_predictions: number
   incorrect_predictions: number
   ensemble_weights: MLModelInfoWire[]
+  epoch?: number
+  dataset_size?: number
   timestamp: number
 }
 

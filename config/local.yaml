@@ -10,7 +10,6 @@ bot:
   tag: "polybot-ml-v3.0"
   assets:
     - "BTC"
-    - "ETH"
   timeframes:
     - "15m"
     - "1h"
@@ -43,7 +42,7 @@ ml_engine:
   # Smart filters - PERMISIVOS para paper trading
   max_spread_bps_15m: 300
   max_spread_bps_1h: 400
-  min_depth_usdc: 500
+  min_depth_usdc: 0
   max_volatility_5m: 0.08
   optimal_hours_only: false
 

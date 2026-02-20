@@ -275,7 +275,7 @@ impl Default for MLConfig {
             dynamic_weight_adjustment: true,
             max_spread_bps_15m: 100.0,
             max_spread_bps_1h: 150.0,
-            min_depth_usdc: 2000.0,
+            min_depth_usdc: 0.0,
             max_volatility_5m: 0.02,
             optimal_hours_only: false,
         }

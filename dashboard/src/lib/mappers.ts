@@ -329,6 +329,8 @@ export function mapMLMetrics(metrics: MLMetricsWire): MLMetrics {
     correctPredictions: metrics.correct_predictions,
     incorrectPredictions: metrics.incorrect_predictions,
     ensembleWeights: (metrics.ensemble_weights || []).map(mapMLModelInfo),
+    epoch: metrics.epoch || 0,
+    datasetSize: metrics.dataset_size || 0,
     timestamp: metrics.timestamp,
   }
 }

@@ -325,6 +325,8 @@ pub struct MLMetricsPayload {
     pub correct_predictions: usize,
     pub incorrect_predictions: usize,
     pub ensemble_weights: Vec<ModelWeightInfo>,
+    pub epoch: usize,
+    pub dataset_size: usize,
     pub timestamp: i64,
 }
 

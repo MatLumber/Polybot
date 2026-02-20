@@ -73,6 +73,8 @@ pub trait Strategy: Send + Sync {
             last_filter_reason: None,
             ensemble_weights: None,
             model_info: vec![],
+            training_epoch: 0,
+            dataset_size: 0,
         }
     }
 

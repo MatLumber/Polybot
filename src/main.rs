@@ -981,6 +981,8 @@ async fn main() -> Result<()> {
                         metrics.correct_predictions,
                         metrics.incorrect_predictions,
                         metrics.model_info,
+                        metrics.training_epoch,
+                        metrics.dataset_size,
                     );
                 }
 

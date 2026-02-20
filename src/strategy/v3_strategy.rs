@@ -513,6 +513,8 @@ impl V3Strategy {
         // Train predictor con el dataset acumulativo
         if let Some(ref mut predictor) = self.predictor {
             predictor.train(&training_dataset)?;
+            self.state.training_epoch += 1;
+            self.state.last_retraining = Some(chrono::Utc::now().timestamp_millis());
             info!(
                 "✅ V3 models trained with {} total samples! Accuracy: {:.2}%",
                 training_dataset.len(),
@@ -746,6 +748,8 @@ impl V3Strategy {
             last_filter_reason: self.last_filter_reason.clone(),
             ensemble_weights,
             model_info,
+            training_epoch: self.state.training_epoch,
+            dataset_size: self.dataset.len(),
         }
     }
 
@@ -854,6 +858,8 @@ pub struct MLStateResponse {
     pub ensemble_weights: Option<Vec<f64>>,
     /// Per-model info: (name, weight, accuracy)
     pub model_info: Vec<(String, f64, f64)>,
+    pub training_epoch: usize,
+    pub dataset_size: usize,
 }
 
 /// Dataset statistics

@@ -965,6 +965,8 @@ impl DashboardMemory {
                 "total_predictions": m.total_predictions,
                 "correct_predictions": m.correct_predictions,
                 "ensemble_weights": ensemble_weights,
+                "epoch": m.training_epoch,
+                "dataset_size": m.dataset_size,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })
         } else {
@@ -974,6 +976,8 @@ impl DashboardMemory {
                 "total_predictions": 0,
                 "correct_predictions": 0,
                 "ensemble_weights": [],
+                "epoch": 0,
+                "dataset_size": 0,
                 "timestamp": chrono::Utc::now().to_rfc3339(),
             })
         }

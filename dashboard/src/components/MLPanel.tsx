@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Brain, Activity, BarChart3, Target, Zap, TrendingUp } from 'lucide-react'
+import { Brain, Activity, BarChart3, Target, Zap, TrendingUp, Database, History } from 'lucide-react'
 import type { MLMetrics, MLModelInfo, MLPrediction, MLState } from '../types/ui'
 
 interface MLPanelProps {
@@ -11,7 +11,7 @@ interface MLPanelProps {
 function ModelWeightBar({ model, maxWeight }: { model: MLModelInfo; maxWeight: number }) {
   const percentage = maxWeight > 0 ? (model.weight / maxWeight) * 100 : 0
   const accuracyColor = model.accuracy >= 0.55 ? '#22c55e' : model.accuracy >= 0.50 ? '#eab308' : '#ef4444'
-  
+
   return (
     <div className="model-weight-item">
       <div className="model-weight-header">
@@ -21,8 +21,8 @@ function ModelWeightBar({ model, maxWeight }: { model: MLModelInfo; maxWeight: n
         </span>
       </div>
       <div className="model-weight-bar-container">
-        <div 
-          className="model-weight-bar" 
+        <div
+          className="model-weight-bar"
           style={{ width: `${percentage}%`, backgroundColor: accuracyColor }}
         />
       </div>
@@ -111,6 +111,18 @@ export function MLPanel({ mlState, mlMetrics, mlPrediction }: MLPanelProps) {
           <span className="ml-metric-label">Loss</span>
           <span className="ml-metric-value text-negative">{mlMetrics.incorrectPredictions}</span>
         </div>
+
+        <div className="ml-metric-card">
+          <History size={14} />
+          <span className="ml-metric-label">Epoch</span>
+          <span className="ml-metric-value">{mlMetrics.epoch}</span>
+        </div>
+
+        <div className="ml-metric-card">
+          <Database size={14} />
+          <span className="ml-metric-label">Dataset</span>
+          <span className="ml-metric-value">{mlMetrics.datasetSize}</span>
+        </div>
       </div>
 
       {/* Ensemble Weights */}
@@ -142,7 +154,7 @@ export function MLPanel({ mlState, mlMetrics, mlPrediction }: MLPanelProps) {
                     {pred.direction}
                   </span>
                   <span className="ml-prediction-confidence">{(pred.confidence * 100).toFixed(0)}%</span>
-                </div>                
+                </div>
                 <div className="ml-prediction-details">
                   <span>Prob Up: {(pred.probUp * 100).toFixed(0)}%</span>
                   <span className="ml-prediction-model">{pred.modelName}</span>

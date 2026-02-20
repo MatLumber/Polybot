@@ -128,6 +128,8 @@ impl WebSocketBroadcaster {
         correct_predictions: usize,
         incorrect_predictions: usize,
         weights: Vec<(String, f64, f64)>,
+        epoch: usize,
+        dataset_size: usize,
     ) {
         let ensemble_weights = weights
             .into_iter()
@@ -147,6 +149,8 @@ impl WebSocketBroadcaster {
                 correct_predictions,
                 incorrect_predictions,
                 ensemble_weights,
+                epoch,
+                dataset_size,
                 timestamp: chrono::Utc::now().timestamp_millis(),
             },
         ));
