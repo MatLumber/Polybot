@@ -154,6 +154,13 @@ async fn main() -> Result<()> {
         * config.risk.max_open_positions as f64)
         .max(config.risk.max_position_usdc);
     risk_cfg.min_confidence = config.strategy.min_confidence.max(0.01).min(0.99);
+    
+    // Scale confidence thresholds to match strategy min_confidence
+    let mc = risk_cfg.min_confidence;
+    risk_cfg.confidence_scale.low = (mc, 0.4);
+    risk_cfg.confidence_scale.medium = (mc + (0.90 - mc) * 0.4, 0.7);
+    risk_cfg.confidence_scale.high = (mc + (0.90 - mc) * 0.8, 1.0);
+    
     risk_cfg.kill_switch_enabled = config.risk.kill_switch_enabled;
     let risk_manager = Arc::new(RiskManager::new(risk_cfg));
     let dry_run = config.bot.dry_run;

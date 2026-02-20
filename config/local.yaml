@@ -43,7 +43,7 @@ ml_engine:
   max_spread_bps_15m: 300
   max_spread_bps_1h: 400
   min_depth_usdc: 0
-  max_volatility_5m: 0.08
+  max_volatility_5m: 0.10
   optimal_hours_only: false
 
 # ============================================================================
@@ -75,7 +75,7 @@ oracle:
 # STRATEGY
 # ============================================================================
 strategy:
-  min_confidence: 0.55
+  min_confidence: 0.50
   entry_delay_secs: 30
   min_time_to_expiry_secs: 30
   rolling_analysis: true
@@ -111,7 +111,7 @@ paper_trading:
   max_hold_duration_ms: 900000
   dashboard_interval_secs: 30
   prefer_chainlink: true
-  min_edge_net: 0.03
+  min_edge_net: 0.01
 
 # ============================================================================
 # KELLY
