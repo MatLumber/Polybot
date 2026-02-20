@@ -276,7 +276,7 @@ impl Default for MLConfig {
             max_spread_bps_15m: 100.0,
             max_spread_bps_1h: 150.0,
             min_depth_usdc: 0.0,
-            max_volatility_5m: 0.02,
+            max_volatility_5m: 0.06,
             optimal_hours_only: false,
         }
     }
@@ -377,7 +377,7 @@ impl AppConfig {
             .set_default("reset.delete_learning_state", true)?
             .set_default("reset.delete_paper_state", true)?
             // ML Engine defaults
-            .set_default("use_v3_strategy", false)?
+            .set_default("use_v3_strategy", true)?
             .set_default("ml_engine.enabled", true)?
             .set_default("ml_engine.model_type", "ensemble")?
             .set_default("ml_engine.retrain_interval_trades", 50)?
@@ -392,7 +392,7 @@ impl AppConfig {
             .set_default("ml_engine.max_spread_bps_15m", 100.0)?
             .set_default("ml_engine.max_spread_bps_1h", 150.0)?
             .set_default("ml_engine.min_depth_usdc", 0.0)?
-            .set_default("ml_engine.max_volatility_5m", 0.02)?
+            .set_default("ml_engine.max_volatility_5m", 0.06)?
             .set_default("ml_engine.optimal_hours_only", false)?
             // Load config file if exists
             .add_source(File::with_name("config/default").required(false))

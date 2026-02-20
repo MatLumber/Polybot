@@ -160,7 +160,7 @@ reset:
 # ============================================================================
 # ML ENGINE v3.0 - Machine Learning Strategy
 # ============================================================================
-use_v3_strategy: false  # Set to true to enable ML-powered trading
+use_v3_strategy: true  # Set to true to enable ML-powered trading
 
 ml_engine:
   enabled: true
@@ -187,7 +187,7 @@ ml_engine:
   max_spread_bps_15m: 100
   max_spread_bps_1h: 150
   min_depth_usdc: 0
-  max_volatility_5m: 0.02
+  max_volatility_5m: 0.06
   optimal_hours_only: false
 
 # ============================================================================
