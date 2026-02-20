@@ -36,6 +36,10 @@ servicio: systemctl status polybot (o el nombre real)
 
 logs recientes: journalctl -u polybot -n 100 --no-pager (o equivalente)
 
+Nunca hagas npm o pnpm run build en el VPS ya que el dashboard esta en Vercel hosteado no en el VPS
+
+El build debe ser siempre "cargo build --release --features dashboard"
+
 4) Flujo obligatorio de cambios (GitHub como fuente de verdad)
 
 Todo cambio debe seguir este orden:
@@ -74,10 +78,6 @@ Actualización:
 
 git pull
 
-Ejecuta el build del servicio Polybot y asegúrate de incluir el dashboard en el comando.
-
-Si hay dependencias, instálalas de forma consistente (según stack): npm ci / pnpm i --frozen-lockfile / pip install -r ... etc.
-
 Reinicio:
 
 Reinicia con el gestor correcto (preferir systemd):
@@ -100,7 +100,7 @@ ss -lntp o lsof -i :PUERTO
 
 Verifica endpoint/health:
 
-curl -f http://localhost:PUERTO/health (o la ruta real)
+curl -f http://localhost:8088/health (o la ruta real)
 
 Si algo falla:
 

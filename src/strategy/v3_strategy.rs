@@ -568,8 +568,8 @@ impl V3Strategy {
         timeframe: Timeframe,
         indicators: &[String],
         is_win: bool,
-        confidence: f64,
-        edge: f64,
+        _confidence: f64,
+        _edge: f64,
     ) {
         // Record in calibrator
         let result = if is_win {
@@ -580,36 +580,14 @@ impl V3Strategy {
         self.calibrator.record_trade(indicators, result);
         self.calibrator.recalibrate();
 
-        // Update accuracy tracking in ML state
-        self.state.add_prediction_result(is_win);
-
-        // Record outcome for dynamic weight adjustment
-        if let Some(ref mut predictor) = self.predictor {
-            predictor.record_outcome(confidence, is_win);
-
-            // Adjust weights periodically
-            if self.state.total_predictions % 10 == 0 {
-                predictor.adjust_weights_dynamically();
-            }
-        }
-
-        // Auto-save ML state every 5 trades
-        if let Some(ref predictor) = self.predictor {
-            if self.state.total_predictions % 5 == 0 {
-                if let Err(e) =
-                    self.persistence
-                        .save_ml_state(predictor, &self.state, &self.dataset)
-                {
-                    warn!("Failed to auto-save ML state: {}", e);
-                }
-            }
-        }
+        // Let the register_closed_trade_result method handle the ML Predictor,
+        // State predictions and dataset additions to avoid duplication.
 
         info!(
             is_win = is_win,
             accuracy = self.state.accuracy(),
             total = self.state.total_predictions,
-            "🧠 V3 learned from trade"
+            "🧠 V3 Indicator calibrator updated from trade"
         );
     }
 
@@ -661,6 +639,17 @@ impl V3Strategy {
             predictor.adjust_weights_dynamically();
             self.state.add_prediction_result(trade_sample.is_win);
             self.add_trade_to_dataset(trade_sample);
+            
+            // Auto-save ML state every 5 trades
+            if self.state.total_predictions % 5 == 0 {
+                if let Err(e) =
+                    self.persistence
+                        .save_ml_state(predictor, &self.state, &self.dataset)
+                {
+                    tracing::warn!("Failed to auto-save ML state: {}", e);
+                }
+            }
+            
             info!(
                 asset = ?asset,
                 timeframe = ?timeframe,
