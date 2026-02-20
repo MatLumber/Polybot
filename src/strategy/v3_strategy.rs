@@ -151,10 +151,6 @@ impl V3Strategy {
             calibrator,
             state,
             feature_history: HashMap::new(),
-            last_filter_reason: None,
-            model_accuracy,
-            total_predictions,
-            correct_predictions,
             dataset,
             persistence,
         };
@@ -459,7 +455,7 @@ impl V3Strategy {
             btc_eth_correlation: 0.0, // Would need cross-asset data
             calibrator_confidence: self.calibrator.get_confidence(),
             num_indicators_agreeing: 3, // Simplified
-            indicators_avg_win_rate: self.model_accuracy,
+            indicators_avg_win_rate: self.state.accuracy(),
             bullish_weight: if features.macd.unwrap_or(0.0) > 0.0 {
                 1.0
             } else {
@@ -516,11 +512,10 @@ impl V3Strategy {
         // Train predictor con el dataset acumulativo
         if let Some(ref mut predictor) = self.predictor {
             predictor.train(&training_dataset)?;
-            self.model_accuracy = predictor.ensemble_accuracy();
             info!(
                 "✅ V3 models trained with {} total samples! Accuracy: {:.2}%",
                 training_dataset.len(),
-                self.model_accuracy * 100.0
+                predictor.ensemble_accuracy() * 100.0
             );
         }
 
@@ -540,7 +535,7 @@ impl V3Strategy {
             let record = TrainingRecord {
                 timestamp: chrono::Utc::now().timestamp_millis(),
                 samples_count: self.dataset.len(),
-                accuracy: self.model_accuracy,
+                accuracy: self.state.accuracy(),
                 ensemble_weights: predictor.weights.clone(),
             };
             if let Err(e) = self.persistence.save_training_record(record) {
