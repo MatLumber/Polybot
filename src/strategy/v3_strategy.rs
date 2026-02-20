@@ -634,19 +634,27 @@ impl V3Strategy {
             indicators_triggered: record.indicators_used.clone(),
         };
 
-        if let Some(ref mut predictor) = self.predictor {
-            predictor.record_outcome(trade_sample.entry_features.calibrator_confidence, trade_sample.is_win);
-            predictor.adjust_weights_dynamically();
-            self.state.add_prediction_result(trade_sample.is_win);
+        if self.predictor.is_some() {
+            let is_win = trade_sample.is_win;
+            let conf = trade_sample.entry_features.calibrator_confidence;
+
+            if let Some(ref mut predictor) = self.predictor {
+                predictor.record_outcome(conf, is_win);
+                predictor.adjust_weights_dynamically();
+            }
+
+            self.state.add_prediction_result(is_win);
             self.add_trade_to_dataset(trade_sample);
             
             // Auto-save ML state every 5 trades
             if self.state.total_predictions % 5 == 0 {
-                if let Err(e) =
-                    self.persistence
-                        .save_ml_state(predictor, &self.state, &self.dataset)
-                {
-                    tracing::warn!("Failed to auto-save ML state: {}", e);
+                if let Some(ref predictor) = self.predictor {
+                    if let Err(e) =
+                        self.persistence
+                            .save_ml_state(predictor, &self.state, &self.dataset)
+                    {
+                        tracing::warn!("Failed to auto-save ML state: {}", e);
+                    }
                 }
             }
             
