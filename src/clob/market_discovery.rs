@@ -268,8 +268,8 @@ impl MarketDiscovery {
     ) -> Result<Vec<DiscoveredMarket>> {
         // Search tags for up/down markets - these rotate every 15m/1h
         let search_tags: Vec<&str> = match asset {
-            Asset::BTC => vec!["Bitcoin", "BTC", "updown", "up-down", "higher", "lower"],
-            Asset::ETH => vec!["Ethereum", "ETH", "updown", "up-down", "higher", "lower"],
+            Asset::BTC => vec!["Bitcoin", "BTC", "updown", "up-down", "Crypto", "crypto"],
+            Asset::ETH => vec!["Ethereum", "ETH", "updown", "up-down", "Crypto", "crypto"],
             _ => return Ok(Vec::new()),
         };
 
