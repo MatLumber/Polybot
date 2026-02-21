@@ -64,7 +64,7 @@ impl EnsembleWeights {
 /// Trait base para todos los modelos
 pub trait MLModel: Send + Sync {
     fn train(&mut self, x: &DenseMatrix<f64>, y: &Vec<i64>) -> anyhow::Result<()>;
-    fn predict(&self, features: &MLFeatureVector) -> f64;
+    fn predict(&self, features: &MLFeatureVector) -> Option<f64>;
     fn name(&self) -> &str;
     fn accuracy(&self) -> f64;
 }
@@ -115,7 +115,7 @@ impl MLModel for RandomForestModel {
         }
     }
 
-    fn predict(&self, features: &MLFeatureVector) -> f64 {
+    fn predict(&self, features: &MLFeatureVector) -> Option<f64> {
         if let Some(ref classifier) = self.classifier {
             let feature_vec = features.to_vec();
             let x = DenseMatrix::from_2d_array(&[&feature_vec]).unwrap();
@@ -124,15 +124,15 @@ impl MLModel for RandomForestModel {
                 Ok(pred) => {
                     let pred_vec: Vec<i64> = pred;
                     if !pred_vec.is_empty() {
-                        pred_vec[0] as f64
+                        Some(pred_vec[0] as f64)
                     } else {
-                        0.5
+                        None
                     }
                 }
-                _ => 0.5,
+                _ => None,
             }
         } else {
-            0.5
+            None
         }
     }
 
@@ -186,17 +186,17 @@ impl MLModel for LogisticRegressionModel {
         }
     }
 
-    fn predict(&self, features: &MLFeatureVector) -> f64 {
+    fn predict(&self, features: &MLFeatureVector) -> Option<f64> {
         if let Some(ref model) = self.model {
             let feature_vec = features.to_vec();
             let x = DenseMatrix::from_2d_array(&[&feature_vec]).unwrap();
 
             match model.predict(&x) {
-                Ok(pred) if !pred.is_empty() => pred[0] as f64,
-                _ => 0.5,
+                Ok(pred) if !pred.is_empty() => Some(pred[0] as f64),
+                _ => None,
             }
         } else {
-            0.5
+            None
         }
     }
 
@@ -255,9 +255,9 @@ impl MLModel for GradientBoostingModel {
         }
     }
 
-    fn predict(&self, features: &MLFeatureVector) -> f64 {
+    fn predict(&self, features: &MLFeatureVector) -> Option<f64> {
         if self.models.is_empty() {
-            return 0.5;
+            return None;
         }
 
         let feature_vec = features.to_vec();
@@ -276,9 +276,9 @@ impl MLModel for GradientBoostingModel {
         }
 
         if count > 0 {
-            sum / count as f64
+            Some(sum / count as f64)
         } else {
-            0.5
+            None
         }
     }
 
@@ -360,49 +360,52 @@ impl MLPredictor {
     }
 
     /// Predecir con ensemble ponderado
-    pub fn predict(&self, features: &MLFeatureVector) -> ModelPrediction {
+    pub fn predict(&self, features: &MLFeatureVector) -> Option<ModelPrediction> {
         let mut weighted_prob = 0.0;
         let mut total_weight = 0.0;
         let mut individual_preds = HashMap::new();
 
         // Random Forest
         if let Some(model) = self.models.get(0) {
-            let pred = model.predict(features);
-            weighted_prob += pred * self.weights.random_forest;
-            total_weight += self.weights.random_forest;
-            individual_preds.insert("RandomForest".to_string(), pred);
+            if let Some(pred) = model.predict(features) {
+                weighted_prob += pred * self.weights.random_forest;
+                total_weight += self.weights.random_forest;
+                individual_preds.insert("RandomForest".to_string(), pred);
+            }
         }
 
         // Gradient Boosting
         if let Some(model) = self.models.get(1) {
-            let pred = model.predict(features);
-            weighted_prob += pred * self.weights.gradient_boosting;
-            total_weight += self.weights.gradient_boosting;
-            individual_preds.insert("GradientBoosting".to_string(), pred);
+            if let Some(pred) = model.predict(features) {
+                weighted_prob += pred * self.weights.gradient_boosting;
+                total_weight += self.weights.gradient_boosting;
+                individual_preds.insert("GradientBoosting".to_string(), pred);
+            }
         }
 
         // Logistic Regression
         if let Some(model) = self.models.get(2) {
-            let pred = model.predict(features);
-            weighted_prob += pred * self.weights.logistic_regression;
-            total_weight += self.weights.logistic_regression;
-            individual_preds.insert("LogisticRegression".to_string(), pred);
+            if let Some(pred) = model.predict(features) {
+                weighted_prob += pred * self.weights.logistic_regression;
+                total_weight += self.weights.logistic_regression;
+                individual_preds.insert("LogisticRegression".to_string(), pred);
+            }
         }
 
-        let prob_up = if total_weight > 0.0 {
-            weighted_prob / total_weight
-        } else {
-            0.5
-        };
+        if total_weight == 0.0 || individual_preds.is_empty() {
+            return None;
+        }
+
+        let prob_up = weighted_prob / total_weight;
 
         // Calcular confianza basada en agreement
         let confidence = self.calculate_confidence(&individual_preds, prob_up);
 
-        ModelPrediction {
+        Some(ModelPrediction {
             prob_up,
             confidence,
             model_name: "Ensemble".to_string(),
-        }
+        })
     }
 
     /// Calcular confianza basada en agreement de modelos
@@ -420,7 +423,9 @@ impl MLPredictor {
         let confidence = (1.0 - mean_diff * 2.0).clamp(0.0, 1.0);
         let extreme_boost = (ensemble_prob - 0.5).abs() * 2.0;
 
-        (confidence * 0.7 + extreme_boost * 0.3).clamp(0.0, 1.0)
+        let neutral_penalty = if (ensemble_prob - 0.5).abs() < 0.02 { 0.4 } else { 1.0 };
+
+        ((confidence * 0.7 + extreme_boost * 0.3) * neutral_penalty).clamp(0.0, 1.0)
     }
 
     /// Registrar predicción y resultado para calibración

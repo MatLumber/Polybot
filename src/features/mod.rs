@@ -261,6 +261,8 @@ pub struct Features {
     pub spread_bps: Option<f64>,
     /// Order flow delta (buy volume - sell volume)
     pub orderflow_delta: Option<f64>,
+    /// Polymarket implied probability (midpoint price of the orderbook or best bid/ask)
+    pub polymarket_price: Option<f64>,
 }
 
 impl FeatureEngine {
@@ -767,6 +769,14 @@ impl FeatureEngine {
                 features.orderbook_ask_depth = Some(micro_features.ask_volume);
                 features.orderbook_depth_top5 =
                     Some((micro_features.bid_volume + micro_features.ask_volume).max(0.0));
+                
+                if micro_features.best_bid > 0.0 && micro_features.best_ask > 0.0 {
+                    features.polymarket_price = Some((micro_features.best_bid + micro_features.best_ask) / 2.0);
+                } else if micro_features.best_bid > 0.0 {
+                    features.polymarket_price = Some(micro_features.best_bid);
+                } else if micro_features.best_ask > 0.0 {
+                    features.polymarket_price = Some(micro_features.best_ask);
+                }
 
                 return;
             }
@@ -787,6 +797,11 @@ impl FeatureEngine {
             if ob.best_bid > 0.0 && ob.best_ask > 0.0 {
                 let spread = (ob.best_ask - ob.best_bid) / ((ob.best_ask + ob.best_bid) / 2.0);
                 features.spread_bps = Some(spread * 10000.0);
+                features.polymarket_price = Some((ob.best_bid + ob.best_ask) / 2.0);
+            } else if ob.best_bid > 0.0 {
+                features.polymarket_price = Some(ob.best_bid);
+            } else if ob.best_ask > 0.0 {
+                features.polymarket_price = Some(ob.best_ask);
             }
 
             // Order flow delta (buy volume - sell volume)

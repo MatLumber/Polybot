@@ -294,7 +294,7 @@ impl V3Strategy {
         _context: &crate::ml_engine::features::MarketContext,
     ) -> Option<GeneratedSignal> {
         let predictor = self.predictor.as_ref()?;
-        let prediction = predictor.predict(ml_features);
+        let prediction = predictor.predict(ml_features)?;
 
         tracing::debug!(
             asset = ?features.asset,
@@ -323,9 +323,19 @@ impl V3Strategy {
             Direction::Down
         };
 
-        // Calculate final confidence
+        // Calculate final confidence naturally
         let confidence = prediction.confidence * (prediction.prob_up - 0.5).abs() * 2.0;
-        let confidence = confidence.clamp(0.52, 0.95);
+
+        // Check minimum confidence again after applying multiplier
+        if confidence < self.config.min_confidence {
+            let reason = format!(
+                "low_edge_confidence: {:.2} < {:.2}",
+                confidence, self.config.min_confidence
+            );
+            tracing::debug!(%reason, "ML prediction inherently lacked edge");
+            self.last_filter_reason = Some(reason);
+            return None;
+        }
 
         // Track prediction for later validation
         self.state.add_prediction(Prediction {

@@ -194,29 +194,30 @@ impl TrainingPipeline {
         let mut returns = Vec::new();
 
         for sample in &test_dataset.samples {
-            let prediction = predictor.predict(&sample.features);
-            let predicted_up = prediction.prob_up > 0.5;
-            let actual_up = sample.target > 0.5;
+            if let Some(prediction) = predictor.predict(&sample.features) {
+                let predicted_up = prediction.prob_up > 0.5;
+                let actual_up = sample.target > 0.5;
 
-            if predicted_up == actual_up {
-                correct += 1;
+                if predicted_up == actual_up {
+                    correct += 1;
+                }
+
+                // Simular P&L
+                let pnl = if predicted_up == actual_up {
+                    wins += 1;
+                    let profit = 0.8; // Ganancia típica
+                    gross_profit += profit;
+                    profit
+                } else {
+                    losses += 1;
+                    let loss: f64 = -1.0; // Pérdida total
+                    gross_loss += loss.abs();
+                    loss
+                };
+
+                total_pnl += pnl;
+                returns.push(pnl);
             }
-
-            // Simular P&L
-            let pnl = if predicted_up == actual_up {
-                wins += 1;
-                let profit = 0.8; // Ganancia típica
-                gross_profit += profit;
-                profit
-            } else {
-                losses += 1;
-                let loss: f64 = -1.0; // Pérdida total
-                gross_loss += loss.abs();
-                loss
-            };
-
-            total_pnl += pnl;
-            returns.push(pnl);
         }
 
         let total = test_dataset.len() as f64;

@@ -132,6 +132,12 @@ pub struct MLFeatureVector {
     pub is_btc: f64,
     /// Timeframe (one-hot: 15m=1, 1h=0)
     pub is_15m: f64,
+
+    // ============ Polymarket ============
+    /// Polymarket implied probability
+    pub polymarket_price: f64,
+    /// Probability momentum
+    pub polymarket_price_momentum: f64,
 }
 
 impl MLFeatureVector {
@@ -188,11 +194,13 @@ impl MLFeatureVector {
             self.bearish_weight,
             self.is_btc,
             self.is_15m,
+            self.polymarket_price,
+            self.polymarket_price_momentum,
         ]
     }
 
     /// Número total de features
-    pub const NUM_FEATURES: usize = 50;
+    pub const NUM_FEATURES: usize = 52;
 
     /// Nombres de las features (para importancia)
     pub fn feature_names() -> Vec<&'static str> {
@@ -247,6 +255,8 @@ impl MLFeatureVector {
             "bearish_weight",
             "is_btc",
             "is_15m",
+            "polymarket_price",
+            "polymarket_price_momentum",
         ]
     }
 }
@@ -374,6 +384,10 @@ impl FeatureEngine {
             0.0
         };
 
+        // ============ Polymarket ============
+        ml_features.polymarket_price = features.polymarket_price.unwrap_or(0.5);
+        ml_features.polymarket_price_momentum = self.calculate_polymarket_momentum(ml_features.polymarket_price);
+
         // Guardar en historial
         self.feature_history
             .push((features.ts, ml_features.clone()));
@@ -422,6 +436,14 @@ impl FeatureEngine {
             .price_velocity;
         let v3 = self.feature_history.last().unwrap().1.price_velocity;
         (v3 - v2) - (v2 - v1)
+    }
+
+    fn calculate_polymarket_momentum(&self, current_price: f64) -> f64 {
+        if self.feature_history.len() < 3 {
+            return 0.0;
+        }
+        let last_price = self.feature_history.last().unwrap().1.polymarket_price;
+        current_price - last_price
     }
 
     fn calculate_vwap_distance(&self, features: &Features) -> f64 {

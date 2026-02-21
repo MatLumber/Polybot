@@ -61,7 +61,11 @@ impl MLStrategyPredictor {
 
         // 3. Predecir con ML
         let ml_prediction = if let Some(ref predictor) = self.ml_predictor {
-            predictor.predict(&ml_features)
+            if let Some(pred) = predictor.predict(&ml_features) {
+                pred
+            } else {
+                return None;
+            }
         } else {
             return None;
         };
