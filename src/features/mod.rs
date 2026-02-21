@@ -263,6 +263,12 @@ pub struct Features {
     pub orderflow_delta: Option<f64>,
     /// Polymarket implied probability (midpoint price of the orderbook or best bid/ask)
     pub polymarket_price: Option<f64>,
+    /// Polymarket 24hr volume
+    pub polymarket_volume_24hr: Option<f64>,
+    /// Polymarket total liquidity
+    pub polymarket_liquidity: Option<f64>,
+    /// Cross-asset correlation (e.g. BTC-ETH)
+    pub btc_eth_correlation: Option<f64>,
 }
 
 impl FeatureEngine {
@@ -392,6 +398,15 @@ impl FeatureEngine {
             last_close = last.close,
             "FeatureEngine::compute starting"
         );
+        
+        // Update cross asset analyzer with current price
+        use chrono::TimeZone;
+        let dt = chrono::Utc
+            .timestamp_millis_opt(last.open_time)
+            .single()
+            .unwrap_or_else(|| chrono::Utc::now());
+        self.cross_asset_analyzer.update_price(last.asset, last.timeframe, last.close, dt);
+
         let key = (last.asset, last.timeframe);
         let mut features = Features {
             asset: last.asset,
@@ -520,6 +535,15 @@ impl FeatureEngine {
         // NEW: Orderbook/Microstructure Features
         // ============================================
         self.compute_orderbook_features(&key, &mut features);
+
+        // ============================================
+        // NEW: Cross Asset Correlation
+        // ============================================
+        let corr_matrix = self.cross_asset_analyzer.get_correlation_matrix();
+        features.btc_eth_correlation = match features.timeframe {
+            Timeframe::Min15 => Some(corr_matrix.btc_eth_15m),
+            Timeframe::Hour1 => Some(corr_matrix.btc_eth_1h),
+        };
 
         // Log feature computation results for debugging
         tracing::debug!(

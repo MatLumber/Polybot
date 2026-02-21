@@ -138,6 +138,10 @@ pub struct MLFeatureVector {
     pub polymarket_price: f64,
     /// Probability momentum
     pub polymarket_price_momentum: f64,
+    /// Polymarket 24h volume
+    pub polymarket_volume_24hr: f64,
+    /// Polymarket total liquidity
+    pub polymarket_liquidity: f64,
 }
 
 impl MLFeatureVector {
@@ -196,11 +200,13 @@ impl MLFeatureVector {
             self.is_15m,
             self.polymarket_price,
             self.polymarket_price_momentum,
+            self.polymarket_volume_24hr,
+            self.polymarket_liquidity,
         ]
     }
 
     /// Número total de features
-    pub const NUM_FEATURES: usize = 52;
+    pub const NUM_FEATURES: usize = 54;
 
     /// Nombres de las features (para importancia)
     pub fn feature_names() -> Vec<&'static str> {
@@ -257,6 +263,8 @@ impl MLFeatureVector {
             "is_15m",
             "polymarket_price",
             "polymarket_price_momentum",
+            "polymarket_volume_24hr",
+            "polymarket_liquidity",
         ]
     }
 }
@@ -387,6 +395,8 @@ impl FeatureEngine {
         // ============ Polymarket ============
         ml_features.polymarket_price = features.polymarket_price.unwrap_or(0.5);
         ml_features.polymarket_price_momentum = self.calculate_polymarket_momentum(ml_features.polymarket_price);
+        ml_features.polymarket_volume_24hr = features.polymarket_volume_24hr.unwrap_or(0.0);
+        ml_features.polymarket_liquidity = features.polymarket_liquidity.unwrap_or(0.0);
 
         // Guardar en historial
         self.feature_history

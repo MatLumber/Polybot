@@ -463,7 +463,7 @@ impl V3Strategy {
             day_of_week,
             minutes_to_close: 60.0 * (24 - hour as i64) as f64, // Simplified
             minutes_since_market_open: (hour as f64 * 60.0).max(0.0),
-            btc_eth_correlation: 0.0, // Would need cross-asset data
+            btc_eth_correlation: features.btc_eth_correlation.unwrap_or(0.0),
             calibrator_confidence: self.calibrator.get_confidence(),
             num_indicators_agreeing: 3, // Simplified
             indicators_avg_win_rate: self.state.accuracy(),

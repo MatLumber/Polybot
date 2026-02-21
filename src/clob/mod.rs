@@ -209,6 +209,10 @@ pub struct MarketInfo {
     pub enable_order_book: bool,
     /// Market liquidity (Gamma snapshot).
     pub liquidity_num: f64,
+    /// Total volume
+    pub volume_num: f64,
+    /// 24hr volume
+    pub volume_24hr: f64,
     /// Best bid snapshot from Gamma (if available).
     pub best_bid: f64,
     /// Best ask snapshot from Gamma (if available).

@@ -819,7 +819,13 @@ async fn main() -> Result<()> {
                     tracing::info!(                        asset = ?tick.asset,                        timeframe = ?timeframe,                        candle_count = candle_count,                        "🕯️ Candle count"                    );
                 } // Need at least 30 candles for meaningful technical indicators
                 if candle_count >= 30 {
-                    if let Some(features) = feature_engine_inner.lock().await.compute(&candles) {
+                    if let Some(mut features) = feature_engine_inner.lock().await.compute(&candles) {
+                        // Let's enrich the features with Polymarket volume and liquidity context
+                        if let Some(market) = feature_clob_client.find_tradeable_market_for_signal(tick.asset, timeframe).await {
+                            features.polymarket_volume_24hr = Some(market.volume_24hr);
+                            features.polymarket_liquidity = Some(market.liquidity_num);
+                        }
+
                         // Log features at DEBUG level to avoid log spam
                         // ALWAYS send features to strategy (V3 handles partial features)
                         // Log indicator availability for debugging
@@ -838,6 +844,7 @@ async fn main() -> Result<()> {
                                 macd = ?features.macd,
                                 momentum = ?features.momentum,
                                 trend = ?features.trend_strength,
+                                vol_24h = ?features.polymarket_volume_24hr,
                                 "📊 Features computed with indicators"
                             );
                         }

@@ -335,6 +335,10 @@ pub struct MarketResponse {
     #[serde(default)]
     pub liquidity_num: Option<f64>,
     #[serde(default)]
+    pub volume_num: Option<f64>,
+    #[serde(default)]
+    pub volume_24hr: Option<f64>,
+    #[serde(default)]
     pub best_bid: Option<f64>,
     #[serde(default)]
     pub best_ask: Option<f64>,
@@ -396,6 +400,8 @@ impl From<MarketResponse> for super::MarketInfo {
             accepting_orders: m.accepting_orders.unwrap_or(true),
             enable_order_book: m.enable_order_book.unwrap_or(true),
             liquidity_num: m.liquidity_num.unwrap_or(0.0),
+            volume_num: m.volume_num.unwrap_or(0.0),
+            volume_24hr: m.volume_24hr.unwrap_or(0.0),
             best_bid: m.best_bid.unwrap_or(0.0),
             best_ask: m.best_ask.unwrap_or(1.0),
         }
