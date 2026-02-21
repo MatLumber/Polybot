@@ -130,8 +130,6 @@ impl V3Strategy {
             max_volatility_5m: ml_config.filters.max_volatility_5m,
             min_volatility_5m: ml_config.filters.min_volatility_5m,
             optimal_hours_only: ml_config.filters.optimal_hours_only,
-            min_btc_eth_correlation: ml_config.filters.min_btc_eth_correlation,
-            max_btc_eth_correlation: ml_config.filters.max_btc_eth_correlation,
             max_window_progress: ml_config.filters.max_window_progress,
             min_time_to_close_minutes: ml_config.filters.min_time_to_close_minutes,
             min_model_confidence: ml_config.min_confidence,
@@ -211,7 +209,6 @@ impl V3Strategy {
             day_of_week: context.day_of_week,
             minutes_to_close: context.minutes_to_close,
             window_progress: features.window_progress.unwrap_or(1.0),
-            btc_eth_correlation: context.btc_eth_correlation,
             is_macro_event_near: false,
             model_confidence: 0.0,
         };
@@ -463,7 +460,6 @@ impl V3Strategy {
             day_of_week,
             minutes_to_close: 60.0 * (24 - hour as i64) as f64, // Simplified
             minutes_since_market_open: (hour as f64 * 60.0).max(0.0),
-            btc_eth_correlation: features.btc_eth_correlation.unwrap_or(0.0),
             calibrator_confidence: self.calibrator.get_confidence(),
             num_indicators_agreeing: 3, // Simplified
             indicators_avg_win_rate: self.state.accuracy(),

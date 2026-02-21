@@ -537,14 +537,6 @@ impl FeatureEngine {
         self.compute_orderbook_features(&key, &mut features);
 
         // ============================================
-        // NEW: Cross Asset Correlation
-        // ============================================
-        let corr_matrix = self.cross_asset_analyzer.get_correlation_matrix();
-        features.btc_eth_correlation = match features.timeframe {
-            Timeframe::Min15 => Some(corr_matrix.btc_eth_15m),
-            Timeframe::Hour1 => Some(corr_matrix.btc_eth_1h),
-        };
-
         // Log feature computation results for debugging
         tracing::debug!(
             asset = ?key.0,

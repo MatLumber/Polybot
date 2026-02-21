@@ -61,7 +61,6 @@ pub struct FilterContext {
     pub day_of_week: u8,
     pub minutes_to_close: f64,
     pub window_progress: f64,
-    pub btc_eth_correlation: f64,
     pub is_macro_event_near: bool,
     pub model_confidence: f64,
 }
@@ -86,8 +85,6 @@ pub struct FilterConfig {
     pub max_volatility_5m: f64,
     pub min_volatility_5m: f64,
     pub optimal_hours_only: bool,
-    pub min_btc_eth_correlation: f64,
-    pub max_btc_eth_correlation: f64,
     pub max_window_progress: f64,
     pub min_time_to_close_minutes: f64,
     pub min_model_confidence: f64,
@@ -102,8 +99,6 @@ impl Default for FilterConfig {
             max_volatility_5m: 0.02,
             min_volatility_5m: 0.001,
             optimal_hours_only: false,
-            min_btc_eth_correlation: 0.6,
-            max_btc_eth_correlation: 0.95,
             max_window_progress: 0.70,
             min_time_to_close_minutes: 3.0,
             min_model_confidence: 0.55,
@@ -152,7 +147,6 @@ impl FilterPerformanceStats {
 pub struct AdaptiveThresholds {
     pub spread_multiplier: f64,
     pub volatility_multiplier: f64,
-    pub correlation_range_expansion: f64,
 }
 
 impl Default for AdaptiveThresholds {
@@ -160,7 +154,6 @@ impl Default for AdaptiveThresholds {
         Self {
             spread_multiplier: 1.0,
             volatility_multiplier: 1.0,
-            correlation_range_expansion: 0.0,
         }
     }
 }
@@ -196,12 +189,6 @@ impl SmartFilterEngine {
         if let Some(decision) = self.check_timing(context) {
             return decision;
         }
-
-        // Filtro 5: Correlación
-        if let Some(decision) = self.check_correlation(context) {
-            return decision;
-        }
-
         // Filtro 6: Eventos macro
         if let Some(decision) = self.check_macro_events(context) {
             return decision;
@@ -268,21 +255,6 @@ impl SmartFilterEngine {
 
         None
     }
-
-    /// Check 5: Correlación estable
-    fn check_correlation(&self, context: &FilterContext) -> Option<FilterDecision> {
-        let corr = context.btc_eth_correlation;
-        let expansion = self.adaptive_thresholds.correlation_range_expansion;
-
-        let min_corr = (self.config.min_btc_eth_correlation - expansion).max(0.0);
-        let max_corr = (self.config.max_btc_eth_correlation + expansion).min(1.0);
-
-        if corr < min_corr || corr > max_corr {
-            return Some(FilterDecision::Reject(FilterReason::UnstableCorrelation));
-        }
-        None
-    }
-
     /// Check 6: Eventos macro
     fn check_macro_events(&self, context: &FilterContext) -> Option<FilterDecision> {
         if context.is_macro_event_near {
@@ -331,9 +303,6 @@ impl SmartFilterEngine {
                     }
                     "volatility" => {
                         self.adaptive_thresholds.volatility_multiplier *= 1.1;
-                    }
-                    "correlation" => {
-                        self.adaptive_thresholds.correlation_range_expansion += 0.05;
                     }
                     _ => {}
                 }

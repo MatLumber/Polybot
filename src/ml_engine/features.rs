@@ -107,8 +107,6 @@ pub struct MLFeatureVector {
     /// Volatilidad en percentil histórico
     pub volatility_percentile: f64,
 
-    /// Correlación BTC-ETH (últimos 15m)
-    pub btc_eth_correlation: f64,
     /// Cambio de correlación reciente
     pub correlation_change: f64,
 
@@ -188,7 +186,6 @@ impl MLFeatureVector {
             self.market_regime,
             self.volatility_5m,
             self.volatility_percentile,
-            self.btc_eth_correlation,
             self.correlation_change,
             self.market_sentiment,
             self.calibrator_confidence,
@@ -206,7 +203,7 @@ impl MLFeatureVector {
     }
 
     /// Número total de features
-    pub const NUM_FEATURES: usize = 54;
+    pub const NUM_FEATURES: usize = 53;
 
     /// Nombres de las features (para importancia)
     pub fn feature_names() -> Vec<&'static str> {
@@ -251,7 +248,6 @@ impl MLFeatureVector {
             "market_regime",
             "volatility_5m",
             "volatility_percentile",
-            "btc_eth_correlation",
             "correlation_change",
             "market_sentiment",
             "calibrator_confidence",
@@ -369,7 +365,6 @@ impl FeatureEngine {
         ml_features.volatility_percentile =
             self.calculate_volatility_percentile(ml_features.volatility_5m);
 
-        ml_features.btc_eth_correlation = context.btc_eth_correlation;
         ml_features.correlation_change = self.calculate_correlation_change();
         ml_features.market_sentiment = self.calculate_market_sentiment(features);
 
@@ -516,14 +511,8 @@ impl FeatureEngine {
     }
 
     fn calculate_correlation_change(&self) -> f64 {
-        if self.feature_history.len() < 10 {
-            return 0.0;
-        }
-        let recent_corr = self.feature_history.last().unwrap().1.btc_eth_correlation;
-        let old_corr = self.feature_history[self.feature_history.len() - 10]
-            .1
-            .btc_eth_correlation;
-        recent_corr - old_corr
+        // Obsolete function since correlation removal, temporarily hardcoded
+        0.0
     }
 
     fn calculate_market_sentiment(&self, features: &Features) -> f64 {
@@ -540,7 +529,6 @@ pub struct MarketContext {
     pub day_of_week: u8,
     pub minutes_to_close: f64,
     pub minutes_since_market_open: f64,
-    pub btc_eth_correlation: f64,
     pub calibrator_confidence: f64,
     pub num_indicators_agreeing: usize,
     pub indicators_avg_win_rate: f64,

@@ -37,8 +37,6 @@ impl MLConfigConvertible for MLConfig {
                 max_volatility_5m: self.max_volatility_5m,
                 min_volatility_5m: 0.001, // Default
                 optimal_hours_only: self.optimal_hours_only,
-                min_btc_eth_correlation: 0.0, // Default - más permisivo
-                max_btc_eth_correlation: 1.0, // Default - más permisivo
                 max_window_progress: 0.90,    // Default - más permisivo
                 min_time_to_close_minutes: 2.0, // Default
                 min_model_confidence: 0.52,   // Default - más permisivo para empezar

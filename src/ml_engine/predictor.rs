@@ -129,7 +129,6 @@ impl MLStrategyPredictor {
             day_of_week: context.day_of_week,
             minutes_to_close: context.minutes_to_close,
             window_progress: features.window_progress.unwrap_or(1.0),
-            btc_eth_correlation: context.btc_eth_correlation,
             is_macro_event_near: false,
             model_confidence: 0.0,
         }

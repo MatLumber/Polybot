@@ -112,8 +112,6 @@ impl Default for MLEngineConfig {
                 max_volatility_5m: 0.05,        // Was 0.02 - too restrictive
                 min_volatility_5m: 0.0001,      // Was 0.001 - allow very low vol
                 optimal_hours_only: false,      // Was true - don't restrict by hour
-                min_btc_eth_correlation: 0.0,   // Was 0.6 - correlation not required
-                max_btc_eth_correlation: 1.0,   // Was 0.95 - allow any correlation
                 max_window_progress: 0.90,      // Was 0.70 - allow later entries
                 min_time_to_close_minutes: 2.0, // Was 3.0 - slightly more permissive
                 min_model_confidence: 0.52,     // Was 0.55 - lower threshold for exploration

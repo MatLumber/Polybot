@@ -347,7 +347,6 @@ fn generate_features(
     features.volatility_percentile = 0.5;
 
     // No disponibles en V2
-    features.btc_eth_correlation = 0.0;
     features.correlation_change = 0.0;
     features.market_sentiment = features.orderbook_imbalance;
 
