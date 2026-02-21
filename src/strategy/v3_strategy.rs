@@ -348,7 +348,8 @@ impl V3Strategy {
             ensemble_weight: 1.0,
         });
 
-        self.state.total_predictions += 1;
+        // NOT incrementing total_predictions here. It should only increment
+        // when a trade outcome is fully registered in register_closed_trade_result.
 
         // Build reasons
         let mut reasons = vec![

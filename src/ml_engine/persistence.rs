@@ -199,9 +199,24 @@ impl MLPersistenceManager {
             Dataset::new()
         };
 
+        // REPAIR ML STATE BUG: recalculate total, correct, and incorrect from the actual dataset
+        // so that inflated loop counts are discarded and we only match reality.
+        let mut state = MLPersistenceState::load(&self.state_file)?;
+        let dataset_len = dataset.samples.len();
+        let correct = dataset.samples.iter().filter(|s| s.target == 1.0).count();
+        // Here, we're assuming target==1.0 corresponds to what was "correct" when predicting.
+        // Wait, NO! target == 1.0 means it was a WIN trade (target=1.0 is_win=true).
+        // Since we only do win/loss correctness, and our model predicts prob_up,
+        // we can just use `dataset.trade_samples` is_win if they are there, or `target > 0.5`.
+        // Actually, since target=1.0 maps to is_win, the number of CORRECT predictions is the number of WINS.
+        // Because "correct_predictions" literally counts `is_win` in `register_closed_trade_result` !
+        state.total_predictions = dataset_len;
+        state.correct_predictions = dataset.samples.iter().filter(|s| s.target > 0.5).count();
+        state.incorrect_predictions = dataset_len.saturating_sub(state.correct_predictions);
+
         let loss_count = state.incorrect_predictions;
         info!(
-            "🧠 ML state restored: {} predictions, {} correct, {} incorrect, {:.1}% accuracy",
+            "🧠 ML state restored & repaired: {} predictions, {} correct, {} incorrect, {:.1}% accuracy",
             state.total_predictions,
             state.correct_predictions,
             loss_count,
