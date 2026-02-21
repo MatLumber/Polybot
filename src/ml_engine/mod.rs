@@ -198,11 +198,17 @@ impl MLEngineState {
 
     /// Check if retraining is needed
     pub fn should_retrain(&self, interval: usize) -> bool {
-        if let Some(last) = self.last_retraining {
-            let trades_since = self.total_predictions.saturating_sub(last as usize);
-            trades_since >= interval
-        } else {
+        if interval == 0 {
+            return false;
+        }
+        
+        // Retrain exactly when hitting multiples of the interval
+        if self.total_predictions > 0 && self.total_predictions % interval == 0 {
             true
+        } else if self.total_predictions >= interval && self.last_retraining.is_none() {
+            true
+        } else {
+            false
         }
     }
 

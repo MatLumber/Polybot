@@ -713,6 +713,10 @@ impl V3Strategy {
                     }
                 }
             }
+            // Trigger retraining if appropriate
+            if let Err(e) = self.maybe_retrain() {
+                tracing::warn!("Failed during maybe_retrain check: {}", e);
+            }
             
             info!(
                 asset = ?asset,
@@ -744,7 +748,9 @@ impl V3Strategy {
             .should_retrain(self.config.training.retrain_interval_trades)
         {
             info!("🔄 Retraining V3 models...");
-            // In a full implementation, this would retrain with recent data
+            if let Err(e) = self.train_initial_model(vec![]) {
+                tracing::warn!("⚠️ Auto-training failed during retraining check: {}", e);
+            }
         }
         Ok(())
     }

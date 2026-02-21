@@ -396,7 +396,7 @@ export function Dashboard() {
   const trades = dashboard.paper.recentTrades
     .filter((trade) => toMsTimestamp(trade.timestamp) >= heartbeatNow - RECENT_TRADES_WINDOW_MS)
     .sort((a, b) => toMsTimestamp(b.timestamp) - toMsTimestamp(a.timestamp))
-    .slice(0, 40)
+    .slice(0, 200)
   const stats = dashboard.paper.stats
   const priceMap = dashboard.prices.prices
   const execution = dashboard.execution
@@ -620,10 +620,10 @@ export function Dashboard() {
               <span>ML Engine v3.0</span>
             </div>
           </div>
-          <MLPanel 
-            mlState={stream.mlState} 
-            mlMetrics={stream.mlMetrics} 
-            mlPrediction={stream.mlPrediction} 
+          <MLPanel
+            mlState={stream.mlState}
+            mlMetrics={stream.mlMetrics}
+            mlPrediction={stream.mlPrediction}
           />
         </section>
       </main>
