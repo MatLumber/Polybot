@@ -386,22 +386,32 @@ impl V3Strategy {
 
     /// Fallback rule-based signal when ML is not available
     fn fallback_signal(&mut self, features: &crate::features::Features) -> Option<GeneratedSignal> {
-        let mut score = 0.0;
+        let mut score: f64 = 0.0;
         let mut reasons = Vec::new();
 
-        // RSI
-        if let Some(rsi) = features.rsi {
-            if rsi < 35.0 {
+        // 1. Trend Direction (EMA 9 vs EMA 21)
+        if let (Some(ema9), Some(ema21)) = (features.ema_9, features.ema_21) {
+            if ema9 > ema21 {
                 score += 1.0;
-                reasons.push("RSI_oversold".to_string());
-            } else if rsi > 65.0 {
+                reasons.push("EMA_bullish".to_string());
+            } else {
                 score -= 1.0;
-                reasons.push("RSI_overbought".to_string());
+                reasons.push("EMA_bearish".to_string());
             }
         }
 
-        // MACD
-        if let Some(macd) = features.macd {
+        // 2. Momentum Confirmation (MACD Histogram)
+        if let Some(macd_hist) = features.macd_hist {
+            // Is MACD histogram positive (momentum upwards)?
+            if macd_hist > 0.0 {
+                score += 0.5;
+                reasons.push("MACD_momentum_bullish".to_string());
+            } else {
+                score -= 0.5;
+                reasons.push("MACD_momentum_bearish".to_string());
+            }
+        } else if let Some(macd) = features.macd {
+            // Fallback to macd alone if hist not available (should be always available though)
             if macd > 0.0 {
                 score += 0.5;
                 reasons.push("MACD_bullish".to_string());
@@ -411,7 +421,35 @@ impl V3Strategy {
             }
         }
 
-        let confidence = ((score as f64).abs() / 3.0).min(1.0) * 0.5 + 0.5;
+        // 3. Heikin Ashi Trend Confirmation
+        if let Some(ha_trend) = &features.ha_trend {
+            match ha_trend {
+                Direction::Up => {
+                    score += 0.5;
+                    reasons.push("HA_bullish".to_string());
+                }
+                Direction::Down => {
+                    score -= 0.5;
+                    reasons.push("HA_bearish".to_string());
+                }
+            }
+        }
+
+        // 4. Extreme Overbought/Oversold Penalties
+        // Instead of trading RSI mean-reverting everywhere, only penalize EXTREMES
+        if let Some(rsi) = features.rsi {
+            if rsi > 80.0 {
+                score -= 1.0; // Penalty against UP
+                reasons.push("RSI_extreme_overbought".to_string());
+            } else if rsi < 20.0 {
+                score += 1.0; // Penalty against DOWN
+                reasons.push("RSI_extreme_oversold".to_string());
+            }
+        }
+
+        // Calculate confidence based on maximum possible absolute score (which is ~3.0 for all aligned)
+        let max_score = 3.0; // 1.0 (EMA) + 0.5 (MACD) + 0.5 (HA) + 1.0 (RSI penalty)
+        let confidence = ((score as f64).abs() / max_score).min(1.0) * 0.4 + 0.6; // Scale base line to 0.6 minimum
 
         if confidence < self.config.min_confidence {
             tracing::info!(
@@ -419,9 +457,21 @@ impl V3Strategy {
                 ?features.timeframe,
                 confidence,
                 min_confidence = self.config.min_confidence,
-                "❌ Fallback signal rejected (low confidence)"
+                "❌ Fallback signal rejected (low confidence, weak trend)"
             );
             self.last_filter_reason = Some("fallback_low_confidence".to_string());
+            return None;
+        }
+        
+        // Ensure strong directional conviction: EMA and MACD must be somewhat aligned
+        if score.abs() < 1.0 {
+            tracing::info!(
+                ?features.asset,
+                ?features.timeframe,
+                score,
+                "❌ Fallback signal rejected (insufficient directional alignment)"
+            );
+            self.last_filter_reason = Some("fallback_weak_directional_score".to_string());
             return None;
         }
 
@@ -438,7 +488,7 @@ impl V3Strategy {
             confidence,
             reasons,
             ts: features.ts,
-            indicators_used: vec!["v3_fallback".to_string()],
+            indicators_used: vec!["v3_fallback_trend".to_string()],
         })
     }
 
