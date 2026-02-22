@@ -106,6 +106,8 @@ pub struct SerializablePosition {
     pub kelly_applied: f64,
     #[serde(default)]
     pub price_at_market_close: f64,
+    #[serde(default)]
+    pub prediction_roi: f64,
 }
 
 /// Serializable stats
@@ -343,6 +345,10 @@ pub struct PaperPosition {
     pub kelly_applied: f64,
     /// Price at market window close (set during MARKET_EXPIRY)
     pub price_at_market_close: f64,
+    /// Prediction ROI: price movement in favor of prediction (NOT trading PnL)
+    /// UP: (current_price - entry_price) / entry_price
+    /// DOWN: (entry_price - current_price) / entry_price
+    pub prediction_roi: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -842,6 +848,7 @@ impl PaperTradingEngine {
                         kelly_raw: pos.kelly_raw,
                         kelly_applied: pos.kelly_applied,
                         price_at_market_close: pos.price_at_market_close,
+                        prediction_roi: pos.prediction_roi,
                     },
                 )
             })
@@ -1050,6 +1057,7 @@ impl PaperTradingEngine {
                     kelly_raw: serialized.kelly_raw,
                     kelly_applied: serialized.kelly_applied,
                     price_at_market_close: serialized.price_at_market_close,
+                    prediction_roi: serialized.prediction_roi,
                 };
 
                 positions_map.insert((asset, timeframe), restored.clone());
@@ -1375,33 +1383,60 @@ impl PaperTradingEngine {
                 let net_return = (gross_return - close_fee).max(0.0);
                 pos.unrealized_pnl = net_return - pos.size_usdc;
 
-                let roi = if pos.size_usdc > 0.0 {
+                // Trading ROI: PnL from share price movement (for money tracking)
+                let trading_roi = if pos.size_usdc > 0.0 {
                     pos.unrealized_pnl / pos.size_usdc
                 } else {
                     0.0
                 };
 
-                // Dynamic checkpoint trailing: adapts arm/floor/gap to volatility + time.
+                // Prediction ROI: price movement in favor of prediction (for checkpoint)
+                // This is the ACTUAL metric for Polymarket predictions
+                // UP: win if price goes UP (current > entry)
+                // DOWN: win if price goes DOWN (current < entry)
+                let prediction_roi = match pos.direction {
+                    Direction::Up => {
+                        if pos.entry_price > 0.0 {
+                            (price - pos.entry_price) / pos.entry_price
+                        } else {
+                            0.0
+                        }
+                    }
+                    Direction::Down => {
+                        if pos.entry_price > 0.0 {
+                            (pos.entry_price - price) / pos.entry_price
+                        } else {
+                            0.0
+                        }
+                    }
+                };
+                pos.prediction_roi = prediction_roi;
+
+                // Dynamic checkpoint trailing: use PREDICTION ROI (not trading ROI)
+                // Checkpoint triggers when prediction is winning and starts to reverse
                 let (arm_roi, floor_base, trail_gap) =
                     self.dynamic_checkpoint_params(pos, now, sell_share_price, ask_share);
 
-                if !pos.checkpoint_armed && roi >= arm_roi {
+                // Arm checkpoint when prediction ROI is positive (winning prediction)
+                if !pos.checkpoint_armed && prediction_roi >= arm_roi {
                     pos.checkpoint_armed = true;
-                    pos.checkpoint_peak_roi = roi;
+                    pos.checkpoint_peak_roi = prediction_roi;
                     pos.checkpoint_floor_roi = floor_base;
                     pos.checkpoint_breach_ticks = 0;
                 }
 
                 if pos.checkpoint_armed {
-                    if roi > pos.checkpoint_peak_roi {
-                        pos.checkpoint_peak_roi = roi;
+                    // Track peak prediction ROI (not trading ROI)
+                    if prediction_roi > pos.checkpoint_peak_roi {
+                        pos.checkpoint_peak_roi = prediction_roi;
                         let dynamic_floor = (pos.checkpoint_peak_roi - trail_gap).max(floor_base);
                         if dynamic_floor > pos.checkpoint_floor_roi {
                             pos.checkpoint_floor_roi = dynamic_floor;
                         }
                     }
 
-                    if roi <= pos.checkpoint_floor_roi {
+                    // Breach when prediction ROI falls below floor
+                    if prediction_roi <= pos.checkpoint_floor_roi {
                         pos.checkpoint_breach_ticks = pos.checkpoint_breach_ticks.saturating_add(1);
                     } else {
                         pos.checkpoint_breach_ticks = 0;
@@ -1417,10 +1452,11 @@ impl PaperTradingEngine {
                     }
                 }
 
+                // Hard stop: still use TRADING ROI (actual money loss)
                 let dynamic_hard_stop_roi =
                     self.dynamic_hard_stop_roi(pos, now, sell_share_price, ask_share);
                 pos.dynamic_hard_stop_roi = dynamic_hard_stop_roi;
-                if roi <= dynamic_hard_stop_roi {
+                if trading_roi <= dynamic_hard_stop_roi {
                     pos.hard_stop_breach_ticks = pos.hard_stop_breach_ticks.saturating_add(1);
                 } else {
                     pos.hard_stop_breach_ticks = 0;
@@ -1871,6 +1907,7 @@ impl PaperTradingEngine {
             kelly_raw: kelly_quote.f_raw,
             kelly_applied: kelly_quote.f_fractional,
             price_at_market_close: 0.0,
+            prediction_roi: 0.0,
         };
 
         // Deduct committed funds.

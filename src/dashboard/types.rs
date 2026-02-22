@@ -123,6 +123,18 @@ pub struct PaperStatsResponse {
     pub exits_take_profit: u32,
     pub exits_market_expiry: u32,
     pub exits_time_expiry: u32,
+    #[serde(default)]
+    pub predictions_correct: u32,
+    #[serde(default)]
+    pub predictions_incorrect: u32,
+    #[serde(default)]
+    pub prediction_win_rate: f64,
+    #[serde(default)]
+    pub trading_wins: u32,
+    #[serde(default)]
+    pub trading_losses: u32,
+    #[serde(default)]
+    pub trading_win_rate: f64,
 }
 
 impl Default for PaperStatsResponse {
@@ -149,6 +161,12 @@ impl Default for PaperStatsResponse {
             exits_take_profit: 0,
             exits_market_expiry: 0,
             exits_time_expiry: 0,
+            predictions_correct: 0,
+            predictions_incorrect: 0,
+            prediction_win_rate: 0.0,
+            trading_wins: 0,
+            trading_losses: 0,
+            trading_win_rate: 0.0,
         }
     }
 }
