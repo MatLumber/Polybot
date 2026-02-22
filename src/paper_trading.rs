@@ -104,6 +104,8 @@ pub struct SerializablePosition {
     pub kelly_raw: f64,
     #[serde(default)]
     pub kelly_applied: f64,
+    #[serde(default)]
+    pub price_at_market_close: f64,
 }
 
 /// Serializable stats
@@ -129,6 +131,14 @@ pub struct SerializableStats {
     pub exits_take_profit: u32,
     pub exits_market_expiry: u32,
     pub exits_time_expiry: u32,
+    #[serde(default)]
+    pub predictions_correct: u32,
+    #[serde(default)]
+    pub predictions_incorrect: u32,
+    #[serde(default)]
+    pub trading_wins: u32,
+    #[serde(default)]
+    pub trading_losses: u32,
 }
 
 /// Serializable asset stats
@@ -331,6 +341,8 @@ pub struct PaperPosition {
     pub edge_net: f64,
     pub kelly_raw: f64,
     pub kelly_applied: f64,
+    /// Price at market window close (set during MARKET_EXPIRY)
+    pub price_at_market_close: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -422,6 +434,25 @@ pub struct PaperTradeRecord {
     pub kelly_applied: f64,
     #[serde(default)]
     pub exit_reason_detail: String,
+    // --- Prediction correctness fields ---
+    /// Asset price at the START of the market window
+    #[serde(default)]
+    pub window_open_price: f64,
+    /// Asset price at the END of the market window (or snapshot for early exits)
+    #[serde(default)]
+    pub window_close_price: f64,
+    /// Actual price direction: "UP" if close >= open, "DOWN" if close < open
+    #[serde(default)]
+    pub actual_price_direction: String,
+    /// Was the bot's prediction correct according to market rules?
+    #[serde(default)]
+    pub prediction_correct: bool,
+    /// Trading PnL: profit from buying/selling shares
+    #[serde(default)]
+    pub trading_pnl: f64,
+    /// Was trading profitable? (trading_pnl > 0)
+    #[serde(default)]
+    pub trading_win: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -611,9 +642,34 @@ pub struct PaperStats {
     pub exits_take_profit: u32,
     pub exits_market_expiry: u32,
     pub exits_time_expiry: u32,
+    // Prediction correctness (for ML training)
+    pub predictions_correct: u32,
+    pub predictions_incorrect: u32,
+    // Trading profitability
+    pub trading_wins: u32,
+    pub trading_losses: u32,
 }
 
 impl PaperTradingEngine {
+    /// Determines the actual price direction according to Polymarket market rules.
+    /// UP: final_price >= initial_price
+    /// DOWN: final_price < initial_price
+    fn determine_price_direction(open_price: f64, close_price: f64) -> &'static str {
+        if close_price >= open_price {
+            "UP"
+        } else {
+            "DOWN"
+        }
+    }
+
+    /// Checks if the bot's prediction matches the actual price direction
+    fn is_prediction_correct(bot_direction: Direction, actual_direction: &str) -> bool {
+        match bot_direction {
+            Direction::Up => actual_direction == "UP",
+            Direction::Down => actual_direction == "DOWN",
+        }
+    }
+
     pub fn new(config: PaperTradingConfig) -> Self {
         let initial_balance = config.initial_balance;
         Self {
@@ -785,6 +841,7 @@ impl PaperTradingEngine {
                         edge_net: pos.edge_net,
                         kelly_raw: pos.kelly_raw,
                         kelly_applied: pos.kelly_applied,
+                        price_at_market_close: pos.price_at_market_close,
                     },
                 )
             })
@@ -812,6 +869,10 @@ impl PaperTradingEngine {
             exits_take_profit: stats.exits_take_profit,
             exits_market_expiry: stats.exits_market_expiry,
             exits_time_expiry: stats.exits_time_expiry,
+            predictions_correct: stats.predictions_correct,
+            predictions_incorrect: stats.predictions_incorrect,
+            trading_wins: stats.trading_wins,
+            trading_losses: stats.trading_losses,
         };
 
         let asset_stats: HashMap<String, SerializableAssetStats> = self
@@ -877,6 +938,10 @@ impl PaperTradingEngine {
             stats.exits_take_profit = state.stats.exits_take_profit;
             stats.exits_market_expiry = state.stats.exits_market_expiry;
             stats.exits_time_expiry = state.stats.exits_time_expiry;
+            stats.predictions_correct = state.stats.predictions_correct;
+            stats.predictions_incorrect = state.stats.predictions_incorrect;
+            stats.trading_wins = state.stats.trading_wins;
+            stats.trading_losses = state.stats.trading_losses;
         }
 
         // Restore asset stats
@@ -984,6 +1049,7 @@ impl PaperTradingEngine {
                     edge_net: serialized.edge_net,
                     kelly_raw: serialized.kelly_raw,
                     kelly_applied: serialized.kelly_applied,
+                    price_at_market_close: serialized.price_at_market_close,
                 };
 
                 positions_map.insert((asset, timeframe), restored.clone());
@@ -1804,6 +1870,7 @@ impl PaperTradingEngine {
             edge_net: ev.edge_net,
             kelly_raw: kelly_quote.f_raw,
             kelly_applied: kelly_quote.f_fractional,
+            price_at_market_close: 0.0,
         };
 
         // Deduct committed funds.
@@ -1895,86 +1962,87 @@ impl PaperTradingEngine {
         let gross_sell = position.shares * sell_share_price;
         let estimated_fee_close = gross_sell * fee_rate_from_price(sell_share_price);
 
-        let price_diff = match position.direction {
-            Direction::Up => exit_price - position.entry_price,
-            Direction::Down => position.entry_price - exit_price,
+        // === PREDICTION CORRECTNESS ===
+        // Use window prices (not bot entry/exit) to determine actual direction
+        let window_open_price = position.price_at_market_open;
+        let window_close_price = exit_price;
+        
+        // Determine actual price direction according to Polymarket rules
+        let actual_price_direction = Self::determine_price_direction(window_open_price, window_close_price);
+        let predicted_direction = match position.direction {
+            Direction::Up => "UP",
+            Direction::Down => "DOWN",
         };
+        let prediction_correct = Self::is_prediction_correct(position.direction, actual_price_direction);
 
-        let (return_amount, pnl, fee_close, exit_reason_detail) = match reason {
+        let (return_amount, pnl, fee_close, exit_reason_detail, trading_pnl, trading_win) = match reason {
             PaperExitReason::MarketExpiry => {
-                // Binary payout at resolution.
-                let is_win = price_diff > 0.0;
-                if is_win {
-                    let ret = position.shares;
-                    (
-                        ret,
-                        ret - position.size_usdc,
-                        0.0,
-                        "market_expiry_resolution_win".to_string(),
-                    )
+                // BINARY PAYOUT: $1/share if correct, $0 if incorrect
+                let (ret, pnl_val) = if prediction_correct {
+                    (position.shares, position.shares - position.size_usdc)
                 } else {
-                    (
-                        0.0,
-                        -position.size_usdc,
-                        0.0,
-                        "market_expiry_resolution_loss".to_string(),
-                    )
-                }
+                    (0.0, -position.size_usdc)
+                };
+                let detail = format!(
+                    "MARKET_EXPIRY | window: ${:.2} -> ${:.2} ({}) | predicted: {} | {}",
+                    window_open_price, window_close_price, actual_price_direction,
+                    predicted_direction,
+                    if prediction_correct { "CORRECT" } else { "INCORRECT" }
+                );
+                (ret, pnl_val, 0.0, detail, pnl_val, prediction_correct)
             }
             PaperExitReason::CheckpointTakeProfit => {
                 let ret = (gross_sell - estimated_fee_close).max(0.0);
-                (
-                    ret,
-                    ret - position.size_usdc,
-                    estimated_fee_close,
-                    format!(
-                        "checkpoint_floor_breach>=2 floor_roi={:.4} peak_roi={:.4}",
-                        position.checkpoint_floor_roi, position.checkpoint_peak_roi
-                    ),
-                )
+                let tpnl = ret - position.size_usdc;
+                let detail = format!(
+                    "CHECKPOINT | window: ${:.2} -> ${:.2} ({}) | predicted: {} | pred_correct: {} | trade_pnl: ${:.2}",
+                    window_open_price, window_close_price, actual_price_direction,
+                    predicted_direction,
+                    if prediction_correct { "Y" } else { "N" },
+                    tpnl
+                );
+                (ret, tpnl, estimated_fee_close, detail, tpnl, tpnl > 0.0)
             }
             PaperExitReason::HardStop => {
                 let ret = (gross_sell - estimated_fee_close).max(0.0);
-                (
-                    ret,
-                    ret - position.size_usdc,
-                    estimated_fee_close,
-                    format!(
-                        "dynamic_hard_stop_roi<={:.4} breaches={}",
-                        position.dynamic_hard_stop_roi, position.hard_stop_breach_ticks
-                    ),
-                )
+                let tpnl = ret - position.size_usdc;
+                let detail = format!(
+                    "HARD_STOP | window: ${:.2} -> ${:.2} ({}) | predicted: {} | pred_correct: {} | trade_pnl: ${:.2} | roi_floor: {:.4}",
+                    window_open_price, window_close_price, actual_price_direction,
+                    predicted_direction,
+                    if prediction_correct { "Y" } else { "N" },
+                    tpnl,
+                    position.dynamic_hard_stop_roi
+                );
+                (ret, tpnl, estimated_fee_close, detail, tpnl, tpnl > 0.0)
             }
             PaperExitReason::TimeStop => {
                 let ret = (gross_sell - estimated_fee_close).max(0.0);
-                (
-                    ret,
-                    ret - position.size_usdc,
-                    estimated_fee_close,
-                    format!(
-                        "time_stop_tte<={}s edge_residual<=0",
-                        self.config.time_stop_seconds_to_expiry
-                    ),
-                )
+                let tpnl = ret - position.size_usdc;
+                let detail = format!(
+                    "TIME_STOP | window: ${:.2} -> ${:.2} ({}) | predicted: {} | pred_correct: {} | trade_pnl: ${:.2}",
+                    window_open_price, window_close_price, actual_price_direction,
+                    predicted_direction,
+                    if prediction_correct { "Y" } else { "N" },
+                    tpnl
+                );
+                (ret, tpnl, estimated_fee_close, detail, tpnl, tpnl > 0.0)
             }
             PaperExitReason::TimeExpiry | PaperExitReason::Manual => {
                 let ret = (gross_sell - estimated_fee_close).max(0.0);
-                (
-                    ret,
-                    ret - position.size_usdc,
-                    estimated_fee_close,
-                    "early_sell_no_resolution".to_string(),
-                )
+                let tpnl = ret - position.size_usdc;
+                (ret, tpnl, estimated_fee_close, "early_exit".to_string(), tpnl, tpnl > 0.0)
             }
         };
 
-        let is_win = pnl >= 0.0;
+        // Determine result string based on prediction correctness (for ML)
+        let is_win = prediction_correct;
+        let result_str = if prediction_correct { "PREDICTION_CORRECT" } else { "PREDICTION_INCORRECT" };
         let pnl_pct = if position.size_usdc > 0.0 {
             (pnl / position.size_usdc) * 100.0
         } else {
             0.0
         };
-        let result_str = if is_win { "WIN" } else { "LOSS" };
 
         // Record hard-stop windows to block re-entry in the same window.
         if matches!(reason, PaperExitReason::HardStop) {
@@ -2011,10 +2079,11 @@ impl PaperTradingEngine {
                 PaperExitReason::Manual => {}
             }
 
-            if pnl >= 0.0 {
+            // Track prediction correctness (for ML training)
+            if prediction_correct {
+                stats.predictions_correct += 1;
                 stats.wins += 1;
                 stats.sum_win_pnl += pnl;
-                stats.gross_profit += pnl;
                 if pnl > stats.largest_win {
                     stats.largest_win = pnl;
                 }
@@ -2027,9 +2096,9 @@ impl PaperTradingEngine {
                     stats.best_streak = stats.current_streak;
                 }
             } else {
+                stats.predictions_incorrect += 1;
                 stats.losses += 1;
                 stats.sum_loss_pnl += pnl;
-                stats.gross_loss += pnl.abs();
                 if pnl < stats.largest_loss {
                     stats.largest_loss = pnl;
                 }
@@ -2041,6 +2110,15 @@ impl PaperTradingEngine {
                 if stats.current_streak < stats.worst_streak {
                     stats.worst_streak = stats.current_streak;
                 }
+            }
+
+            // Track trading profitability (separate from prediction correctness)
+            if trading_win {
+                stats.trading_wins += 1;
+                stats.gross_profit += trading_pnl;
+            } else {
+                stats.trading_losses += 1;
+                stats.gross_loss += trading_pnl.abs();
             }
 
             if balance_after > stats.peak_balance {
@@ -2128,6 +2206,13 @@ impl PaperTradingEngine {
             kelly_raw: position.kelly_raw,
             kelly_applied: position.kelly_applied,
             exit_reason_detail,
+            // Prediction correctness fields
+            window_open_price,
+            window_close_price,
+            actual_price_direction: actual_price_direction.to_string(),
+            prediction_correct,
+            trading_pnl,
+            trading_win,
         };
 
         {
@@ -2135,10 +2220,11 @@ impl PaperTradingEngine {
             history.push(record.clone());
         }
 
-        let emoji = if pnl >= 0.0 { "OK" } else { "X" };
+        let emoji = if prediction_correct { "OK" } else { "X" };
+        let pred_emoji = if prediction_correct { "PRED_OK" } else { "PRED_X" };
         let stats = self.stats.read().unwrap();
         let wr = if stats.total_trades > 0 {
-            (stats.wins as f64 / stats.total_trades as f64) * 100.0
+            (stats.predictions_correct as f64 / stats.total_trades as f64) * 100.0
         } else {
             0.0
         };
@@ -2146,43 +2232,35 @@ impl PaperTradingEngine {
         info!(
             trade_id = %position.id,
             asset = %position.asset,
-            direction = ?position.direction,
-            entry_price = %format!("${:.2}", position.entry_price),
-            exit_price = %format!("${:.2}", exit_price),
-            shares = %format!("{:.2}", position.shares),
-            entry_share_mid = %format!("${:.3}", position.entry_mid),
-            exit_share_bid = %format!("${:.3}", exit_bid),
-            return_amount = %format!("${:.2}", return_amount),
+            timeframe = %position.timeframe,
+            predicted = %predicted_direction,
+            actual = %actual_price_direction,
+            prediction_correct = prediction_correct,
+            window = %format!("${:.2} -> ${:.2}", window_open_price, window_close_price),
             pnl = %format!("${:+.2}", pnl),
-            pnl_pct = %format!("{:+.1}%", pnl_pct),
-            result = %result_str,
+            trading_pnl = %format!("${:+.2}", trading_pnl),
             reason = %reason,
-            hold_secs = hold_duration / 1000,
-            balance = %format!("${:.2}", balance_after),
-            winrate = %format!("{:.1}%", wr),
-            total_trades = stats.total_trades,
-            "[PAPER] {} {} | PnL ${:+.2} ({:+.1}%) | WR {:.1}% ({}/{})",
+            "[TRADE CLOSED] {} | {} | {} | WR {:.1}% ({}/{})",
             emoji,
+            pred_emoji,
             result_str,
-            pnl,
-            pnl_pct,
             wr,
-            stats.wins,
+            stats.predictions_correct,
             stats.total_trades
         );
 
         if let Some(ref callback) = self.calibration_callback {
-            let is_win = pnl >= 0.0;
+            // Use prediction_correct for ML calibration, not pnl
             callback(
                 position.asset,
                 position.timeframe,
                 &position.indicators_used,
-                is_win,
+                prediction_correct,
                 position.p_model,
             );
             info!(
                 asset = %position.asset,
-                is_win = is_win,
+                prediction_correct = prediction_correct,
                 indicators = ?position.indicators_used,
                 "[CALIBRATION] Trade result recorded for indicator calibration"
             );

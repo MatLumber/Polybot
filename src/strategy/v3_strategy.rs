@@ -51,11 +51,7 @@ impl V3Strategy {
         let persistence = MLPersistenceManager::new("./data");
 
         // Try to load previous state
-        let (
-            mut predictor,
-            mut dataset,
-            mut state,
-        ) = match persistence.load_ml_state() {
+        let (mut predictor, mut dataset, mut state) = match persistence.load_ml_state() {
             Ok(Some((persisted, loaded_dataset))) => {
                 info!("🧠 Loading persisted ML state...");
 
@@ -86,11 +82,7 @@ impl V3Strategy {
                     loaded_dataset.len()
                 );
 
-                (
-                    pred,
-                    loaded_dataset,
-                    ml_state,
-                )
+                (pred, loaded_dataset, ml_state)
             }
             Ok(None) => {
                 info!("🆕 No previous ML state found, starting fresh");
@@ -100,11 +92,7 @@ impl V3Strategy {
                 } else {
                     None
                 };
-                (
-                    pred,
-                    Dataset::new(),
-                    MLEngineState::new(ml_config.clone()),
-                )
+                (pred, Dataset::new(), MLEngineState::new(ml_config.clone()))
             }
             Err(e) => {
                 warn!("⚠️ Failed to load ML state: {}, starting fresh", e);
@@ -114,11 +102,7 @@ impl V3Strategy {
                 } else {
                     None
                 };
-                (
-                    pred,
-                    Dataset::new(),
-                    MLEngineState::new(ml_config.clone()),
-                )
+                (pred, Dataset::new(), MLEngineState::new(ml_config.clone()))
             }
         };
 
@@ -463,7 +447,7 @@ impl V3Strategy {
             self.last_filter_reason = Some("fallback_low_confidence".to_string());
             return None;
         }
-        
+
         // Ensure strong directional conviction: EMA and MACD must be somewhat aligned
         if score.abs() < 1.0 {
             tracing::info!(
@@ -649,7 +633,10 @@ impl V3Strategy {
     }
 
     /// Feed closed paper trade outcome back into ML predictor to improve probability calibration over time
-    pub fn register_closed_trade_result(&mut self, record: &crate::paper_trading::PaperTradeRecord) {
+    pub fn register_closed_trade_result(
+        &mut self,
+        record: &crate::paper_trading::PaperTradeRecord,
+    ) {
         if record.asset.is_empty() || record.timeframe.is_empty() {
             return;
         }
@@ -663,8 +650,10 @@ impl V3Strategy {
             Some(t) => t,
             None => return,
         };
-        
-        let direction = if record.direction.eq_ignore_ascii_case("up") || record.direction.eq_ignore_ascii_case("buy") {
+
+        let direction = if record.direction.eq_ignore_ascii_case("up")
+            || record.direction.eq_ignore_ascii_case("buy")
+        {
             crate::types::Direction::Up
         } else {
             crate::types::Direction::Down
@@ -674,15 +663,18 @@ impl V3Strategy {
         // The predictor relies on the calibrator confidence to adjust the outcome mapping
         let mut entry_features = crate::ml_engine::features::MLFeatureVector::default();
         entry_features.calibrator_confidence = record.confidence;
-        
+
         let trade_sample = crate::ml_engine::dataset::TradeSample {
             trade_id: record.trade_id.clone(),
             entry_ts: record.market_open_ts.max(record.timestamp),
-            exit_ts: record.market_close_ts.max(record.timestamp + record.hold_duration_ms),
+            exit_ts: record
+                .market_close_ts
+                .max(record.timestamp + record.hold_duration_ms),
             asset,
             timeframe,
             direction,
-            is_win: record.pnl >= 0.0,
+            // Use prediction_correct for ML, not pnl >= 0
+            is_win: record.prediction_correct,
             entry_features,
             entry_price: record.entry_price,
             exit_price: record.exit_price,
@@ -702,7 +694,7 @@ impl V3Strategy {
 
             self.state.add_prediction_result(is_win);
             self.add_trade_to_dataset(trade_sample);
-            
+
             // Auto-save ML state after every trade so we don't lose data on crash/restart
             if self.state.total_predictions % 1 == 0 {
                 if let Some(ref predictor) = self.predictor {
@@ -718,12 +710,14 @@ impl V3Strategy {
             if let Err(e) = self.maybe_retrain() {
                 tracing::warn!("Failed during maybe_retrain check: {}", e);
             }
-            
+
             info!(
                 asset = ?asset,
                 timeframe = ?timeframe,
-                pnl = record.pnl,
-                "✅ Trade outcome successfully registered in V3 Predictor for dynamic continuous learning"
+                prediction_correct = record.prediction_correct,
+                window = %format!("${:.2} -> ${:.2}", record.window_open_price, record.window_close_price),
+                actual_direction = %record.actual_price_direction,
+                "Trade outcome registered in V3 Predictor (using prediction_correct)"
             );
         }
     }
@@ -731,9 +725,9 @@ impl V3Strategy {
     /// Force save state to disk gracefully
     pub fn force_save_state(&mut self) {
         if let Some(ref predictor) = self.predictor {
-            if let Err(e) =
-                self.persistence
-                    .save_ml_state(predictor, &self.state, &self.dataset)
+            if let Err(e) = self
+                .persistence
+                .save_ml_state(predictor, &self.state, &self.dataset)
             {
                 tracing::warn!("Failed to auto-save ML state: {}", e);
             } else {
@@ -786,28 +780,36 @@ impl V3Strategy {
                 p.weights.gradient_boosting,
                 p.weights.logistic_regression,
             ];
-            let info: Vec<(String, f64, f64)> = p.models.iter().enumerate().map(|(i, m)| {
-                let weight = match i {
-                    0 => p.weights.random_forest,
-                    1 => p.weights.gradient_boosting,
-                    2 => p.weights.logistic_regression,
-                    _ => 0.0,
-                };
-                (m.name().to_string(), weight, m.accuracy())
-            }).collect();
+            let info: Vec<(String, f64, f64)> = p
+                .models
+                .iter()
+                .enumerate()
+                .map(|(i, m)| {
+                    let weight = match i {
+                        0 => p.weights.random_forest,
+                        1 => p.weights.gradient_boosting,
+                        2 => p.weights.logistic_regression,
+                        _ => 0.0,
+                    };
+                    (m.name().to_string(), weight, m.accuracy())
+                })
+                .collect();
             (Some(weights), info)
         } else {
-            (None, vec![
-                ("Random Forest".to_string(), 0.40, 0.0),
-                ("Gradient Boosting".to_string(), 0.35, 0.0),
-                ("Logistic Regression".to_string(), 0.25, 0.0),
-            ])
+            (
+                None,
+                vec![
+                    ("Random Forest".to_string(), 0.40, 0.0),
+                    ("Gradient Boosting".to_string(), 0.35, 0.0),
+                    ("Logistic Regression".to_string(), 0.25, 0.0),
+                ],
+            )
         };
 
         let incorrect = self.state.incorrect_predictions;
         let correct = self.state.correct_predictions;
         let total = self.state.total_predictions;
-        
+
         MLStateResponse {
             enabled: self.config.enabled,
             model_type: format!("{:?}", self.config.model_type),
