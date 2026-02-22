@@ -507,16 +507,7 @@ async fn main() -> Result<()> {
                 current_price: p.current_price,
                 size_usdc: p.size_usdc,
                 pnl: p.unrealized_pnl,
-                pnl_pct: if p.entry_price > 0.0 {
-                    ((p.current_price - p.entry_price) / p.entry_price * 100.0)
-                        * if p.direction == Direction::Up {
-                            1.0
-                        } else {
-                            -1.0
-                        }
-                } else {
-                    0.0
-                },
+                pnl_pct: trading_roi, // token-based, consistent with pnl
                 opened_at: p.opened_at,
                 market_slug: p.market_slug.clone(),
                 confidence: p.confidence,
@@ -1758,16 +1749,7 @@ async fn main() -> Result<()> {
                             current_price: p.current_price,
                             size_usdc: p.size_usdc,
                             pnl: p.unrealized_pnl,
-                            pnl_pct: if p.entry_price > 0.0 {
-                                ((p.current_price - p.entry_price) / p.entry_price * 100.0)
-                                    * if p.direction == Direction::Up {
-                                        1.0
-                                    } else {
-                                        -1.0
-                                    }
-                            } else {
-                                0.0
-                            },
+                            pnl_pct: trading_roi, // token-based, consistent with pnl
                             opened_at: p.opened_at,
                             market_slug: p.market_slug.clone(),
                             confidence: p.confidence,
@@ -1955,16 +1937,7 @@ async fn main() -> Result<()> {
                             current_price: p.current_price,
                             size_usdc: p.size_usdc,
                             pnl: p.unrealized_pnl,
-                            pnl_pct: if p.entry_price > 0.0 {
-                                ((p.current_price - p.entry_price) / p.entry_price * 100.0)
-                                    * if p.direction == Direction::Up {
-                                        1.0
-                                    } else {
-                                        -1.0
-                                    }
-                            } else {
-                                0.0
-                            },
+                            pnl_pct: trading_roi, // token-based, consistent with pnl
                             opened_at: p.opened_at,
                             market_slug: p.market_slug.clone(),
                             confidence: p.confidence,
