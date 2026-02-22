@@ -1468,31 +1468,32 @@ impl PaperTradingEngine {
                     continue;
                 }
 
-                // Dynamic checkpoint trailing: use PREDICTION ROI (not trading ROI)
-                // Checkpoint triggers when prediction is winning and starts to reverse
+                // Dynamic checkpoint trailing: arm and track on TRADING ROI (token PnL %)
+                // Thresholds (arm=5%, floor=2.2%, gap=1.2%) are calibrated for token movement,
+                // not BTC price movement, so trading_roi is the correct metric here.
                 let (arm_roi, floor_base, trail_gap) =
                     self.dynamic_checkpoint_params(pos, now, sell_share_price, ask_share);
 
-                // Arm checkpoint when prediction ROI is positive (winning prediction)
-                if !pos.checkpoint_armed && prediction_roi >= arm_roi {
+                // Arm checkpoint when trading ROI reaches the threshold
+                if !pos.checkpoint_armed && trading_roi >= arm_roi {
                     pos.checkpoint_armed = true;
-                    pos.checkpoint_peak_roi = prediction_roi;
+                    pos.checkpoint_peak_roi = trading_roi;
                     pos.checkpoint_floor_roi = floor_base;
                     pos.checkpoint_breach_ticks = 0;
                 }
 
                 if pos.checkpoint_armed {
-                    // Track peak prediction ROI (not trading ROI)
-                    if prediction_roi > pos.checkpoint_peak_roi {
-                        pos.checkpoint_peak_roi = prediction_roi;
+                    // Track peak trading ROI and raise the floor as profit grows
+                    if trading_roi > pos.checkpoint_peak_roi {
+                        pos.checkpoint_peak_roi = trading_roi;
                         let dynamic_floor = (pos.checkpoint_peak_roi - trail_gap).max(floor_base);
                         if dynamic_floor > pos.checkpoint_floor_roi {
                             pos.checkpoint_floor_roi = dynamic_floor;
                         }
                     }
 
-                    // Breach when prediction ROI falls below floor
-                    if prediction_roi <= pos.checkpoint_floor_roi {
+                    // Breach when trading ROI falls below the locked floor
+                    if trading_roi <= pos.checkpoint_floor_roi {
                         pos.checkpoint_breach_ticks = pos.checkpoint_breach_ticks.saturating_add(1);
                     } else {
                         pos.checkpoint_breach_ticks = 0;
