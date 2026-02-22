@@ -45,6 +45,14 @@ export interface PositionWire {
   trough_price: number
   market_close_ts: number
   time_remaining_secs: number
+  // Dynamic risk thresholds (live per-tick)
+  stop_loss_pct: number
+  take_profit_pct: number
+  checkpoint_armed: boolean
+  checkpoint_floor_pct: number
+  checkpoint_peak_pct: number
+  trading_roi: number
+  prediction_roi: number
 }
 
 export interface TradeWire {
@@ -60,6 +68,7 @@ export interface TradeWire {
   pnl: number
   pnl_pct: number
   result: string
+  prediction_correct: boolean
   exit_reason: string
   hold_duration_secs: number
   balance_after: number

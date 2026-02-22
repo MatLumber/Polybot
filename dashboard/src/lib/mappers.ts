@@ -69,6 +69,13 @@ export function mapPosition(position: PositionWire): Position {
     troughPrice: position.trough_price,
     marketCloseTs: position.market_close_ts,
     timeRemainingSecs: position.time_remaining_secs,
+    stopLossPct: position.stop_loss_pct ?? 0,
+    takeProfitPct: position.take_profit_pct ?? 0,
+    checkpointArmed: position.checkpoint_armed ?? false,
+    checkpointFloorPct: position.checkpoint_floor_pct ?? 0,
+    checkpointPeakPct: position.checkpoint_peak_pct ?? 0,
+    tradingRoi: position.trading_roi ?? 0,
+    predictionRoi: position.prediction_roi ?? 0,
   }
 }
 
@@ -86,6 +93,7 @@ export function mapTrade(trade: TradeWire): Trade {
     pnl: trade.pnl,
     pnlPct: trade.pnl_pct,
     result: trade.result,
+    predictionCorrect: trade.prediction_correct ?? (trade.pnl >= 0),
     exitReason: trade.exit_reason,
     holdDurationSecs: trade.hold_duration_secs,
     balanceAfter: trade.balance_after,

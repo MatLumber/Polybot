@@ -39,6 +39,14 @@ export interface Position {
   troughPrice: number
   marketCloseTs: number
   timeRemainingSecs: number
+  // Dynamic risk thresholds (live per-tick)
+  stopLossPct: number
+  takeProfitPct: number
+  checkpointArmed: boolean
+  checkpointFloorPct: number
+  checkpointPeakPct: number
+  tradingRoi: number
+  predictionRoi: number
 }
 
 export interface Trade {
@@ -54,6 +62,7 @@ export interface Trade {
   pnl: number
   pnlPct: number
   result: string
+  predictionCorrect: boolean
   exitReason: string
   holdDurationSecs: number
   balanceAfter: number

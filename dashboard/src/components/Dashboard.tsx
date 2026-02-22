@@ -163,6 +163,9 @@ function PositionTable({ positions }: { positions: Position[] }) {
             <th>Size</th>
             <th>PnL</th>
             <th>%</th>
+            <th title="Dynamic stop-loss threshold (token ROI)">SL</th>
+            <th title="Dynamic take-profit ceiling (token ROI)">TP</th>
+            <th title="Checkpoint floor — armed when prediction ROI hits arm threshold">CP</th>
             <th>Time Left</th>
           </tr>
         </thead>
@@ -176,6 +179,13 @@ function PositionTable({ positions }: { positions: Position[] }) {
               <td>{formatCurrency(position.sizeUsdc)}</td>
               <td className={pnlClass(position.pnl)}>{formatSignedCurrency(position.pnl)}</td>
               <td className={pnlClass(position.pnlPct)}>{formatPercent(position.pnlPct)}</td>
+              <td className="text-negative">-{position.stopLossPct.toFixed(1)}%</td>
+              <td className="text-positive">+{position.takeProfitPct.toFixed(1)}%</td>
+              <td className={position.checkpointArmed ? 'text-warning' : 'text-muted'}>
+                {position.checkpointArmed
+                  ? `🔒 ${position.checkpointFloorPct.toFixed(1)}%`
+                  : '—'}
+              </td>
               <td>{formatTimeLeft(position.timeRemainingSecs)}</td>
             </tr>
           ))}
@@ -202,6 +212,7 @@ function TradeTable({ trades }: { trades: Trade[] }) {
             <th>Exit</th>
             <th>PnL</th>
             <th>%</th>
+            <th title="Was the prediction correct? (direction for MARKET_EXPIRY, pnl > 0 for early exits)">Pred</th>
             <th>Reason</th>
           </tr>
         </thead>
@@ -215,6 +226,9 @@ function TradeTable({ trades }: { trades: Trade[] }) {
               <td>{formatCurrency(trade.exitPrice)}</td>
               <td className={pnlClass(trade.pnl)}>{formatSignedCurrency(trade.pnl)}</td>
               <td className={pnlClass(trade.pnlPct)}>{formatPercent(trade.pnlPct)}</td>
+              <td className={trade.predictionCorrect ? 'text-positive' : 'text-negative'}>
+                {trade.predictionCorrect ? 'WIN' : 'LOSS'}
+              </td>
               <td>{trade.exitReason.replaceAll('_', ' ')}</td>
             </tr>
           ))}
