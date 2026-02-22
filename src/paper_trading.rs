@@ -1999,36 +1999,36 @@ impl PaperTradingEngine {
         let gross_sell = position.shares * sell_share_price;
         let estimated_fee_close = gross_sell * fee_rate_from_price(sell_share_price);
 
-        // === PREDICTION CORRECTNESS ===
-        // For early exits: compare entry_price vs exit_price (did price move in our favor?)
-        // For MARKET_EXPIRY: compare window_open vs window_close (market resolution)
-        let (comparison_open, comparison_close) = match reason {
-            PaperExitReason::MarketExpiry => {
-                // Market resolution: compare window start vs end
-                (position.price_at_market_open, exit_price)
-            }
-            _ => {
-                // Early exit: compare bot entry vs exit
-                (position.entry_price, exit_price)
-            }
-        };
-        
-        // Determine actual price direction
-        let actual_price_direction = Self::determine_price_direction(comparison_open, comparison_close);
+        // === PREDICTION CORRECTNESS AND FINANCIAL OUTCOME ===
+        // For MARKET_EXPIRY: binary payout based on BTC direction (window_open vs window_close).
+        //   prediction_correct = did BTC close in the predicted direction vs window open?
+        // For early exits (HARD_STOP, CHECKPOINT, TIME_STOP, etc.):
+        //   prediction_correct = was the trade profitable? (pnl > 0)
+        //   Rationale: In Polymarket the token price reflects market consensus on probability.
+        //   If you exit early and LOSE money, the market (token price) disagreed with your
+        //   prediction — so the ML should treat it as incorrect regardless of the tiny BTC move.
+        //   A $0.45 BTC tick in the "right" direction that still costs $1.52 is NOT a win.
+
+        // BTC direction for logging (informational; not used for early-exit prediction label)
+        let actual_price_direction = Self::determine_price_direction(
+            position.price_at_market_open,
+            exit_price,
+        );
         let predicted_direction = match position.direction {
             Direction::Up => "UP",
             Direction::Down => "DOWN",
         };
-        let prediction_correct = Self::is_prediction_correct(position.direction, actual_price_direction);
-        
+
         // Keep window prices for logging
         let window_open_price = position.price_at_market_open;
         let window_close_price = exit_price;
 
-        let (return_amount, pnl, fee_close, exit_reason_detail, trading_pnl, trading_win) = match reason {
+        let (return_amount, pnl, fee_close, exit_reason_detail, trading_pnl, trading_win, prediction_correct) = match reason {
             PaperExitReason::MarketExpiry => {
-                // BINARY PAYOUT: $1/share if correct, $0 if incorrect
-                let (ret, pnl_val) = if prediction_correct {
+                // BINARY PAYOUT: $1/share if direction correct, $0 if not.
+                // Direction determined by BTC window_open vs window_close.
+                let pc = Self::is_prediction_correct(position.direction, actual_price_direction);
+                let (ret, pnl_val) = if pc {
                     (position.shares, position.shares - position.size_usdc)
                 } else {
                     (0.0, -position.size_usdc)
@@ -2037,50 +2037,56 @@ impl PaperTradingEngine {
                     "MARKET_EXPIRY | window: ${:.2} -> ${:.2} ({}) | predicted: {} | {}",
                     window_open_price, window_close_price, actual_price_direction,
                     predicted_direction,
-                    if prediction_correct { "CORRECT" } else { "INCORRECT" }
+                    if pc { "CORRECT" } else { "INCORRECT" }
                 );
-                (ret, pnl_val, 0.0, detail, pnl_val, prediction_correct)
+                (ret, pnl_val, 0.0, detail, pnl_val, pc, pc)
             }
             PaperExitReason::CheckpointTakeProfit => {
                 let ret = (gross_sell - estimated_fee_close).max(0.0);
                 let tpnl = ret - position.size_usdc;
+                // prediction_correct = trade was profitable (token price moved in our favor)
+                let pc = tpnl > 0.0;
                 let detail = format!(
                     "CHECKPOINT | entry->exit: ${:.2} -> ${:.2} ({}) | predicted: {} | {} | pnl: ${:.2}",
                     position.entry_price, exit_price, actual_price_direction,
                     predicted_direction,
-                    if prediction_correct { "CORRECT" } else { "INCORRECT" },
+                    if pc { "CORRECT" } else { "INCORRECT" },
                     tpnl
                 );
-                (ret, tpnl, estimated_fee_close, detail, tpnl, tpnl > 0.0)
+                (ret, tpnl, estimated_fee_close, detail, tpnl, tpnl > 0.0, pc)
             }
             PaperExitReason::HardStop => {
                 let ret = (gross_sell - estimated_fee_close).max(0.0);
                 let tpnl = ret - position.size_usdc;
+                // Hard stops lose money; market (token price) disagreed with prediction
+                let pc = tpnl > 0.0;
                 let detail = format!(
                     "HARD_STOP | entry->exit: ${:.2} -> ${:.2} ({}) | predicted: {} | {} | pnl: ${:.2}",
                     position.entry_price, exit_price, actual_price_direction,
                     predicted_direction,
-                    if prediction_correct { "CORRECT" } else { "INCORRECT" },
+                    if pc { "CORRECT" } else { "INCORRECT" },
                     tpnl
                 );
-                (ret, tpnl, estimated_fee_close, detail, tpnl, tpnl > 0.0)
+                (ret, tpnl, estimated_fee_close, detail, tpnl, tpnl > 0.0, pc)
             }
             PaperExitReason::TimeStop => {
                 let ret = (gross_sell - estimated_fee_close).max(0.0);
                 let tpnl = ret - position.size_usdc;
+                let pc = tpnl > 0.0;
                 let detail = format!(
                     "TIME_STOP | entry->exit: ${:.2} -> ${:.2} ({}) | predicted: {} | {} | pnl: ${:.2}",
                     position.entry_price, exit_price, actual_price_direction,
                     predicted_direction,
-                    if prediction_correct { "CORRECT" } else { "INCORRECT" },
+                    if pc { "CORRECT" } else { "INCORRECT" },
                     tpnl
                 );
-                (ret, tpnl, estimated_fee_close, detail, tpnl, tpnl > 0.0)
+                (ret, tpnl, estimated_fee_close, detail, tpnl, tpnl > 0.0, pc)
             }
             PaperExitReason::TimeExpiry | PaperExitReason::Manual => {
                 let ret = (gross_sell - estimated_fee_close).max(0.0);
                 let tpnl = ret - position.size_usdc;
-                (ret, tpnl, estimated_fee_close, "early_exit".to_string(), tpnl, tpnl > 0.0)
+                let pc = tpnl > 0.0;
+                (ret, tpnl, estimated_fee_close, "early_exit".to_string(), tpnl, tpnl > 0.0, pc)
             }
         };
 

@@ -2098,7 +2098,7 @@ fn paper_trade_record_to_dashboard_trade(
         timeframe: record.timeframe.clone(),
         direction: record.direction.clone(),
         confidence: record.confidence,
-        entry_price: record.entry_price,
+        entry_price: if record.window_open_price > 0.0 { record.window_open_price } else { record.entry_price },
         exit_price: record.exit_price,
         size_usdc: record.size_usdc,
         pnl: record.pnl,
