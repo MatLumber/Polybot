@@ -1213,6 +1213,14 @@ impl PaperTradingEngine {
             dynamic += late_tighten * 0.5;
         }
 
+        // Confidence scaling: high confidence → wider stop (trust the prediction),
+        // low confidence → tighter stop (cut losses faster).
+        // Range: +0% at conf=0.50, up to +1.5% wider at conf=0.95.
+        let conf = pos.confidence.clamp(0.50, 0.95);
+        let conf_boost = (conf - 0.50) / 0.45;
+        let conf_widen = conf_boost * 0.015;
+        dynamic -= conf_widen;
+
         dynamic.clamp(min_floor, max_floor)
     }
 
@@ -1290,6 +1298,15 @@ impl PaperTradingEngine {
         floor = floor.clamp(floor_min, base_floor.max(floor_min));
         gap = gap.clamp(gap_min, base_gap.max(gap_min));
 
+        // Confidence scaling for checkpoint:
+        // High confidence → arm at higher ROI (let trade run, expect bigger move).
+        // Low confidence → arm earlier (lock gains sooner).
+        // Range: ±25% on arm threshold.
+        let conf = pos.confidence.clamp(0.50, 0.95);
+        let conf_boost = (conf - 0.50) / 0.45;
+        arm *= 1.0 + conf_boost * 0.25;
+        arm = arm.clamp(arm_min, base_arm * 1.30);
+
         // Keep floor safely below arm.
         let floor_cap = (arm - gap_min * 0.5).max(floor_min);
         if floor > floor_cap {
@@ -1297,6 +1314,36 @@ impl PaperTradingEngine {
         }
 
         (arm, floor, gap)
+    }
+
+    /// Direct take-profit ceiling: exit when trading ROI exceeds a dynamic threshold.
+    ///
+    /// For Polymarket binary markets, locking in 65-85% trading ROI is excellent.
+    /// This acts as a hard ceiling above the checkpoint trailing system.
+    /// - High confidence → higher TP (let trade run toward full binary payout)
+    /// - Low confidence → lower TP (lock gains earlier)
+    /// - Near expiry → lower TP (take what's available)
+    pub fn dynamic_take_profit_roi(pos: &PaperPosition, now_ms: i64) -> f64 {
+        let progress = Self::market_progress_ratio(pos, now_ms);
+        let conf = pos.confidence.clamp(0.50, 0.95);
+        let conf_factor = (conf - 0.50) / 0.45; // 0.0 at 50% conf, 1.0 at 95% conf
+
+        let base_tp = match pos.timeframe {
+            Timeframe::Min15 => 0.72,
+            Timeframe::Hour1 => 0.68,
+        };
+
+        // Confidence adjusts range: 0.62 (low conf) to 0.87 (high conf)
+        let mut tp = base_tp + conf_factor * 0.15 - (1.0 - conf_factor) * 0.10;
+
+        // Near expiry: take whatever gains are available rather than risk reversal
+        if progress >= 0.85 {
+            tp *= 0.80;
+        } else if progress >= 0.70 {
+            tp *= 0.90;
+        }
+
+        tp.clamp(0.50, 0.90)
     }
 
     // ── Price updates ──────────────────────────────────────────
@@ -1411,6 +1458,15 @@ impl PaperTradingEngine {
                     }
                 };
                 pos.prediction_roi = prediction_roi;
+
+                // Direct take-profit ceiling: exit immediately when trading ROI exceeds
+                // a dynamic threshold based on confidence and time-to-expiry.
+                // This acts as a hard ceiling above the checkpoint trailing system.
+                let tp_roi = Self::dynamic_take_profit_roi(pos, now);
+                if trading_roi >= tp_roi {
+                    exits.push(((*pos_asset, *pos_timeframe), PaperExitReason::CheckpointTakeProfit));
+                    continue;
+                }
 
                 // Dynamic checkpoint trailing: use PREDICTION ROI (not trading ROI)
                 // Checkpoint triggers when prediction is winning and starts to reverse
