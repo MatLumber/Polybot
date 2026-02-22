@@ -187,6 +187,7 @@ pub struct TradeResponse {
     pub pnl: f64,
     pub pnl_pct: f64,
     pub result: String,
+    pub prediction_correct: bool,
     pub exit_reason: String,
     pub hold_duration_secs: i64,
     pub balance_after: f64,

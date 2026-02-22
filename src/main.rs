@@ -2062,6 +2062,7 @@ fn paper_trade_record_to_dashboard_trade(
         pnl: record.pnl,
         pnl_pct: record.pnl_pct,
         result: record.result.clone(),
+        prediction_correct: record.prediction_correct,
         exit_reason: record.exit_reason.clone(),
         hold_duration_secs: record.hold_duration_ms / 1000,
         balance_after: record.balance_after,

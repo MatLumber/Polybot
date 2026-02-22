@@ -802,6 +802,7 @@ impl CsvPersistence {
                 match result {
                     Ok(record) => {
                         let analytics: PaperAnalyticsRecord = record;
+                        let prediction_correct = analytics.result == "PREDICTION_CORRECT";
                         trades.push(TradeResponse {
                             timestamp: analytics.timestamp,
                             trade_id: analytics.trade_id,
@@ -815,6 +816,7 @@ impl CsvPersistence {
                             pnl: analytics.pnl,
                             pnl_pct: analytics.pnl_pct,
                             result: analytics.result,
+                            prediction_correct,
                             exit_reason: analytics.exit_reason,
                             hold_duration_secs: analytics.time_in_market_secs,
                             balance_after: analytics.balance_after,
@@ -947,6 +949,8 @@ impl CsvPersistence {
                     0.0
                 };
 
+                let prediction_correct = result == "PREDICTION_CORRECT";
+
                 trades.push(TradeResponse {
                     timestamp,
                     trade_id,
@@ -960,6 +964,7 @@ impl CsvPersistence {
                     pnl,
                     pnl_pct,
                     result,
+                    prediction_correct,
                     exit_reason,
                     hold_duration_secs: 0,
                     balance_after: 0.0,
@@ -983,6 +988,7 @@ impl CsvPersistence {
                 } else {
                     0.0
                 };
+                let prediction_correct = result == "PREDICTION_CORRECT";
                 trades.push(TradeResponse {
                     timestamp,
                     trade_id: trade_id.clone(),
@@ -996,6 +1002,7 @@ impl CsvPersistence {
                     pnl,
                     pnl_pct,
                     result,
+                    prediction_correct,
                     exit_reason: "UNKNOWN".to_string(),
                     hold_duration_secs: 0,
                     balance_after: 0.0,

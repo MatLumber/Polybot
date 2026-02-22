@@ -180,19 +180,29 @@ impl DashboardMemory {
                 total_pnl += pnl;
                 total_fees += trade.size_usdc * 0.001; // Assume 0.1% fee
 
-                if pnl >= 0.0 {
+                // Use prediction_correct for win/loss counting (not pnl)
+                // This correctly reflects whether the prediction was right
+                let is_prediction_correct = trade.prediction_correct || 
+                    trade.result == "PREDICTION_CORRECT" || 
+                    trade.result == "WIN";
+                
+                if is_prediction_correct {
                     wins += 1;
                     sum_win_pnl += pnl;
-                    gross_profit += pnl;
-                    if pnl > largest_win {
-                        largest_win = pnl;
+                    if pnl > 0.0 {
+                        gross_profit += pnl;
+                        if pnl > largest_win {
+                            largest_win = pnl;
+                        }
                     }
                 } else {
                     losses += 1;
                     sum_loss_pnl += pnl;
-                    gross_loss += pnl.abs();
-                    if pnl < largest_loss {
-                        largest_loss = pnl;
+                    if pnl < 0.0 {
+                        gross_loss += pnl.abs();
+                        if pnl < largest_loss {
+                            largest_loss = pnl;
+                        }
                     }
                 }
 
@@ -210,7 +220,7 @@ impl DashboardMemory {
                     .entry(trade.asset.clone())
                     .or_insert((0, 0, 0.0, 0.0, 0.0));
                 entry.0 += 1; // total trades
-                if pnl >= 0.0 {
+                if is_prediction_correct {
                     entry.1 += 1; // wins
                     entry.2 += trade.confidence;
                     entry.3 += pnl;
@@ -1197,7 +1207,8 @@ mod tests {
                     size_usdc: 10.0,
                     pnl: 5.0,
                     pnl_pct: 50.0,
-                    result: "WIN".to_string(),
+                    result: "PREDICTION_CORRECT".to_string(),
+                    prediction_correct: true,
                     exit_reason: "TIME_EXPIRY".to_string(),
                     hold_duration_secs: 10,
                     balance_after: 1005.0,
@@ -1219,7 +1230,8 @@ mod tests {
                     size_usdc: 10.0,
                     pnl: -15.0,
                     pnl_pct: -150.0,
-                    result: "LOSS".to_string(),
+                    result: "PREDICTION_INCORRECT".to_string(),
+                    prediction_correct: false,
                     exit_reason: "HARD_STOP".to_string(),
                     hold_duration_secs: 12,
                     balance_after: 990.0,
