@@ -1963,17 +1963,30 @@ impl PaperTradingEngine {
         let estimated_fee_close = gross_sell * fee_rate_from_price(sell_share_price);
 
         // === PREDICTION CORRECTNESS ===
-        // Use window prices (not bot entry/exit) to determine actual direction
-        let window_open_price = position.price_at_market_open;
-        let window_close_price = exit_price;
+        // For early exits: compare entry_price vs exit_price (did price move in our favor?)
+        // For MARKET_EXPIRY: compare window_open vs window_close (market resolution)
+        let (comparison_open, comparison_close) = match reason {
+            PaperExitReason::MarketExpiry => {
+                // Market resolution: compare window start vs end
+                (position.price_at_market_open, exit_price)
+            }
+            _ => {
+                // Early exit: compare bot entry vs exit
+                (position.entry_price, exit_price)
+            }
+        };
         
-        // Determine actual price direction according to Polymarket rules
-        let actual_price_direction = Self::determine_price_direction(window_open_price, window_close_price);
+        // Determine actual price direction
+        let actual_price_direction = Self::determine_price_direction(comparison_open, comparison_close);
         let predicted_direction = match position.direction {
             Direction::Up => "UP",
             Direction::Down => "DOWN",
         };
         let prediction_correct = Self::is_prediction_correct(position.direction, actual_price_direction);
+        
+        // Keep window prices for logging
+        let window_open_price = position.price_at_market_open;
+        let window_close_price = exit_price;
 
         let (return_amount, pnl, fee_close, exit_reason_detail, trading_pnl, trading_win) = match reason {
             PaperExitReason::MarketExpiry => {
@@ -1995,10 +2008,10 @@ impl PaperTradingEngine {
                 let ret = (gross_sell - estimated_fee_close).max(0.0);
                 let tpnl = ret - position.size_usdc;
                 let detail = format!(
-                    "CHECKPOINT | window: ${:.2} -> ${:.2} ({}) | predicted: {} | pred_correct: {} | trade_pnl: ${:.2}",
-                    window_open_price, window_close_price, actual_price_direction,
+                    "CHECKPOINT | entry->exit: ${:.2} -> ${:.2} ({}) | predicted: {} | {} | pnl: ${:.2}",
+                    position.entry_price, exit_price, actual_price_direction,
                     predicted_direction,
-                    if prediction_correct { "Y" } else { "N" },
+                    if prediction_correct { "CORRECT" } else { "INCORRECT" },
                     tpnl
                 );
                 (ret, tpnl, estimated_fee_close, detail, tpnl, tpnl > 0.0)
@@ -2007,12 +2020,11 @@ impl PaperTradingEngine {
                 let ret = (gross_sell - estimated_fee_close).max(0.0);
                 let tpnl = ret - position.size_usdc;
                 let detail = format!(
-                    "HARD_STOP | window: ${:.2} -> ${:.2} ({}) | predicted: {} | pred_correct: {} | trade_pnl: ${:.2} | roi_floor: {:.4}",
-                    window_open_price, window_close_price, actual_price_direction,
+                    "HARD_STOP | entry->exit: ${:.2} -> ${:.2} ({}) | predicted: {} | {} | pnl: ${:.2}",
+                    position.entry_price, exit_price, actual_price_direction,
                     predicted_direction,
-                    if prediction_correct { "Y" } else { "N" },
-                    tpnl,
-                    position.dynamic_hard_stop_roi
+                    if prediction_correct { "CORRECT" } else { "INCORRECT" },
+                    tpnl
                 );
                 (ret, tpnl, estimated_fee_close, detail, tpnl, tpnl > 0.0)
             }
@@ -2020,10 +2032,10 @@ impl PaperTradingEngine {
                 let ret = (gross_sell - estimated_fee_close).max(0.0);
                 let tpnl = ret - position.size_usdc;
                 let detail = format!(
-                    "TIME_STOP | window: ${:.2} -> ${:.2} ({}) | predicted: {} | pred_correct: {} | trade_pnl: ${:.2}",
-                    window_open_price, window_close_price, actual_price_direction,
+                    "TIME_STOP | entry->exit: ${:.2} -> ${:.2} ({}) | predicted: {} | {} | pnl: ${:.2}",
+                    position.entry_price, exit_price, actual_price_direction,
                     predicted_direction,
-                    if prediction_correct { "Y" } else { "N" },
+                    if prediction_correct { "CORRECT" } else { "INCORRECT" },
                     tpnl
                 );
                 (ret, tpnl, estimated_fee_close, detail, tpnl, tpnl > 0.0)
@@ -2236,9 +2248,8 @@ impl PaperTradingEngine {
             predicted = %predicted_direction,
             actual = %actual_price_direction,
             prediction_correct = prediction_correct,
-            window = %format!("${:.2} -> ${:.2}", window_open_price, window_close_price),
+            entry_exit = %format!("${:.2} -> ${:.2}", position.entry_price, exit_price),
             pnl = %format!("${:+.2}", pnl),
-            trading_pnl = %format!("${:+.2}", trading_pnl),
             reason = %reason,
             "[TRADE CLOSED] {} | {} | {} | WR {:.1}% ({}/{})",
             emoji,
