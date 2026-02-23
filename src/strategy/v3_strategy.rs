@@ -693,7 +693,23 @@ impl V3Strategy {
             }
 
             self.state.add_prediction_result(is_win);
-            self.add_trade_to_dataset(trade_sample);
+            // Only add ML-generated signals to the training dataset.
+            // Fallback (rule-based) signals are excluded to prevent circular learning:
+            // the fallback always picks the same direction/indicators, so the ML would
+            // just learn to copy the fallback rather than discover real market patterns.
+            let is_ml_signal = trade_sample
+                .indicators_triggered
+                .iter()
+                .any(|i| i == "v3_ml");
+            if is_ml_signal {
+                self.add_trade_to_dataset(trade_sample);
+            } else {
+                tracing::debug!(
+                    trade_id = %trade_sample.trade_id,
+                    indicators = ?trade_sample.indicators_triggered,
+                    "⏭️ Fallback trade excluded from ML training dataset"
+                );
+            }
 
             // Auto-save ML state after every trade so we don't lose data on crash/restart
             if self.state.total_predictions % 1 == 0 {

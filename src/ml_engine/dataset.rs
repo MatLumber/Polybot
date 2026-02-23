@@ -91,7 +91,13 @@ impl Dataset {
             .iter()
             .map(|trade| LabeledSample {
                 features: trade.entry_features.clone(),
-                target: if trade.is_win { 1.0 } else { 0.0 },
+                // target = 1.0 if BTC actually went Up, 0.0 if it went Down.
+                // For Up trades: win means price went Up → 1.0, loss means Down → 0.0.
+                // For Down trades: win means price went Down → 0.0, loss means Up → 1.0.
+                target: match trade.direction {
+                    Direction::Up => if trade.is_win { 1.0 } else { 0.0 },
+                    Direction::Down => if trade.is_win { 0.0 } else { 1.0 },
+                },
                 timestamp: trade.entry_ts,
                 asset: trade.asset,
                 timeframe: trade.timeframe,
@@ -122,7 +128,13 @@ impl Dataset {
         self.trade_samples.push(trade.clone());
         self.samples.push(LabeledSample {
             features: trade.entry_features,
-            target: if trade.is_win { 1.0 } else { 0.0 },
+            // target = 1.0 if BTC actually went Up, 0.0 if it went Down.
+            // For Up trades: win means price went Up → 1.0, loss means Down → 0.0.
+            // For Down trades: win means price went Down → 0.0, loss means Up → 1.0.
+            target: match trade.direction {
+                Direction::Up => if trade.is_win { 1.0 } else { 0.0 },
+                Direction::Down => if trade.is_win { 0.0 } else { 1.0 },
+            },
             timestamp: trade.entry_ts,
             asset: trade.asset,
             timeframe: trade.timeframe,
