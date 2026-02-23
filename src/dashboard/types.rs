@@ -217,6 +217,11 @@ pub struct TradeResponse {
     pub exit_reason: String,
     pub hold_duration_secs: i64,
     pub balance_after: f64,
+    // Share prices (Polymarket token price at entry/exit, 0.01-0.99)
+    pub entry_share_price: f64,
+    pub exit_share_price: f64,
+    /// Was the trade financially profitable? (trading_pnl > 0)
+    pub trading_win: bool,
     // Technical indicators at entry
     pub rsi_at_entry: Option<f64>,
     pub macd_hist_at_entry: Option<f64>,

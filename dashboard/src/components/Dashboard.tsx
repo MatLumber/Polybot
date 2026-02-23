@@ -212,12 +212,24 @@ function TradeTable({ trades }: { trades: Trade[] }) {
             <th>Exit</th>
             <th>PnL</th>
             <th>%</th>
-            <th title="Was the prediction correct? (direction for MARKET_EXPIRY, pnl > 0 for early exits)">Pred</th>
+            <th title="Share price at entry (Polymarket token price, 0-1)">Share</th>
+            <th title="WIN=direction correct+profitable · DIR=direction correct but loss · LOSS=direction wrong">Pred</th>
             <th>Reason</th>
           </tr>
         </thead>
         <tbody>
-          {trades.map((trade) => (
+          {trades.map((trade) => {
+            const predState = !trade.predictionCorrect
+              ? 'LOSS'
+              : trade.tradingWin
+                ? 'WIN'
+                : 'DIR'
+            const predClass = !trade.predictionCorrect
+              ? 'text-negative'
+              : trade.tradingWin
+                ? 'text-positive'
+                : 'text-warning'
+            return (
             <tr key={trade.id}>
               <td>{new Date(toMsTimestamp(trade.timestamp)).toLocaleTimeString()}</td>
               <td>{formatMarketLabel(trade.asset, trade.timeframe)}</td>
@@ -226,12 +238,12 @@ function TradeTable({ trades }: { trades: Trade[] }) {
               <td>{formatCurrency(trade.exitPrice)}</td>
               <td className={pnlClass(trade.pnl)}>{formatSignedCurrency(trade.pnl)}</td>
               <td className={pnlClass(trade.pnlPct)}>{formatPercent(trade.pnlPct)}</td>
-              <td className={trade.predictionCorrect ? 'text-positive' : 'text-negative'}>
-                {trade.predictionCorrect ? 'WIN' : 'LOSS'}
-              </td>
+              <td className="text-muted">{trade.entrySharePrice > 0 ? `$${trade.entrySharePrice.toFixed(2)}` : '—'}</td>
+              <td className={predClass}>{predState}</td>
               <td>{trade.exitReason.replaceAll('_', ' ')}</td>
             </tr>
-          ))}
+            )
+          })}
         </tbody>
       </table>
     </div>

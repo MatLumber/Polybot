@@ -72,6 +72,9 @@ export interface TradeWire {
   exit_reason: string
   hold_duration_secs: number
   balance_after: number
+  entry_share_price: number
+  exit_share_price: number
+  trading_win: boolean
   rsi_at_entry?: number
   macd_hist_at_entry?: number
   bb_position_at_entry?: number

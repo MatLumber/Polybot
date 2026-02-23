@@ -97,6 +97,9 @@ export function mapTrade(trade: TradeWire): Trade {
     exitReason: trade.exit_reason,
     holdDurationSecs: trade.hold_duration_secs,
     balanceAfter: trade.balance_after,
+    entrySharePrice: trade.entry_share_price ?? 0,
+    exitSharePrice: trade.exit_share_price ?? 0,
+    tradingWin: trade.trading_win ?? (trade.pnl >= 0),
   }
 }
 

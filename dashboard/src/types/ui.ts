@@ -66,6 +66,9 @@ export interface Trade {
   exitReason: string
   holdDurationSecs: number
   balanceAfter: number
+  entrySharePrice: number
+  exitSharePrice: number
+  tradingWin: boolean
 }
 
 export interface AssetStats {
