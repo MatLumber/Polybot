@@ -485,8 +485,9 @@ pub async fn subscribe_to_book(
     Ok(())
 }
 
-/// Subscribe to market channel for real-time orderbook and price updates
-/// According to Polymarket docs: {"subscribe": "market", "assets_ids": ["token_id_1", "token_id_2"]}
+/// Initial subscription to market channel on connect.
+/// Per Polymarket docs: {"type": "market", "assets_ids": [...], "custom_feature_enabled": true}
+/// Use this when first connecting or reconnecting.
 pub async fn subscribe_to_market(
     write: &mut futures_util::stream::SplitSink<
         tokio_tungstenite::WebSocketStream<
@@ -497,11 +498,37 @@ pub async fn subscribe_to_market(
     token_ids: &[&str],
 ) -> Result<()> {
     let msg = serde_json::json!({
-        "subscribe": "market",
-        "assets_ids": token_ids
+        "type": "market",
+        "assets_ids": token_ids,
+        "custom_feature_enabled": true
     });
     info!(
         "Subscribing to market channel for {} tokens",
+        token_ids.len()
+    );
+    write
+        .send(TungsteniteMessage::Text(msg.to_string()))
+        .await?;
+    Ok(())
+}
+
+/// Add more tokens to an already-connected market channel.
+/// Per Polymarket docs: {"assets_ids": [...], "operation": "subscribe"}
+pub async fn subscribe_additional_tokens(
+    write: &mut futures_util::stream::SplitSink<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        TungsteniteMessage,
+    >,
+    token_ids: &[&str],
+) -> Result<()> {
+    let msg = serde_json::json!({
+        "assets_ids": token_ids,
+        "operation": "subscribe"
+    });
+    info!(
+        "Subscribing additional {} tokens to market channel",
         token_ids.len()
     );
     write
@@ -652,7 +679,7 @@ impl MarketFeedClient {
                             }
                             if !new_tokens.is_empty() {
                                 let token_refs: Vec<&str> = new_tokens.iter().map(String::as_str).collect();
-                                if let Err(e) = subscribe_to_market(&mut write, &token_refs).await {
+                                if let Err(e) = subscribe_additional_tokens(&mut write, &token_refs).await {
                                     warn!(error = %e, "Failed to subscribe incremental market tokens");
                                     let _ = self.event_tx.send(WsEvent::Error(format!("market_feed_subscribe_send_failed: {e}"))).await;
                                     break "subscribe_send_failed";

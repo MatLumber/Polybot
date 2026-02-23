@@ -97,7 +97,7 @@ impl Default for ClobConfig {
         Self {
             chain_id: 137, // Polygon
             rest_url: "https://clob.polymarket.com".to_string(),
-            ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws".to_string(),
+            ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws/market".to_string(),
             gamma_url: "https://gamma-api.polymarket.com".to_string(),
             private_key: None,
             address: None,
@@ -130,7 +130,7 @@ impl From<ExecutionConfig> for ClobConfig {
         Self {
             chain_id: exec.chain_id,
             rest_url: exec.clob_url,
-            ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws".to_string(),
+            ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws/market".to_string(),
             gamma_url: exec.gamma_url,
             private_key,
             address,

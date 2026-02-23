@@ -33,7 +33,7 @@ impl DynamicOrderbookFeed {
             market_discovery: MarketDiscovery::new(gamma_url),
             tracker,
             share_prices,
-            ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws".to_string(),
+            ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws/market".to_string(),
             current_token_map: HashMap::new(),
             current_token_ids: Vec::new(),
         }

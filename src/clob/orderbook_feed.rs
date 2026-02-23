@@ -77,7 +77,7 @@ pub struct OrderbookFeedConfig {
 impl Default for OrderbookFeedConfig {
     fn default() -> Self {
         Self {
-            ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws".to_string(),
+            ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws/market".to_string(),
             rest_url: "https://clob.polymarket.com".to_string(),
             refresh_interval_ms: 5000,
             max_reconnect_attempts: 5,
