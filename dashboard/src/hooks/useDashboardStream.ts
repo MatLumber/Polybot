@@ -183,6 +183,8 @@ function reducer(state: DashboardStreamState, action: StreamAction): DashboardSt
             paper: {
               ...state.dashboard.paper,
               openPositions: [...withoutDuplicate, opened],
+              balance: state.dashboard.paper.balance - opened.sizeUsdc,
+              locked: state.dashboard.paper.locked + opened.sizeUsdc,
             },
           },
         }
@@ -200,6 +202,8 @@ function reducer(state: DashboardStreamState, action: StreamAction): DashboardSt
                 (position) => position.id !== message.data.position_id,
               ),
               recentTrades: mergeRecentTrades(state.dashboard.paper.recentTrades, closedTrade),
+              balance: state.dashboard.paper.balance + closedTrade.sizeUsdc + closedTrade.pnl,
+              locked: Math.max(0, state.dashboard.paper.locked - closedTrade.sizeUsdc),
             },
           },
         }

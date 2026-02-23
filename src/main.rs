@@ -1738,8 +1738,21 @@ async fn main() -> Result<()> {
                         .get_positions()
                         .into_iter()
                         .map(|p| {
-                            let trading_roi = if p.size_usdc > 0.0 { p.unrealized_pnl / p.size_usdc * 100.0 } else { 0.0 };
                             let now_ms = chrono::Utc::now().timestamp_millis();
+                            let display_pnl = {
+                                let dir_sign = if format!("{:?}", p.direction) == "Up" { 1.0_f64 } else { -1.0_f64 };
+                                let price_diff = (tick.mid - p.entry_price) * dir_sign;
+                                let price_move_pct = if p.entry_price > 0.0 { price_diff / p.entry_price } else { 0.0 };
+                                let window_ms_disp = (p.market_close_ts - p.market_open_ts).max(1) as f64;
+                                let elapsed_ms = (now_ms - p.opened_at).max(0) as f64;
+                                let time_factor = 1.0 + (elapsed_ms / window_ms_disp).min(1.0) * 2.0;
+                                let sensitivity = if format!("{:?}", p.timeframe) == "Min15" { 15.0_f64 } else { 8.0_f64 };
+                                let sim_share = (p.share_price + price_move_pct * sensitivity * time_factor).clamp(0.02, 0.98);
+                                let fee_rate = crate::polymarket::fee_rate_from_price(sim_share);
+                                let gross = p.shares * sim_share;
+                                (gross * (1.0 - fee_rate)).max(0.0) - p.size_usdc
+                            };
+                            let trading_roi = if p.size_usdc > 0.0 { display_pnl / p.size_usdc * 100.0 } else { 0.0 };
                             PositionResponse {
                             id: p.id.clone(),
                             asset: format!("{:?}", p.asset),
@@ -1748,8 +1761,8 @@ async fn main() -> Result<()> {
                             entry_price: if p.price_at_market_open > 0.0 { p.price_at_market_open } else { p.entry_price },
                             current_price: p.current_price,
                             size_usdc: p.size_usdc,
-                            pnl: p.unrealized_pnl,
-                            pnl_pct: trading_roi, // token-based, consistent with pnl
+                            pnl: display_pnl,
+                            pnl_pct: trading_roi,
                             opened_at: p.opened_at,
                             market_slug: p.market_slug.clone(),
                             confidence: p.confidence,
@@ -1926,8 +1939,21 @@ async fn main() -> Result<()> {
                         .get_positions()
                         .into_iter()
                         .map(|p| {
-                            let trading_roi = if p.size_usdc > 0.0 { p.unrealized_pnl / p.size_usdc * 100.0 } else { 0.0 };
                             let now_ms = chrono::Utc::now().timestamp_millis();
+                            let display_pnl = {
+                                let dir_sign = if format!("{:?}", p.direction) == "Up" { 1.0_f64 } else { -1.0_f64 };
+                                let price_diff = (tick.mid - p.entry_price) * dir_sign;
+                                let price_move_pct = if p.entry_price > 0.0 { price_diff / p.entry_price } else { 0.0 };
+                                let window_ms_disp = (p.market_close_ts - p.market_open_ts).max(1) as f64;
+                                let elapsed_ms = (now_ms - p.opened_at).max(0) as f64;
+                                let time_factor = 1.0 + (elapsed_ms / window_ms_disp).min(1.0) * 2.0;
+                                let sensitivity = if format!("{:?}", p.timeframe) == "Min15" { 15.0_f64 } else { 8.0_f64 };
+                                let sim_share = (p.share_price + price_move_pct * sensitivity * time_factor).clamp(0.02, 0.98);
+                                let fee_rate = crate::polymarket::fee_rate_from_price(sim_share);
+                                let gross = p.shares * sim_share;
+                                (gross * (1.0 - fee_rate)).max(0.0) - p.size_usdc
+                            };
+                            let trading_roi = if p.size_usdc > 0.0 { display_pnl / p.size_usdc * 100.0 } else { 0.0 };
                             PositionResponse {
                             id: p.id.clone(),
                             asset: format!("{:?}", p.asset),
@@ -1936,8 +1962,8 @@ async fn main() -> Result<()> {
                             entry_price: if p.price_at_market_open > 0.0 { p.price_at_market_open } else { p.entry_price },
                             current_price: p.current_price,
                             size_usdc: p.size_usdc,
-                            pnl: p.unrealized_pnl,
-                            pnl_pct: trading_roi, // token-based, consistent with pnl
+                            pnl: display_pnl,
+                            pnl_pct: trading_roi,
                             opened_at: p.opened_at,
                             market_slug: p.market_slug.clone(),
                             confidence: p.confidence,

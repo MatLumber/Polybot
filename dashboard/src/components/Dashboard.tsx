@@ -146,7 +146,7 @@ function renderPriceChip(asset: string, price?: AssetPrice) {
   )
 }
 
-function PositionTable({ positions }: { positions: Position[] }) {
+function PositionTable({ positions, now }: { positions: Position[]; now: number }) {
   if (positions.length === 0) {
     return <div className="empty-state">No open positions</div>
   }
@@ -170,25 +170,28 @@ function PositionTable({ positions }: { positions: Position[] }) {
           </tr>
         </thead>
         <tbody>
-          {positions.map((position) => (
-            <tr key={position.id}>
-              <td>{formatMarketLabel(position.asset, position.timeframe)}</td>
-              <td className={positionDirectionClass(position.direction)}>{position.direction.toUpperCase()}</td>
-              <td>{formatCurrency(position.entryPrice)}</td>
-              <td>{formatCurrency(position.currentPrice)}</td>
-              <td>{formatCurrency(position.sizeUsdc)}</td>
-              <td className={pnlClass(position.pnl)}>{formatSignedCurrency(position.pnl)}</td>
-              <td className={pnlClass(position.pnlPct)}>{formatPercent(position.pnlPct)}</td>
-              <td className="text-negative">-{position.stopLossPct.toFixed(1)}%</td>
-              <td className="text-positive">+{position.takeProfitPct.toFixed(1)}%</td>
-              <td className={position.checkpointArmed ? 'text-warning' : 'text-muted'}>
-                {position.checkpointArmed
-                  ? `🔒 ${position.checkpointFloorPct.toFixed(1)}%`
-                  : '—'}
-              </td>
-              <td>{formatTimeLeft(position.timeRemainingSecs)}</td>
-            </tr>
-          ))}
+          {positions.map((position) => {
+            const timeLeft = Math.max(0, Math.floor((position.marketCloseTs - now) / 1000))
+            return (
+              <tr key={position.id}>
+                <td>{formatMarketLabel(position.asset, position.timeframe)}</td>
+                <td className={positionDirectionClass(position.direction)}>{position.direction.toUpperCase()}</td>
+                <td>{formatCurrency(position.entryPrice)}</td>
+                <td>{formatCurrency(position.currentPrice)}</td>
+                <td>{formatCurrency(position.sizeUsdc)}</td>
+                <td className={pnlClass(position.pnl)}>{formatSignedCurrency(position.pnl)}</td>
+                <td className={pnlClass(position.pnlPct)}>{formatPercent(position.pnlPct)}</td>
+                <td className="text-negative">-{position.stopLossPct.toFixed(1)}%</td>
+                <td className="text-positive">+{position.takeProfitPct.toFixed(1)}%</td>
+                <td className={position.checkpointArmed ? 'text-warning' : 'text-muted'}>
+                  {position.checkpointArmed
+                    ? `🔒 ${position.checkpointFloorPct.toFixed(1)}%`
+                    : '—'}
+                </td>
+                <td>{formatTimeLeft(timeLeft)}</td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
@@ -419,6 +422,9 @@ export function Dashboard() {
   }
 
   const positions = modeState.openPositions
+  const liveUnrealized = positions.reduce((s, p) => s + p.pnl, 0)
+  const liveLocked = positions.reduce((s, p) => s + p.sizeUsdc, 0)
+  const liveTotalEquity = modeState.balance + liveLocked + liveUnrealized
   const trades = dashboard.paper.recentTrades
     .filter((trade) => toMsTimestamp(trade.timestamp) >= heartbeatNow - RECENT_TRADES_WINDOW_MS)
     .sort((a, b) => toMsTimestamp(b.timestamp) - toMsTimestamp(a.timestamp))
@@ -534,18 +540,18 @@ export function Dashboard() {
         <section className="metrics-grid">
           <MetricCard
             label="Total Equity"
-            value={formatCurrency(modeState.totalEquity)}
+            value={formatCurrency(liveTotalEquity)}
             sublabel={`Balance ${formatCurrency(modeState.balance)}`}
           />
           <MetricCard
             label="Available"
-            value={formatCurrency(modeState.available)}
-            sublabel={`Locked ${formatCurrency(modeState.locked)}`}
+            value={formatCurrency(modeState.balance)}
+            sublabel={`Locked ${formatCurrency(liveLocked)}`}
           />
           <MetricCard
             label="Unrealized"
-            value={formatSignedCurrency(modeState.unrealizedPnl)}
-            tone={modeState.unrealizedPnl >= 0 ? 'positive' : 'negative'}
+            value={formatSignedCurrency(liveUnrealized)}
+            tone={liveUnrealized >= 0 ? 'positive' : 'negative'}
           />
           <MetricCard
             label={mode === 'paper' ? 'Win Rate' : 'Daily PnL'}
@@ -579,7 +585,7 @@ export function Dashboard() {
                 <span>{mode === 'paper' ? 'Paper' : 'Live'} Positions</span>
               </div>
             </div>
-            <PositionTable positions={positions} />
+            <PositionTable positions={positions} now={heartbeatNow} />
           </div>
 
           <div className="glass-panel">
