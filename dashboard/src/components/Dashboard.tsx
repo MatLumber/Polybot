@@ -216,22 +216,26 @@ function TradeTable({ trades }: { trades: Trade[] }) {
             <th>PnL</th>
             <th>%</th>
             <th title="Share price at entry (Polymarket token price, 0-1)">Share</th>
-            <th title="WIN=direction correct+profitable · DIR=direction correct but loss · LOSS=direction wrong">Pred</th>
+            <th title="WIN=profitable · DIR=direction correct but financial loss · LOSS=lost money">Pred</th>
             <th>Reason</th>
           </tr>
         </thead>
         <tbody>
           {trades.map((trade) => {
-            const predState = !trade.predictionCorrect
-              ? 'LOSS'
-              : trade.tradingWin
-                ? 'WIN'
-                : 'DIR'
-            const predClass = !trade.predictionCorrect
-              ? 'text-negative'
-              : trade.tradingWin
-                ? 'text-positive'
-                : 'text-warning'
+            // PRED reflects financial outcome primarily:
+            // WIN  = made money (pnl > 0)
+            // DIR  = direction was correct but lost money (share mechanics / bad timing)
+            // LOSS = lost money (pnl <= 0, direction also wrong)
+            const predState = trade.tradingWin
+              ? 'WIN'
+              : trade.predictionCorrect
+                ? 'DIR'
+                : 'LOSS'
+            const predClass = trade.tradingWin
+              ? 'text-positive'
+              : trade.predictionCorrect
+                ? 'text-warning'
+                : 'text-negative'
             return (
             <tr key={trade.id}>
               <td>{new Date(toMsTimestamp(trade.timestamp)).toLocaleTimeString()}</td>
