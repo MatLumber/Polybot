@@ -11,7 +11,7 @@ use smartcore::ensemble::random_forest_classifier::{
 };
 use smartcore::linalg::basic::matrix::DenseMatrix;
 use smartcore::linear::logistic_regression::{LogisticRegression, LogisticRegressionParameters};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 /// Predicción de un modelo individual
 #[derive(Debug, Clone)]
@@ -230,10 +230,17 @@ impl GradientBoostingModel {
 
 impl MLModel for GradientBoostingModel {
     fn train(&mut self, x: &DenseMatrix<f64>, y: &Vec<i64>) -> anyhow::Result<()> {
-        // Simplificación: usar un RandomForest con menos árboles
+        // Fix memory leak: always start fresh on each retrain.
+        self.models.clear();
+
+        // Use different hyperparameters from the main RF (shallower trees, fewer estimators)
+        // so this model learns a genuinely different boundary — higher bias, lower variance.
+        // The MLPredictor.train() flow overrides this with an error-focused dataset that
+        // makes this model specialize on the examples the main RF gets wrong.
         let params = RandomForestClassifierParameters::default()
-            .with_n_trees(50)
-            .with_max_depth(5);
+            .with_n_trees(40)
+            .with_max_depth(4)
+            .with_min_samples_split(8);
 
         match RandomForestClassifier::fit(x, y, params) {
             Ok(model) => {
@@ -297,6 +304,11 @@ pub struct MLPredictor {
     pub weights: EnsembleWeights,
     pub feature_importance: HashMap<String, f64>,
     pub historical_predictions: Vec<(f64, bool)>, // (predicción, resultado real)
+    /// Rolling window of recent prediction outcomes for concept drift detection.
+    /// `true` = prediction was correct.  Kept to the last 30 results.
+    recent_outcomes: VecDeque<bool>,
+    /// Baseline rolling accuracy established once we have ≥30 outcomes.
+    pub drift_baseline_accuracy: f64,
 }
 
 impl MLPredictor {
@@ -313,49 +325,133 @@ impl MLPredictor {
             weights,
             feature_importance: HashMap::new(),
             historical_predictions: Vec::new(),
+            recent_outcomes: VecDeque::with_capacity(32),
+            drift_baseline_accuracy: 0.0,
         }
     }
 
-    /// Entrenar todos los modelos con SmartCore REAL
+    /// Entrenar todos los modelos con SmartCore REAL.
+    ///
+    /// Training flow:
+    /// 1. RF trains on the full (recency-weighted) dataset.
+    /// 2. GB trains on an *error-focused* version: samples the RF misclassified are
+    ///    included 3× so the second learner specialises on the RF's blind spots.
+    /// 3. LR trains on the full dataset.
+    /// 4. Real feature importance computed via Pearson correlation with target.
     pub fn train(&mut self, dataset: &Dataset) -> anyhow::Result<()> {
-        // Convertir dataset a DenseMatrix
+        // === Step 1: Build recency-weighted matrix (recent samples counted more) ===
         let (x, y) = self.dataset_to_dense_matrix(dataset);
 
-        for model in &mut self.models {
-            model.train(&x, &y)?;
+        // === Step 2: Train Random Forest ===
+        if let Some(rf) = self.models.get_mut(0) {
+            match rf.train(&x, &y) {
+                Ok(_) => tracing::info!(
+                    "🌲 RF trained — accuracy: {:.1}%",
+                    rf.accuracy() * 100.0
+                ),
+                Err(e) => tracing::warn!("RF training failed: {}", e),
+            }
         }
 
-        // Calcular feature importance
-        self.calculate_feature_importance();
+        // === Step 3: Build error-focused dataset and train GB ===
+        // For each sample, ask the RF whether it got it right.
+        // Misclassified samples appear 3× in the GB training set so the GB
+        // model concentrates on the patterns RF struggles with.
+        let mut focused_2d: Vec<Vec<f64>> = Vec::new();
+        let mut focused_y: Vec<i64> = Vec::new();
+
+        if let Some(rf) = self.models.get(0) {
+            for sample in &dataset.samples {
+                let feat_vec = sample.features.to_vec();
+                let label = if sample.target > 0.5 { 1i64 } else { 0i64 };
+                let pred = rf.predict(&sample.features);
+                let is_correct = pred
+                    .map(|p| (p > 0.5) == (sample.target > 0.5))
+                    .unwrap_or(false);
+
+                // Every sample appears at least once.
+                focused_2d.push(feat_vec.clone());
+                focused_y.push(label);
+
+                // Misclassified appear 2 extra times (3× total weight).
+                if !is_correct {
+                    focused_2d.push(feat_vec.clone());
+                    focused_y.push(label);
+                    focused_2d.push(feat_vec.clone());
+                    focused_y.push(label);
+                }
+            }
+        } else {
+            // RF not available: fall back to unweighted data.
+            for sample in &dataset.samples {
+                focused_2d.push(sample.features.to_vec());
+                focused_y.push(if sample.target > 0.5 { 1i64 } else { 0i64 });
+            }
+        }
+
+        if !focused_2d.is_empty() {
+            let refs: Vec<&[f64]> = focused_2d.iter().map(|r| r.as_slice()).collect();
+            match DenseMatrix::from_2d_array(&refs) {
+                Ok(x_focused) => {
+                    if let Some(gb) = self.models.get_mut(1) {
+                        match gb.train(&x_focused, &focused_y) {
+                            Ok(_) => tracing::info!(
+                                "🔁 GB (error-focused) trained — accuracy: {:.1}%",
+                                gb.accuracy() * 100.0
+                            ),
+                            Err(e) => tracing::warn!("GB error-focused training failed: {}", e),
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!("Failed to build error-focused matrix: {:?}", e),
+            }
+        }
+
+        // === Step 4: Train Logistic Regression on full dataset ===
+        if let Some(lr) = self.models.get_mut(2) {
+            match lr.train(&x, &y) {
+                Ok(_) => tracing::info!(
+                    "📈 LR trained — accuracy: {:.1}%",
+                    lr.accuracy() * 100.0
+                ),
+                Err(e) => tracing::warn!("LR training failed: {}", e),
+            }
+        }
+
+        // === Step 5: Real feature importance (Pearson correlation with target) ===
+        self.calculate_feature_importance_real(dataset);
 
         Ok(())
     }
 
-    /// Convertir Dataset a DenseMatrix para SmartCore
+    /// Convertir Dataset a DenseMatrix para SmartCore.
+    ///
+    /// Applies **recency weighting**: samples younger than 7 days are included 3×,
+    /// samples from 7–21 days ago are included 2×, older samples once.
+    /// This makes the model pay more attention to recent market behaviour without
+    /// discarding historical patterns entirely.
     fn dataset_to_dense_matrix(&self, dataset: &Dataset) -> (DenseMatrix<f64>, Vec<i64>) {
-        let n_samples = dataset.samples.len();
-        let n_features = MLFeatureVector::NUM_FEATURES;
-
-        // Crear matriz de features
-        let mut x_data: Vec<f64> = Vec::with_capacity(n_samples * n_features);
-        let mut y_data: Vec<i64> = Vec::with_capacity(n_samples);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let mut x_2d: Vec<Vec<f64>> = Vec::new();
+        let mut y_data: Vec<i64> = Vec::new();
 
         for sample in &dataset.samples {
+            let age_days = (now_ms - sample.timestamp).max(0) as f64 / 86_400_000.0;
+            let copies: usize = if age_days < 7.0 { 3 } else if age_days < 21.0 { 2 } else { 1 };
+
             let feature_vec = sample.features.to_vec();
-            x_data.extend(feature_vec);
-            y_data.push(if sample.target > 0.5 { 1 } else { 0 });
+            let label: i64 = if sample.target > 0.5 { 1 } else { 0 };
+
+            for _ in 0..copies {
+                x_2d.push(feature_vec.clone());
+                y_data.push(label);
+            }
         }
 
-        // Convertir a formato 2D para from_2d_array
-        let mut x_2d: Vec<Vec<f64>> = Vec::with_capacity(n_samples);
-        for i in 0..n_samples {
-            let start = i * n_features;
-            let end = start + n_features;
-            x_2d.push(x_data[start..end].to_vec());
-        }
-
-        let x = DenseMatrix::from_2d_array(&x_2d.iter().map(|v| v.as_slice()).collect::<Vec<_>>())
-            .unwrap();
+        let x = DenseMatrix::from_2d_array(
+            &x_2d.iter().map(|v| v.as_slice()).collect::<Vec<_>>(),
+        )
+        .unwrap();
         (x, y_data)
     }
 
@@ -428,7 +524,7 @@ impl MLPredictor {
         ((confidence * 0.7 + extreme_boost * 0.3) * neutral_penalty).clamp(0.0, 1.0)
     }
 
-    /// Registrar predicción y resultado para calibración
+    /// Registrar predicción y resultado para calibración y concept drift.
     pub fn record_outcome(&mut self, predicted_prob: f64, actual_outcome: bool) {
         self.historical_predictions
             .push((predicted_prob, actual_outcome));
@@ -437,6 +533,43 @@ impl MLPredictor {
         if self.historical_predictions.len() > 1000 {
             self.historical_predictions.remove(0);
         }
+
+        // Concept drift: track rolling accuracy over last 30 outcomes.
+        let was_correct = (predicted_prob > 0.5) == actual_outcome;
+        self.recent_outcomes.push_back(was_correct);
+        if self.recent_outcomes.len() > 30 {
+            self.recent_outcomes.pop_front();
+        }
+
+        // Establish baseline once we have the first 30 outcomes, then update slowly.
+        if self.recent_outcomes.len() == 30 {
+            let current = self.recent_rolling_accuracy();
+            if self.drift_baseline_accuracy < 1e-9 {
+                self.drift_baseline_accuracy = current;
+            } else {
+                // Exponential moving average — baseline adapts slowly.
+                self.drift_baseline_accuracy =
+                    self.drift_baseline_accuracy * 0.95 + current * 0.05;
+            }
+        }
+    }
+
+    /// Rolling accuracy over the last 30 predictions.
+    pub fn recent_rolling_accuracy(&self) -> f64 {
+        if self.recent_outcomes.is_empty() {
+            return 0.5;
+        }
+        self.recent_outcomes.iter().filter(|&&c| c).count() as f64
+            / self.recent_outcomes.len() as f64
+    }
+
+    /// Returns `true` when the rolling accuracy has dropped ≥10 percentage points
+    /// below the established baseline — a signal that market conditions have shifted.
+    pub fn is_drift_detected(&self) -> bool {
+        if self.recent_outcomes.len() < 20 || self.drift_baseline_accuracy < 1e-9 {
+            return false;
+        }
+        self.recent_rolling_accuracy() < self.drift_baseline_accuracy - 0.10
     }
 
     /// Ajustar pesos dinámicamente basado en performance
@@ -530,18 +663,66 @@ impl MLPredictor {
         total / self.models.len() as f64
     }
 
-    /// Calcular feature importance combinado
-    fn calculate_feature_importance(&mut self) {
+    /// Real feature importance via Pearson correlation between each feature and the target.
+    ///
+    /// `importance[i] = |corr(feature_i, target)|`
+    ///
+    /// This is not as powerful as permutation importance but it is real, fast, captures
+    /// linear relationships between each predictor and the UP/DOWN outcome, and is
+    /// infinitely better than the previous hardcoded cycling pattern.
+    fn calculate_feature_importance_real(&mut self, dataset: &Dataset) {
         let names = MLFeatureVector::feature_names();
+        let n = dataset.samples.len();
+        if n < 5 {
+            return;
+        }
 
-        for (i, name) in names.iter().enumerate() {
-            // Simular importancia basada en varianza de feature
-            let importance = match i % 3 {
-                0 => 0.4,
-                1 => 0.35,
-                _ => 0.25,
+        let targets: Vec<f64> = dataset.samples.iter().map(|s| s.target).collect();
+        let target_mean = targets.iter().sum::<f64>() / n as f64;
+        let target_std = {
+            let var = targets
+                .iter()
+                .map(|&t| (t - target_mean).powi(2))
+                .sum::<f64>()
+                / n as f64;
+            var.sqrt()
+        };
+
+        if target_std < 1e-9 {
+            return; // All same class — no variance to correlate against.
+        }
+
+        for (feat_idx, name) in names.iter().enumerate() {
+            let feat_vals: Vec<f64> = dataset
+                .samples
+                .iter()
+                .map(|s| s.features.to_vec()[feat_idx])
+                .collect();
+
+            let feat_mean = feat_vals.iter().sum::<f64>() / n as f64;
+            let feat_std = {
+                let var = feat_vals
+                    .iter()
+                    .map(|&v| (v - feat_mean).powi(2))
+                    .sum::<f64>()
+                    / n as f64;
+                var.sqrt()
             };
-            self.feature_importance.insert(name.to_string(), importance);
+
+            if feat_std < 1e-9 {
+                self.feature_importance.insert(name.to_string(), 0.0);
+                continue;
+            }
+
+            let cov = feat_vals
+                .iter()
+                .zip(targets.iter())
+                .map(|(&v, &t)| (v - feat_mean) * (t - target_mean))
+                .sum::<f64>()
+                / n as f64;
+
+            let pearson = (cov / (feat_std * target_std)).abs();
+            self.feature_importance.insert(name.to_string(), pearson);
         }
     }
 

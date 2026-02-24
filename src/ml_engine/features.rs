@@ -140,6 +140,25 @@ pub struct MLFeatureVector {
     pub polymarket_volume_24hr: f64,
     /// Polymarket total liquidity
     pub polymarket_liquidity: f64,
+
+    // ============ Window History & Cross-TF ============
+    /// Resultado de la ventana previa para este mercado (1=UP, 0=DOWN, 0.5=desconocido)
+    pub prev_window_dir_1: f64,
+    /// Resultado de hace 2 ventanas
+    pub prev_window_dir_2: f64,
+    /// Resultado de hace 3 ventanas
+    pub prev_window_dir_3: f64,
+    /// Racha de ventanas consecutivas en la misma dirección, normalizada -1..1 (cap=5).
+    /// Positivo = rachas UP, negativo = rachas DOWN.
+    pub window_streak: f64,
+    /// Alineación cross-timeframe: +1=acuerdo (15m y 1h apuntan igual), -1=desacuerdo, 0=desconocido
+    pub cross_tf_alignment: f64,
+    /// Precio del token Polymarket (YES) al abrir la ventana actual (probabilidad implícita)
+    pub token_price_window_open: f64,
+    /// Cambio relativo del precio del token desde apertura de ventana (%, clamp -1..1)
+    pub token_price_change_window: f64,
+    /// Tendencia de volumen 24h: +1=subiendo, -1=bajando, 0=estable
+    pub volume_trend: f64,
 }
 
 impl MLFeatureVector {
@@ -199,11 +218,20 @@ impl MLFeatureVector {
             self.polymarket_price_momentum,
             self.polymarket_volume_24hr,
             self.polymarket_liquidity,
+            // Window History & Cross-TF (8 nuevos)
+            self.prev_window_dir_1,
+            self.prev_window_dir_2,
+            self.prev_window_dir_3,
+            self.window_streak,
+            self.cross_tf_alignment,
+            self.token_price_window_open,
+            self.token_price_change_window,
+            self.volume_trend,
         ]
     }
 
     /// Número total de features
-    pub const NUM_FEATURES: usize = 53;
+    pub const NUM_FEATURES: usize = 61;
 
     /// Nombres de las features (para importancia)
     pub fn feature_names() -> Vec<&'static str> {
@@ -261,6 +289,15 @@ impl MLFeatureVector {
             "polymarket_price_momentum",
             "polymarket_volume_24hr",
             "polymarket_liquidity",
+            // Window History & Cross-TF
+            "prev_window_dir_1",
+            "prev_window_dir_2",
+            "prev_window_dir_3",
+            "window_streak",
+            "cross_tf_alignment",
+            "token_price_window_open",
+            "token_price_change_window",
+            "volume_trend",
         ]
     }
 }

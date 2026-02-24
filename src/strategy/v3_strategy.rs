@@ -13,7 +13,7 @@ use crate::ml_engine::{MLEngineConfig, MLEngineState, Prediction};
 use crate::strategy::calibrator::{IndicatorCalibrator, IndicatorStats, TradeResult};
 use crate::strategy::GeneratedSignal;
 use crate::types::{Asset, Direction, Timeframe};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use tracing::{error, info, warn};
 
@@ -25,6 +25,8 @@ struct WindowObservation {
     features: MLFeatureVector,
     /// BTC price at the first tick of this window (approximates the market-open price)
     price_at_open: f64,
+    /// Polymarket token (YES) price at the first tick of this window
+    token_price_at_open: f64,
     /// Timestamp when this window closes (ms)
     close_ts: i64,
     /// Asset
@@ -63,6 +65,11 @@ pub struct V3Strategy {
     /// Captures one feature snapshot per market window so the ML can learn from
     /// EVERY window outcome — not just windows where a trade was executed.
     pending_windows: HashMap<(Asset, Timeframe, i64), WindowObservation>,
+    /// Finalized window outcomes per market (last 5). Used to compute sequential
+    /// features: prev_window_dir_1/2/3, window_streak, cross_tf_alignment.
+    window_history: HashMap<(Asset, Timeframe), VecDeque<f64>>,
+    /// Recent Polymarket 24h volume per market for volume_trend feature.
+    volume_history: HashMap<(Asset, Timeframe), VecDeque<f64>>,
 }
 
 impl V3Strategy {
@@ -159,6 +166,8 @@ impl V3Strategy {
             dataset,
             persistence,
             pending_windows: HashMap::new(),
+            window_history: HashMap::new(),
+            volume_history: HashMap::new(),
         };
 
         // Auto-train models on startup if we have enough samples
@@ -201,7 +210,7 @@ impl V3Strategy {
         let context = self.build_market_context(features);
 
         // Compute ML feature vector
-        let ml_features = self.feature_engine.compute(features, &context);
+        let mut ml_features = self.feature_engine.compute(features, &context);
 
         // === WINDOW OBSERVATION TRACKING ===
         // Record one ML feature snapshot per market window (regardless of whether a trade
@@ -211,9 +220,20 @@ impl V3Strategy {
         let (win_open_ts, win_close_ts) = Self::window_boundaries(features.ts, timeframe);
         let win_key = (asset, timeframe, win_open_ts);
 
+        // Track recent Polymarket volume for the volume_trend feature.
+        let current_volume = features.polymarket_volume_24hr.unwrap_or(0.0);
+        {
+            let vh = self.volume_history
+                .entry((asset, timeframe))
+                .or_insert_with(|| VecDeque::with_capacity(20));
+            vh.push_back(current_volume);
+            if vh.len() > 20 { vh.pop_front(); }
+        }
+
         // 1. Finalize any windows that have already closed (use current price as proxy for
         //    the window-close BTC price — this is accurate to within one tick, ~1 second).
         let current_btc_price = features.close;
+        let current_token_price = features.polymarket_price.unwrap_or(0.5);
         let now_ts = features.ts;
         let expired_keys: Vec<_> = self
             .pending_windows
@@ -225,6 +245,14 @@ impl V3Strategy {
             if let Some(obs) = self.pending_windows.remove(&key) {
                 let target = if current_btc_price >= obs.price_at_open { 1.0 } else { 0.0 };
                 let direction_label = if target > 0.5 { "UP" } else { "DOWN" };
+                // Update window_history for this market so sequential features stay fresh.
+                {
+                    let wh = self.window_history
+                        .entry((obs.asset, obs.timeframe))
+                        .or_insert_with(|| VecDeque::with_capacity(6));
+                    wh.push_back(target);
+                    if wh.len() > 5 { wh.pop_front(); }
+                }
                 info!(
                     asset = ?obs.asset,
                     timeframe = ?obs.timeframe,
@@ -256,10 +284,36 @@ impl V3Strategy {
             }
         }
 
-        // 2. Register this window if we haven't seen it yet (one snapshot per window).
+        // 2. Patch ml_features with the 8 new window-history / cross-TF / token-dynamics
+        //    features. This must happen AFTER finalizing expired windows (so window_history
+        //    is up-to-date) and BEFORE registering the current window (so the stored
+        //    snapshot already includes these enriched features).
+        ml_features.prev_window_dir_1 = self.get_prev_window_dir(asset, timeframe, 1);
+        ml_features.prev_window_dir_2 = self.get_prev_window_dir(asset, timeframe, 2);
+        ml_features.prev_window_dir_3 = self.get_prev_window_dir(asset, timeframe, 3);
+        ml_features.window_streak = self.calculate_window_streak(asset, timeframe);
+        ml_features.cross_tf_alignment = self.calculate_cross_tf_alignment(asset, timeframe);
+        ml_features.volume_trend = self.calculate_volume_trend_for_market(asset, timeframe);
+
+        // Token price dynamics: compare current token price to the price at window open.
+        // If the window is already tracked, we know the opening price.
+        if let Some(obs) = self.pending_windows.get(&win_key) {
+            ml_features.token_price_window_open = obs.token_price_at_open;
+            let change = if obs.token_price_at_open > 1e-9 {
+                (current_token_price - obs.token_price_at_open) / obs.token_price_at_open
+            } else { 0.0 };
+            ml_features.token_price_change_window = change.clamp(-1.0, 1.0);
+        } else {
+            // First tick of this window — no change yet.
+            ml_features.token_price_window_open = current_token_price;
+            ml_features.token_price_change_window = 0.0;
+        }
+
+        // 3. Register this window if we haven't seen it yet (one snapshot per window).
         self.pending_windows.entry(win_key).or_insert_with(|| WindowObservation {
             features: ml_features.clone(),
             price_at_open: current_btc_price,
+            token_price_at_open: current_token_price,
             close_ts: win_close_ts,
             asset,
             timeframe,
@@ -310,6 +364,18 @@ impl V3Strategy {
             min_samples_required = min_samples,
             "ML status check"
         );
+
+        // Concept drift warning
+        if let Some(ref predictor) = self.predictor {
+            if predictor.is_drift_detected() {
+                warn!(
+                    ?asset, ?timeframe,
+                    rolling_acc = predictor.recent_rolling_accuracy(),
+                    baseline = predictor.drift_baseline_accuracy,
+                    "⚠️ Concept drift detected — market regime may have changed, consider retraining"
+                );
+            }
+        }
 
         // Try ML prediction if available
         if ml_available && dataset_size >= min_samples {
@@ -999,6 +1065,82 @@ impl V3Strategy {
         };
         let open = (ts_ms / window_ms) * window_ms;
         (open, open + window_ms)
+    }
+
+    /// Get the N-th previous window outcome (1 = most recent).
+    /// Returns 0.5 when there is not enough history (unknown).
+    fn get_prev_window_dir(&self, asset: Asset, timeframe: Timeframe, n: usize) -> f64 {
+        if let Some(history) = self.window_history.get(&(asset, timeframe)) {
+            let len = history.len();
+            if len >= n {
+                return history[len - n]; // VecDeque is front-indexed
+            }
+        }
+        0.5 // unknown
+    }
+
+    /// Signed streak of consecutive windows in the same direction.
+    /// Returns a value in [-1, 1] (positive = streak of UPs, negative = streak of DOWNs).
+    /// Capped at 5 consecutive to stay in range.
+    fn calculate_window_streak(&self, asset: Asset, timeframe: Timeframe) -> f64 {
+        if let Some(history) = self.window_history.get(&(asset, timeframe)) {
+            if history.is_empty() {
+                return 0.0;
+            }
+            let last_dir = *history.back().unwrap();
+            let last_is_up = last_dir > 0.5;
+            let mut streak: i32 = 0;
+            for &dir in history.iter().rev() {
+                if (dir > 0.5) == last_is_up {
+                    streak += if last_is_up { 1 } else { -1 };
+                } else {
+                    break;
+                }
+            }
+            (streak as f64 / 5.0).clamp(-1.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Cross-timeframe alignment: +1 if this market and the other timeframe agree on the
+    /// last window direction, -1 if they disagree, 0 if not enough history on either side.
+    fn calculate_cross_tf_alignment(&self, asset: Asset, timeframe: Timeframe) -> f64 {
+        let other_tf = match timeframe {
+            Timeframe::Min15 => Timeframe::Hour1,
+            Timeframe::Hour1 => Timeframe::Min15,
+        };
+        let my_last = self.window_history
+            .get(&(asset, timeframe))
+            .and_then(|h| h.back().copied());
+        let other_last = self.window_history
+            .get(&(asset, other_tf))
+            .and_then(|h| h.back().copied());
+        match (my_last, other_last) {
+            (Some(mine), Some(other)) => {
+                if (mine > 0.5) == (other > 0.5) { 1.0 } else { -1.0 }
+            }
+            _ => 0.0,
+        }
+    }
+
+    /// Volume trend: +1 if recent 24h volume is rising, -1 if falling, 0 if stable.
+    /// Compares the average of the last 5 observations to the previous 5.
+    fn calculate_volume_trend_for_market(&self, asset: Asset, timeframe: Timeframe) -> f64 {
+        if let Some(history) = self.volume_history.get(&(asset, timeframe)) {
+            if history.len() < 10 {
+                return 0.0;
+            }
+            let recent: f64 = history.iter().rev().take(5).sum::<f64>() / 5.0;
+            let older: f64 = history.iter().rev().skip(5).take(5).sum::<f64>() / 5.0;
+            if older < 1.0 {
+                return 0.0;
+            }
+            let change = (recent - older) / older;
+            if change > 0.10 { 1.0 } else if change < -0.10 { -1.0 } else { 0.0 }
+        } else {
+            0.0
+        }
     }
 
     /// Obtener estadísticas del dataset
