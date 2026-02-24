@@ -70,6 +70,8 @@ pub struct V3Strategy {
     window_history: HashMap<(Asset, Timeframe), VecDeque<f64>>,
     /// Recent Polymarket 24h volume per market for volume_trend feature.
     volume_history: HashMap<(Asset, Timeframe), VecDeque<f64>>,
+    /// Counter of window observations (NOT trades) — used for retraining trigger.
+    window_observations_count: usize,
 }
 
 impl V3Strategy {
@@ -168,6 +170,7 @@ impl V3Strategy {
             pending_windows: HashMap::new(),
             window_history: HashMap::new(),
             volume_history: HashMap::new(),
+            window_observations_count: 0,
         };
 
         // Auto-train models on startup if we have enough samples
@@ -271,9 +274,11 @@ impl V3Strategy {
                     obs.price_at_open,
                     current_btc_price,
                 );
+                self.window_observations_count += 1;
                 info!(
-                    "📊 Window observation added to dataset: {} samples total",
-                    self.dataset.len()
+                    "📊 Window observation added to dataset: {} samples total ({} windows recorded)",
+                    self.dataset.len(),
+                    self.window_observations_count
                 );
                 // Auto-save every 10 new observations (reuses trade-save interval logic)
                 if self.dataset.len() % 10 == 0 {

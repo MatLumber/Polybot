@@ -31,7 +31,7 @@ ml_engine:
   
   # Training
   retrain_interval_trades: 50
-  min_samples_for_training: 30
+  min_samples_for_training: 20
   
   # Ensemble weights (must sum to 1.0)
   random_forest_weight: 0.40

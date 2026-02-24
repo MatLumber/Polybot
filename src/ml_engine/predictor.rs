@@ -22,6 +22,7 @@ pub struct MLStrategyPredictor {
     state: MLEngineState,
     dataset: Dataset,
     trades_since_retrain: usize,
+    window_observations_since_retrain: usize,
 }
 
 impl MLStrategyPredictor {
@@ -37,6 +38,7 @@ impl MLStrategyPredictor {
             state,
             dataset: Dataset::new(),
             trades_since_retrain: 0,
+            window_observations_since_retrain: 0,
         }
     }
 
