@@ -17,6 +17,24 @@ use std::collections::HashMap;
 use std::path::Path;
 use tracing::{error, info, warn};
 
+/// One observed market window, used to record ground-truth BTC direction
+/// at window close regardless of whether a trade was entered.
+#[derive(Debug, Clone)]
+struct WindowObservation {
+    /// ML feature vector captured at the first signal evaluation of this window
+    features: MLFeatureVector,
+    /// BTC price at the first tick of this window (approximates the market-open price)
+    price_at_open: f64,
+    /// Timestamp when this window closes (ms)
+    close_ts: i64,
+    /// Asset
+    asset: Asset,
+    /// Timeframe
+    timeframe: Timeframe,
+    /// Window open timestamp (ms) – used as the sample timestamp
+    open_ts: i64,
+}
+
 /// ML-Powered Trading Strategy (V3)
 pub struct V3Strategy {
     /// ML Engine configuration
@@ -41,6 +59,10 @@ pub struct V3Strategy {
     dataset: Dataset,
     /// Persistence manager
     persistence: MLPersistenceManager,
+    /// Pending window observations keyed by (asset, timeframe, window_open_ts).
+    /// Captures one feature snapshot per market window so the ML can learn from
+    /// EVERY window outcome — not just windows where a trade was executed.
+    pending_windows: HashMap<(Asset, Timeframe, i64), WindowObservation>,
 }
 
 impl V3Strategy {
@@ -136,6 +158,7 @@ impl V3Strategy {
             last_filter_reason: None,
             dataset,
             persistence,
+            pending_windows: HashMap::new(),
         };
 
         // Auto-train models on startup if we have enough samples
@@ -179,6 +202,70 @@ impl V3Strategy {
 
         // Compute ML feature vector
         let ml_features = self.feature_engine.compute(features, &context);
+
+        // === WINDOW OBSERVATION TRACKING ===
+        // Record one ML feature snapshot per market window (regardless of whether a trade
+        // is entered). When the window closes we learn the final BTC direction and add it
+        // to the training dataset. This lets the ML learn from ALL market states, including
+        // bearish indicator states where the edge-filter would block a real trade.
+        let (win_open_ts, win_close_ts) = Self::window_boundaries(features.ts, timeframe);
+        let win_key = (asset, timeframe, win_open_ts);
+
+        // 1. Finalize any windows that have already closed (use current price as proxy for
+        //    the window-close BTC price — this is accurate to within one tick, ~1 second).
+        let current_btc_price = features.close;
+        let now_ts = features.ts;
+        let expired_keys: Vec<_> = self
+            .pending_windows
+            .iter()
+            .filter(|(_, obs)| now_ts >= obs.close_ts)
+            .map(|(k, _)| *k)
+            .collect();
+        for key in expired_keys {
+            if let Some(obs) = self.pending_windows.remove(&key) {
+                let target = if current_btc_price >= obs.price_at_open { 1.0 } else { 0.0 };
+                let direction_label = if target > 0.5 { "UP" } else { "DOWN" };
+                info!(
+                    asset = ?obs.asset,
+                    timeframe = ?obs.timeframe,
+                    price_open = obs.price_at_open,
+                    price_close = current_btc_price,
+                    outcome = direction_label,
+                    dataset_before = self.dataset.len(),
+                    "🪟 Window closed — recording ground-truth observation"
+                );
+                self.dataset.add_window_observation(
+                    obs.features,
+                    target,
+                    obs.open_ts,
+                    obs.asset,
+                    obs.timeframe,
+                    obs.price_at_open,
+                    current_btc_price,
+                );
+                info!(
+                    "📊 Window observation added to dataset: {} samples total",
+                    self.dataset.len()
+                );
+                // Auto-save every 10 new observations (reuses trade-save interval logic)
+                if self.dataset.len() % 10 == 0 {
+                    if let Err(e) = self.dataset.save(&format!("{}/ml_engine/dataset.json", "./data")) {
+                        warn!("Failed to auto-save dataset after window observation: {}", e);
+                    }
+                }
+            }
+        }
+
+        // 2. Register this window if we haven't seen it yet (one snapshot per window).
+        self.pending_windows.entry(win_key).or_insert_with(|| WindowObservation {
+            features: ml_features.clone(),
+            price_at_open: current_btc_price,
+            close_ts: win_close_ts,
+            asset,
+            timeframe,
+            open_ts: win_open_ts,
+        });
+        // === END WINDOW OBSERVATION TRACKING ===
 
         // Apply smart filters first
         let filter_context = FilterContext {
@@ -901,6 +988,17 @@ impl V3Strategy {
             previous_size,
             self.dataset.len()
         );
+    }
+
+    /// Compute the [open_ts, close_ts) window boundaries for a given tick timestamp.
+    /// Uses simple time-grid alignment (floor to nearest 15m or 1h boundary).
+    fn window_boundaries(ts_ms: i64, timeframe: Timeframe) -> (i64, i64) {
+        let window_ms = match timeframe {
+            Timeframe::Min15 => 15 * 60 * 1000,
+            Timeframe::Hour1 => 60 * 60 * 1000,
+        };
+        let open = (ts_ms / window_ms) * window_ms;
+        (open, open + window_ms)
     }
 
     /// Obtener estadísticas del dataset

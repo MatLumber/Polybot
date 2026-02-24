@@ -149,6 +149,41 @@ impl Dataset {
         });
     }
 
+    /// Add a window observation: market features at signal-evaluation time + final BTC direction.
+    /// Used to record outcomes from windows where no trade was executed (or to record the
+    /// true final window outcome for early-exit trades).
+    /// target = 1.0 if BTC closed above window_open_price, 0.0 if it closed below.
+    pub fn add_window_observation(
+        &mut self,
+        features: MLFeatureVector,
+        target: f64,
+        timestamp: i64,
+        asset: Asset,
+        timeframe: Timeframe,
+        price_at_open: f64,
+        price_at_close: f64,
+    ) {
+        self.samples.push(LabeledSample {
+            features,
+            target,
+            timestamp,
+            asset,
+            timeframe,
+            metadata: SampleMetadata {
+                entry_price: price_at_open,
+                exit_price: price_at_close,
+                actual_return: if price_at_open > 0.0 {
+                    (price_at_close - price_at_open) / price_at_open
+                } else {
+                    0.0
+                },
+                pnl: 0.0,
+                indicators_used: vec!["window_observation".to_string()],
+                old_confidence: 0.0,
+            },
+        });
+    }
+
     /// Tamaño del dataset
     pub fn len(&self) -> usize {
         self.samples.len()
