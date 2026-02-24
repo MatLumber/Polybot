@@ -237,6 +237,8 @@ pub struct MLConfig {
     pub model_type: String,
     /// Retrain interval (number of trades)
     pub retrain_interval_trades: usize,
+    /// Retrain interval (number of window observations)
+    pub retrain_interval_window_observations: usize,
     /// Minimum samples required for training
     pub min_samples_for_training: usize,
     /// Use microstructure features
@@ -265,6 +267,7 @@ impl Default for MLConfig {
             enabled: true,
             model_type: "ensemble".to_string(),
             retrain_interval_trades: 50,
+            retrain_interval_window_observations: 100,
             min_samples_for_training: 20,
             use_microstructure: true,
             use_temporal_patterns: true,
@@ -381,6 +384,7 @@ impl AppConfig {
             .set_default("ml_engine.enabled", true)?
             .set_default("ml_engine.model_type", "ensemble")?
             .set_default("ml_engine.retrain_interval_trades", 50)?
+            .set_default("ml_engine.retrain_interval_window_observations", 100)?
             .set_default("ml_engine.min_samples_for_training", 20)?
             .set_default("ml_engine.use_microstructure", true)?
             .set_default("ml_engine.use_temporal_patterns", true)?

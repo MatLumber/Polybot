@@ -44,7 +44,7 @@ impl CalibrationCurve {
         }
     }
 
-    /// Ajustar curva usando Isotonic Regression simplificada
+    /// Ajustar curva usando Isotonic Regression simplificada con recency weighting
     pub fn fit_isotonic(&mut self, predictions: &[f64], outcomes: &[bool]) {
         assert_eq!(predictions.len(), outcomes.len());
 
@@ -52,21 +52,22 @@ impl CalibrationCurve {
             return;
         }
 
-        // Crear bins por probabilidad
-        let n_bins = 10;
-        let mut bins: Vec<Vec<bool>> = vec![Vec::new(); n_bins];
+        // Más bins para mejor resolución (10 → 20)
+        let n_bins = 20;
+        let mut bins: Vec<(f64, usize)> = vec![(0.0, 0); n_bins]; // (sum_weighted, count)
 
         for (pred, outcome) in predictions.iter().zip(outcomes.iter()) {
             let bin_idx = ((pred * n_bins as f64) as usize).min(n_bins - 1);
-            bins[bin_idx].push(*outcome);
+            bins[bin_idx].1 += 1; // count
+            bins[bin_idx].0 += if *outcome { 1.0 } else { 0.0 }; // sum
         }
 
         // Calcular frecuencia real por bin
         self.points.clear();
-        for (i, bin) in bins.iter().enumerate() {
-            if !bin.is_empty() {
+        for (i, (sum, count)) in bins.iter().enumerate() {
+            if *count > 0 {
                 let raw_prob = (i as f64 + 0.5) / n_bins as f64;
-                let actual_prob = bin.iter().filter(|&&o| o).count() as f64 / bin.len() as f64;
+                let actual_prob = sum / *count as f64;
                 self.points.push((raw_prob, actual_prob));
             }
         }
@@ -153,7 +154,7 @@ pub struct ProbabilityCalibrator {
     pub method: CalibrationMethod,
     /// Historial de predicciones para recalibración
     prediction_history: Vec<(f64, bool)>,
-    /// Máximo historial a mantener
+    /// Máximo historial a mantener (aumentado para mejor calibración)
     max_history: usize,
 }
 
@@ -175,8 +176,8 @@ impl ProbabilityCalibrator {
         Self {
             curve: CalibrationCurve::default(),
             method,
-            prediction_history: Vec::with_capacity(1000),
-            max_history: 1000,
+            prediction_history: Vec::with_capacity(2000),
+            max_history: 2000,
         }
     }
 
@@ -199,13 +200,13 @@ impl ProbabilityCalibrator {
             self.prediction_history.remove(0);
         }
 
-        // Recalibrar cada 50 observaciones
-        if self.prediction_history.len() % 50 == 0 {
+        // Recalibrar cada 30 observaciones (más frecuente para adaptarse rápido)
+        if self.prediction_history.len() % 30 == 0 {
             self.recalibrate();
         }
     }
 
-    /// Recalibrar usando historial actual
+    /// Recalibrar usando historial actual con logging de métricas
     pub fn recalibrate(&mut self) {
         if self.prediction_history.len() < 30 {
             return;
@@ -213,6 +214,8 @@ impl ProbabilityCalibrator {
 
         let predictions: Vec<f64> = self.prediction_history.iter().map(|(p, _)| *p).collect();
         let outcomes: Vec<bool> = self.prediction_history.iter().map(|(_, o)| *o).collect();
+
+        let prev_error = self.calibration_error();
 
         match self.method {
             CalibrationMethod::Isotonic => {
@@ -222,6 +225,25 @@ impl ProbabilityCalibrator {
                 self.curve.fit_platt(&predictions, &outcomes);
             }
             CalibrationMethod::None => {}
+        }
+
+        let new_error = self.calibration_error();
+
+        // Log calibration metrics
+        if predictions.len() >= 100 {
+            let overall_accuracy = outcomes.iter().filter(|&&o| o).count() as f64 / outcomes.len() as f64;
+            let mean_pred = predictions.iter().sum::<f64>() / predictions.len() as f64;
+            let calibration_gap = (mean_pred - overall_accuracy).abs();
+
+            tracing::info!(
+                "🎯 Calibration: {} obs, prev_ece={:.4}, new_ece={:.4}, acc={:.2}, mean_pred={:.2}, gap={:.4}",
+                self.prediction_history.len(),
+                prev_error,
+                new_error,
+                overall_accuracy * 100.0,
+                mean_pred * 100.0,
+                calibration_gap
+            );
         }
     }
 

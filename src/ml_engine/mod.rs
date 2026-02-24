@@ -80,6 +80,7 @@ pub struct EnsembleConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrainingConfig {
     pub retrain_interval_trades: usize,
+    pub retrain_interval_window_observations: usize,
     pub min_samples_for_training: usize,
     pub walk_forward_train_days: i64,
     pub walk_forward_test_days: i64,
@@ -118,7 +119,8 @@ impl Default for MLEngineConfig {
             },
             training: TrainingConfig {
                 retrain_interval_trades: 50,
-                min_samples_for_training: 30,
+                retrain_interval_window_observations: 100,
+                min_samples_for_training: 20,
                 walk_forward_train_days: 30,
                 walk_forward_test_days: 7,
                 early_stopping_patience: 10,

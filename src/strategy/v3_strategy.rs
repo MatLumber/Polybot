@@ -286,6 +286,18 @@ impl V3Strategy {
                         warn!("Failed to auto-save dataset after window observation: {}", e);
                     }
                 }
+                // Check if we need to retrain based on window observations
+                if self.window_observations_count % self.config.training.retrain_interval_window_observations == 0
+                    && self.dataset.len() >= self.config.training.min_samples_for_training
+                {
+                    info!(
+                        "🔄 Retraining after {} window observations...",
+                        self.window_observations_count
+                    );
+                    if let Err(e) = self.train_initial_model(vec![]) {
+                        warn!("⚠️ Retraining after window observations failed: {}", e);
+                    }
+                }
             }
         }
 

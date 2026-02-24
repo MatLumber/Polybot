@@ -43,6 +43,7 @@ impl MLConfigConvertible for MLConfig {
             },
             training: TrainingConfig {
                 retrain_interval_trades: self.retrain_interval_trades,
+                retrain_interval_window_observations: self.retrain_interval_window_observations,
                 min_samples_for_training: self.min_samples_for_training,
                 walk_forward_train_days: 30, // Default
                 walk_forward_test_days: 7,   // Default
