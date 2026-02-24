@@ -716,6 +716,13 @@ impl V3Strategy {
             return Ok(());
         }
 
+        // Crear predictor si aún no existe (caso de full reset)
+        if self.predictor.is_none() && self.config.enabled {
+            info!("🆕 Creating new predictor (no persisted state found)");
+            let weights = crate::ml_engine::models::EnsembleWeights::from_config(&self.config.ensemble);
+            self.predictor = Some(crate::ml_engine::models::MLPredictor::new(weights));
+        }
+
         // Crear copia balanceada para entrenamiento
         let mut training_dataset = self.dataset.clone();
         training_dataset.balance_classes();
@@ -731,6 +738,8 @@ impl V3Strategy {
                 training_dataset.len(),
                 predictor.ensemble_accuracy() * 100.0
             );
+        } else {
+            warn!("⚠️ Predictor is None, cannot train. ML may be disabled.");
         }
 
         // Run walk-forward validation
