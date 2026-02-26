@@ -189,6 +189,7 @@ fn create_trade_sample(
         exit_price: if is_win { 50500.0 } else { 49500.0 },
         pnl: if is_win { 50.0 } else { -50.0 },
         estimated_edge: weight,
+        predicted_prob_up: None,
         indicators_triggered: vec![indicator.to_string()],
     }
 }

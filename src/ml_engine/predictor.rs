@@ -237,16 +237,31 @@ impl MLStrategyPredictor {
         // Agregar al dataset
         self.dataset.add_trade(trade.clone());
 
-        // Actualizar calibrador
+        // Actualizar calibrador con la probabilidad ML (prob_up), no calibrator_confidence
         self.calibrator
-            .add_observation(trade.entry_features.calibrator_confidence, trade.is_win);
+            .add_observation(trade.predicted_prob_up.unwrap_or(0.5), trade.is_win);
 
         // Actualizar estadísticas
         self.state.add_prediction_result(trade.is_win);
 
-        // Actualizar predictor
+        // Actualizar predictor con la probabilidad ML real
         if let Some(ref mut predictor) = self.ml_predictor {
-            predictor.record_outcome(trade.entry_features.calibrator_confidence, trade.is_win);
+            predictor.record_outcome(trade.predicted_prob_up.unwrap_or(0.5), trade.is_win);
+        }
+
+        // Check for concept drift — if detected, force immediate retrain
+        if let Some(ref predictor) = self.ml_predictor {
+            if predictor.is_drift_detected() {
+                warn!(
+                    "⚠️ Concept drift detected! Rolling accuracy: {:.1}% vs baseline: {:.1}%. Forcing retrain.",
+                    predictor.recent_rolling_accuracy() * 100.0,
+                    predictor.drift_baseline_accuracy * 100.0
+                );
+                if let Err(e) = self.incremental_update() {
+                    warn!("Error in drift-triggered retrain: {}", e);
+                }
+                self.trades_since_retrain = 0;
+            }
         }
 
         // Verificar si necesitamos retraining

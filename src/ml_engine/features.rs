@@ -28,9 +28,11 @@ pub struct MLFeatureVector {
 
     /// Posición en Bollinger Bands (0 = lower, 0.5 = middle, 1 = upper)
     pub bb_position: f64,
-    /// Ancho de BB como % del precio
+
+    // Dead features kept for serde backward compat but excluded from ML vector
+    #[serde(default)]
     pub bb_width_pct: f64,
-    /// Squeeze intensity (1 = muy comprimido)
+    #[serde(default)]
     pub bb_squeeze: f64,
 
     /// ADX (0-100)
@@ -73,12 +75,12 @@ pub struct MLFeatureVector {
     /// Concentración de liquidez (0 = dispersa, 1 = concentrada)
     pub liquidity_concentration: f64,
 
-    /// Intensidad de trades (trades por minuto)
+    // Dead features kept for serde backward compat but excluded from ML vector
+    #[serde(default)]
     pub trade_intensity: f64,
-    /// Z-score de intensidad vs histórico
+    #[serde(default)]
     pub trade_intensity_zscore: f64,
-
-    /// Order flow imbalance (buy_vol - sell_vol) / total_vol
+    #[serde(default)]
     pub order_flow_imbalance: f64,
 
     // ============ Temporales ============
@@ -107,7 +109,8 @@ pub struct MLFeatureVector {
     /// Volatilidad en percentil histórico
     pub volatility_percentile: f64,
 
-    /// Cambio de correlación reciente
+    // Dead feature kept for serde backward compat but excluded from ML vector
+    #[serde(default)]
     pub correlation_change: f64,
 
     /// Sentimiento de mercado basado en order flow
@@ -163,6 +166,9 @@ pub struct MLFeatureVector {
 
 impl MLFeatureVector {
     /// Convertir a vector f64 para los modelos ML
+    /// NOTE: Dead features (bb_width_pct, bb_squeeze, trade_intensity,
+    /// trade_intensity_zscore, order_flow_imbalance, correlation_change)
+    /// are excluded — they were always 0.0 and added noise.
     pub fn to_vec(&self) -> Vec<f64> {
         vec![
             self.rsi,
@@ -173,8 +179,8 @@ impl MLFeatureVector {
             self.macd_histogram,
             self.macd_hist_slope,
             self.bb_position,
-            self.bb_width_pct,
-            self.bb_squeeze,
+            // bb_width_pct REMOVED (always 0)
+            // bb_squeeze REMOVED (always 0)
             self.adx,
             self.plus_di,
             self.minus_di,
@@ -191,9 +197,9 @@ impl MLFeatureVector {
             self.orderbook_imbalance,
             self.depth_top5,
             self.liquidity_concentration,
-            self.trade_intensity,
-            self.trade_intensity_zscore,
-            self.order_flow_imbalance,
+            // trade_intensity REMOVED (always 0)
+            // trade_intensity_zscore REMOVED (always 0)
+            // order_flow_imbalance REMOVED (always 0)
             self.minutes_to_close,
             self.window_progress,
             self.hour_of_day,
@@ -205,7 +211,7 @@ impl MLFeatureVector {
             self.market_regime,
             self.volatility_5m,
             self.volatility_percentile,
-            self.correlation_change,
+            // correlation_change REMOVED (always 0)
             self.market_sentiment,
             self.calibrator_confidence,
             self.num_indicators_agreeing,
@@ -218,7 +224,7 @@ impl MLFeatureVector {
             self.polymarket_price_momentum,
             self.polymarket_volume_24hr,
             self.polymarket_liquidity,
-            // Window History & Cross-TF (8 nuevos)
+            // Window History & Cross-TF (8)
             self.prev_window_dir_1,
             self.prev_window_dir_2,
             self.prev_window_dir_3,
@@ -230,8 +236,8 @@ impl MLFeatureVector {
         ]
     }
 
-    /// Número total de features
-    pub const NUM_FEATURES: usize = 61;
+    /// Número total de features (61 - 6 dead = 55)
+    pub const NUM_FEATURES: usize = 55;
 
     /// Nombres de las features (para importancia)
     pub fn feature_names() -> Vec<&'static str> {
@@ -244,8 +250,6 @@ impl MLFeatureVector {
             "macd_histogram",
             "macd_hist_slope",
             "bb_position",
-            "bb_width_pct",
-            "bb_squeeze",
             "adx",
             "plus_di",
             "minus_di",
@@ -262,9 +266,6 @@ impl MLFeatureVector {
             "orderbook_imbalance",
             "depth_top5",
             "liquidity_concentration",
-            "trade_intensity",
-            "trade_intensity_zscore",
-            "order_flow_imbalance",
             "minutes_to_close",
             "window_progress",
             "hour_of_day",
@@ -276,7 +277,6 @@ impl MLFeatureVector {
             "market_regime",
             "volatility_5m",
             "volatility_percentile",
-            "correlation_change",
             "market_sentiment",
             "calibrator_confidence",
             "num_indicators_agreeing",
@@ -312,8 +312,6 @@ pub struct FeatureEngine {
     spread_history: Vec<f64>,
     /// Estadísticas de volatilidad
     volatility_history: Vec<f64>,
-    /// Estadísticas de intensidad de trades
-    intensity_history: Vec<f64>,
 }
 
 impl FeatureEngine {
@@ -323,7 +321,6 @@ impl FeatureEngine {
             max_history: 100,
             spread_history: Vec::with_capacity(1000),
             volatility_history: Vec::with_capacity(1000),
-            intensity_history: Vec::with_capacity(1000),
         }
     }
 
@@ -334,7 +331,6 @@ impl FeatureEngine {
         // ============ Técnicos Básicos ============
         ml_features.rsi = features.rsi.unwrap_or(50.0);
         ml_features.rsi_normalized = (ml_features.rsi - 50.0) / 50.0;
-        // TODO: Calcular divergencia RSI
 
         ml_features.macd = features.macd.unwrap_or(0.0);
         ml_features.macd_signal = features.macd_signal.unwrap_or(0.0);
@@ -342,8 +338,7 @@ impl FeatureEngine {
         ml_features.macd_hist_slope = self.calculate_macd_slope();
 
         ml_features.bb_position = features.bb_position.unwrap_or(0.5);
-        ml_features.bb_width_pct = self.calculate_bb_width(features);
-        ml_features.bb_squeeze = self.calculate_bb_squeeze(features);
+        // bb_width_pct and bb_squeeze removed (were always 0)
 
         ml_features.adx = features.adx.unwrap_or(0.0);
         ml_features.plus_di = features.plus_di.unwrap_or(0.0);
@@ -377,10 +372,7 @@ impl FeatureEngine {
         ml_features.orderbook_imbalance = features.orderbook_imbalance.unwrap_or(0.0);
         ml_features.depth_top5 = features.orderbook_depth_top5.unwrap_or(0.0);
         ml_features.liquidity_concentration = self.calculate_liquidity_concentration(features);
-
-        ml_features.trade_intensity = 0.0; // Simplificado
-        ml_features.trade_intensity_zscore = 0.0;
-        ml_features.order_flow_imbalance = self.calculate_order_flow_imbalance(features);
+        // trade_intensity, trade_intensity_zscore, order_flow_imbalance removed (were always 0)
 
         // ============ Temporales ============
         ml_features.minutes_to_close = context.minutes_to_close;
@@ -401,8 +393,7 @@ impl FeatureEngine {
         ml_features.volatility_5m = features.volatility.unwrap_or(0.0);
         ml_features.volatility_percentile =
             self.calculate_volatility_percentile(ml_features.volatility_5m);
-
-        ml_features.correlation_change = self.calculate_correlation_change();
+        // correlation_change removed (was always 0)
         ml_features.market_sentiment = self.calculate_market_sentiment(features);
 
         // ============ Calibrador ============
@@ -446,7 +437,6 @@ impl FeatureEngine {
         ml_features
     }
 
-    // Métodos helper (simplificados - implementación completa después)
     fn calculate_macd_slope(&self) -> f64 {
         if self.feature_history.len() < 2 {
             return 0.0;
@@ -454,16 +444,6 @@ impl FeatureEngine {
         let last = &self.feature_history.last().unwrap().1;
         let prev = &self.feature_history[self.feature_history.len() - 2].1;
         last.macd_histogram - prev.macd_histogram
-    }
-
-    fn calculate_bb_width(&self, _features: &Features) -> f64 {
-        // TODO: Implementar
-        0.0
-    }
-
-    fn calculate_bb_squeeze(&self, _features: &Features) -> f64 {
-        // TODO: Implementar
-        0.0
     }
 
     fn calculate_momentum_2nd_order(&self) -> f64 {
@@ -505,38 +485,11 @@ impl FeatureEngine {
     }
 
     fn calculate_liquidity_concentration(&self, features: &Features) -> f64 {
-        // Ratio entre top 3 niveles y top 10 niveles
-        // Mayor = más concentrado
-        // Simplificado
         if let Some(depth) = features.orderbook_depth_top5 {
             (depth / 1000.0).min(1.0)
         } else {
             0.5
         }
-    }
-
-    fn calculate_intensity_zscore(&self, intensity: f64) -> f64 {
-        if self.intensity_history.len() < 10 {
-            return 0.0;
-        }
-        let mean = self.intensity_history.iter().sum::<f64>() / self.intensity_history.len() as f64;
-        let variance = self
-            .intensity_history
-            .iter()
-            .map(|&x| (x - mean).powi(2))
-            .sum::<f64>()
-            / self.intensity_history.len() as f64;
-        let std = variance.sqrt();
-        if std > 0.0 {
-            (intensity - mean) / std
-        } else {
-            0.0
-        }
-    }
-
-    fn calculate_order_flow_imbalance(&self, _features: &Features) -> f64 {
-        // TODO: Implementar con datos reales de order flow
-        0.0
     }
 
     fn calculate_volatility_percentile(&self, vol: f64) -> f64 {
@@ -547,13 +500,7 @@ impl FeatureEngine {
         count_below as f64 / self.volatility_history.len() as f64
     }
 
-    fn calculate_correlation_change(&self) -> f64 {
-        // Obsolete function since correlation removal, temporarily hardcoded
-        0.0
-    }
-
     fn calculate_market_sentiment(&self, features: &Features) -> f64 {
-        // Combinar order flow y orderbook imbalance
         features.orderbook_imbalance.unwrap_or(0.0)
     }
 }

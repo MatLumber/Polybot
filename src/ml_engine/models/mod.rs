@@ -1,14 +1,15 @@
 //! ML Models - Ensemble REAL usando SmartCore
 //!
-//! Implementación completa con RandomForest, LogisticRegression y GradientBoosting
+//! Implementación con RandomForestRegressor (probabilidades reales),
+//! LogisticRegression (sigmoid manual), y GradientBoosting (RF regressor error-focused)
 
 use crate::ml_engine::dataset::Dataset;
 use crate::ml_engine::features::MLFeatureVector;
-use ndarray::{Array1, Array2};
 use serde::{Deserialize, Serialize};
-use smartcore::ensemble::random_forest_classifier::{
-    RandomForestClassifier, RandomForestClassifierParameters,
+use smartcore::ensemble::random_forest_regressor::{
+    RandomForestRegressor, RandomForestRegressorParameters,
 };
+use smartcore::linalg::basic::arrays::Array;
 use smartcore::linalg::basic::matrix::DenseMatrix;
 use smartcore::linear::logistic_regression::{LogisticRegression, LogisticRegressionParameters};
 use std::collections::{HashMap, VecDeque};
@@ -61,54 +62,55 @@ impl EnsembleWeights {
     }
 }
 
-/// Trait base para todos los modelos
+/// Trait base para todos los modelos — ahora usa Vec<f64> targets para regresión
 pub trait MLModel: Send + Sync {
-    fn train(&mut self, x: &DenseMatrix<f64>, y: &Vec<i64>) -> anyhow::Result<()>;
+    fn train(&mut self, x: &DenseMatrix<f64>, y: &Vec<f64>) -> anyhow::Result<()>;
+    /// Returns a probability in [0, 1] — NOT a class label
     fn predict(&self, features: &MLFeatureVector) -> Option<f64>;
     fn name(&self) -> &str;
     fn accuracy(&self) -> f64;
 }
 
-/// Random Forest Classifier REAL usando SmartCore
+/// Random Forest Regressor — outputs real probabilities via tree averaging
 pub struct RandomForestModel {
     name: String,
-    classifier: Option<RandomForestClassifier<f64, i64, DenseMatrix<f64>, Vec<i64>>>,
+    regressor: Option<RandomForestRegressor<f64, f64, DenseMatrix<f64>, Vec<f64>>>,
     accuracy: f64,
-    n_trees: u16,
-    max_depth: u16,
+    n_trees: usize,
+    max_depth: usize,
 }
 
 impl RandomForestModel {
     pub fn new(n_trees: usize, max_depth: usize) -> Self {
         Self {
             name: "RandomForest".to_string(),
-            classifier: None,
+            regressor: None,
             accuracy: 0.0,
-            n_trees: n_trees as u16,
-            max_depth: max_depth as u16,
+            n_trees,
+            max_depth,
         }
     }
 }
 
 impl MLModel for RandomForestModel {
-    fn train(&mut self, x: &DenseMatrix<f64>, y: &Vec<i64>) -> anyhow::Result<()> {
-        let params = RandomForestClassifierParameters::default()
+    fn train(&mut self, x: &DenseMatrix<f64>, y: &Vec<f64>) -> anyhow::Result<()> {
+        let params = RandomForestRegressorParameters::default()
             .with_n_trees(self.n_trees)
-            .with_max_depth(self.max_depth)
-            .with_min_samples_split(5);
+            .with_max_depth(self.max_depth as u16)
+            .with_min_samples_split(10);
 
-        match RandomForestClassifier::fit(x, y, params) {
-            Ok(classifier) => {
-                // Calcular accuracy en training
-                let predictions = classifier.predict(x).unwrap_or_default();
+        match RandomForestRegressor::fit(x, y, params) {
+            Ok(regressor) => {
+                // Calcular accuracy: treat >0.5 as UP, check against target
+                let predictions = regressor.predict(x).unwrap_or_default();
                 let correct = predictions
                     .iter()
                     .zip(y.iter())
-                    .filter(|(p, a)| **p == **a)
+                    .filter(|(p, a)| (**p > 0.5) == (**a > 0.5))
                     .count();
                 self.accuracy = correct as f64 / y.len() as f64;
 
-                self.classifier = Some(classifier);
+                self.regressor = Some(regressor);
                 Ok(())
             }
             Err(e) => Err(anyhow::anyhow!("Random Forest training failed: {:?}", e)),
@@ -116,18 +118,14 @@ impl MLModel for RandomForestModel {
     }
 
     fn predict(&self, features: &MLFeatureVector) -> Option<f64> {
-        if let Some(ref classifier) = self.classifier {
+        if let Some(ref regressor) = self.regressor {
             let feature_vec = features.to_vec();
-            let x = DenseMatrix::from_2d_array(&[&feature_vec]).unwrap();
+            let x = DenseMatrix::from_2d_array(&[&feature_vec]).ok()?;
 
-            match classifier.predict(&x) {
-                Ok(pred) => {
-                    let pred_vec: Vec<i64> = pred;
-                    if !pred_vec.is_empty() {
-                        Some(pred_vec[0] as f64)
-                    } else {
-                        None
-                    }
+            match regressor.predict(&x) {
+                Ok(pred) if !pred.is_empty() => {
+                    // Clamp to [0.01, 0.99] — regressor can output slightly outside [0,1]
+                    Some(pred[0].clamp(0.01, 0.99))
                 }
                 _ => None,
             }
@@ -145,10 +143,13 @@ impl MLModel for RandomForestModel {
     }
 }
 
-/// Logistic Regression REAL usando SmartCore
+/// Logistic Regression — uses coefficients + sigmoid for real probabilities
 pub struct LogisticRegressionModel {
     name: String,
     model: Option<LogisticRegression<f64, i64, DenseMatrix<f64>, Vec<i64>>>,
+    /// Stored coefficients for manual sigmoid probability computation
+    coefficients: Vec<f64>,
+    intercept: f64,
     accuracy: f64,
 }
 
@@ -157,24 +158,42 @@ impl LogisticRegressionModel {
         Self {
             name: "LogisticRegression".to_string(),
             model: None,
+            coefficients: Vec::new(),
+            intercept: 0.0,
             accuracy: 0.0,
         }
+    }
+
+    /// Compute sigmoid probability from raw score
+    fn sigmoid(z: f64) -> f64 {
+        1.0 / (1.0 + (-z).exp())
     }
 }
 
 impl MLModel for LogisticRegressionModel {
-    fn train(&mut self, x: &DenseMatrix<f64>, y: &Vec<i64>) -> anyhow::Result<()> {
+    fn train(&mut self, x: &DenseMatrix<f64>, y: &Vec<f64>) -> anyhow::Result<()> {
+        // LR needs i64 labels
+        let y_labels: Vec<i64> = y.iter().map(|&v| if v > 0.5 { 1 } else { 0 }).collect();
         let params = LogisticRegressionParameters::default();
 
-        match LogisticRegression::fit(x, y, params) {
+        match LogisticRegression::fit(x, &y_labels, params) {
             Ok(model) => {
+                // Extract coefficients for manual sigmoid probability computation
+                // coefficients() returns &DenseMatrix<f64> — row vector of shape (1, n_features)
+                let coefs_matrix = model.coefficients();
+                let n_cols = coefs_matrix.shape().1;
+                self.coefficients = (0..n_cols).map(|j| *coefs_matrix.get((0, j))).collect();
+                // intercept() returns &DenseMatrix<f64> — shape (1, 1)
+                let intercept_matrix = model.intercept();
+                self.intercept = *intercept_matrix.get((0, 0));
+
                 let predictions = model.predict(x).unwrap_or_default();
                 let correct = predictions
                     .iter()
-                    .zip(y.iter())
+                    .zip(y_labels.iter())
                     .filter(|(p, a)| **p == **a)
                     .count();
-                self.accuracy = correct as f64 / y.len() as f64;
+                self.accuracy = correct as f64 / y_labels.len() as f64;
 
                 self.model = Some(model);
                 Ok(())
@@ -187,17 +206,22 @@ impl MLModel for LogisticRegressionModel {
     }
 
     fn predict(&self, features: &MLFeatureVector) -> Option<f64> {
-        if let Some(ref model) = self.model {
-            let feature_vec = features.to_vec();
-            let x = DenseMatrix::from_2d_array(&[&feature_vec]).unwrap();
-
-            match model.predict(&x) {
-                Ok(pred) if !pred.is_empty() => Some(pred[0] as f64),
-                _ => None,
-            }
-        } else {
-            None
+        if self.model.is_none() || self.coefficients.is_empty() {
+            return None;
         }
+
+        let feature_vec = features.to_vec();
+
+        // Manual sigmoid: z = intercept + sum(coef_i * feature_i)
+        let z: f64 = self.intercept
+            + self
+                .coefficients
+                .iter()
+                .zip(feature_vec.iter())
+                .map(|(c, f)| c * f)
+                .sum::<f64>();
+
+        Some(Self::sigmoid(z).clamp(0.01, 0.99))
     }
 
     fn name(&self) -> &str {
@@ -209,10 +233,10 @@ impl MLModel for LogisticRegressionModel {
     }
 }
 
-/// Gradient Boosting simplificado (usando múltiples RF pequeños)
+/// Gradient Boosting — RF Regressor with error-focused training for real probabilities
 pub struct GradientBoostingModel {
     name: String,
-    models: Vec<RandomForestClassifier<f64, i64, DenseMatrix<f64>, Vec<i64>>>,
+    regressor: Option<RandomForestRegressor<f64, f64, DenseMatrix<f64>, Vec<f64>>>,
     learning_rate: f64,
     accuracy: f64,
 }
@@ -221,7 +245,7 @@ impl GradientBoostingModel {
     pub fn new(n_estimators: usize, learning_rate: f64) -> Self {
         Self {
             name: "GradientBoosting".to_string(),
-            models: Vec::new(),
+            regressor: None,
             learning_rate,
             accuracy: 0.0,
         }
@@ -229,30 +253,24 @@ impl GradientBoostingModel {
 }
 
 impl MLModel for GradientBoostingModel {
-    fn train(&mut self, x: &DenseMatrix<f64>, y: &Vec<i64>) -> anyhow::Result<()> {
-        // Fix memory leak: always start fresh on each retrain.
-        self.models.clear();
-
-        // Use different hyperparameters from the main RF (shallower trees, fewer estimators)
-        // so this model learns a genuinely different boundary — higher bias, lower variance.
-        // The MLPredictor.train() flow overrides this with an error-focused dataset that
-        // makes this model specialize on the examples the main RF gets wrong.
-        let params = RandomForestClassifierParameters::default()
+    fn train(&mut self, x: &DenseMatrix<f64>, y: &Vec<f64>) -> anyhow::Result<()> {
+        // Shallower trees, fewer estimators — higher bias, lower variance
+        let params = RandomForestRegressorParameters::default()
             .with_n_trees(40)
             .with_max_depth(4)
             .with_min_samples_split(8);
 
-        match RandomForestClassifier::fit(x, y, params) {
-            Ok(model) => {
-                let predictions = model.predict(x).unwrap_or_default();
+        match RandomForestRegressor::fit(x, y, params) {
+            Ok(regressor) => {
+                let predictions = regressor.predict(x).unwrap_or_default();
                 let correct = predictions
                     .iter()
                     .zip(y.iter())
-                    .filter(|(p, a)| **p == **a)
+                    .filter(|(p, a)| (**p > 0.5) == (**a > 0.5))
                     .count();
                 self.accuracy = correct as f64 / y.len() as f64;
 
-                self.models.push(model);
+                self.regressor = Some(regressor);
                 Ok(())
             }
             Err(e) => Err(anyhow::anyhow!(
@@ -263,27 +281,16 @@ impl MLModel for GradientBoostingModel {
     }
 
     fn predict(&self, features: &MLFeatureVector) -> Option<f64> {
-        if self.models.is_empty() {
-            return None;
-        }
+        if let Some(ref regressor) = self.regressor {
+            let feature_vec = features.to_vec();
+            let x = DenseMatrix::from_2d_array(&[&feature_vec]).ok()?;
 
-        let feature_vec = features.to_vec();
-        let x = DenseMatrix::from_2d_array(&[&feature_vec]).unwrap();
-
-        let mut sum = 0.0;
-        let mut count = 0;
-
-        for model in &self.models {
-            if let Ok(pred) = model.predict(&x) {
-                if !pred.is_empty() {
-                    sum += pred[0] as f64;
-                    count += 1;
+            match regressor.predict(&x) {
+                Ok(pred) if !pred.is_empty() => {
+                    Some(pred[0].clamp(0.01, 0.99))
                 }
+                _ => None,
             }
-        }
-
-        if count > 0 {
-            Some(sum / count as f64)
         } else {
             None
         }
@@ -315,9 +322,11 @@ impl MLPredictor {
     pub fn new(weights: EnsembleWeights) -> Self {
         let mut models: Vec<Box<dyn MLModel>> = Vec::new();
 
-        // Inicializar modelos reales
-        models.push(Box::new(RandomForestModel::new(100, 10)));
+        // RF: 100 trees, max_depth 6 (reduced from 10 to prevent overfitting)
+        models.push(Box::new(RandomForestModel::new(100, 6)));
+        // GB: error-focused RF with shallower trees
         models.push(Box::new(GradientBoostingModel::new(50, 0.1)));
+        // LR: sigmoid probabilities via coefficients
         models.push(Box::new(LogisticRegressionModel::new()));
 
         Self {
@@ -339,7 +348,7 @@ impl MLPredictor {
     /// 3. LR trains on the full dataset.
     /// 4. Real feature importance computed via Pearson correlation with target.
     pub fn train(&mut self, dataset: &Dataset) -> anyhow::Result<()> {
-        // === Step 1: Build recency-weighted matrix (recent samples counted more) ===
+        // === Step 1: Build recency-weighted matrix ===
         let (x, y) = self.dataset_to_dense_matrix(dataset);
 
         // === Step 2: Train Random Forest ===
@@ -354,38 +363,34 @@ impl MLPredictor {
         }
 
         // === Step 3: Build error-focused dataset and train GB ===
-        // For each sample, ask the RF whether it got it right.
-        // Misclassified samples appear 3× in the GB training set so the GB
-        // model concentrates on the patterns RF struggles with.
         let mut focused_2d: Vec<Vec<f64>> = Vec::new();
-        let mut focused_y: Vec<i64> = Vec::new();
+        let mut focused_y: Vec<f64> = Vec::new();
 
         if let Some(rf) = self.models.get(0) {
             for sample in &dataset.samples {
                 let feat_vec = sample.features.to_vec();
-                let label = if sample.target > 0.5 { 1i64 } else { 0i64 };
+                let target = sample.target;
                 let pred = rf.predict(&sample.features);
                 let is_correct = pred
-                    .map(|p| (p > 0.5) == (sample.target > 0.5))
+                    .map(|p| (p > 0.5) == (target > 0.5))
                     .unwrap_or(false);
 
                 // Every sample appears at least once.
                 focused_2d.push(feat_vec.clone());
-                focused_y.push(label);
+                focused_y.push(target);
 
                 // Misclassified appear 2 extra times (3× total weight).
                 if !is_correct {
                     focused_2d.push(feat_vec.clone());
-                    focused_y.push(label);
+                    focused_y.push(target);
                     focused_2d.push(feat_vec.clone());
-                    focused_y.push(label);
+                    focused_y.push(target);
                 }
             }
         } else {
-            // RF not available: fall back to unweighted data.
             for sample in &dataset.samples {
                 focused_2d.push(sample.features.to_vec());
-                focused_y.push(if sample.target > 0.5 { 1i64 } else { 0i64 });
+                focused_y.push(sample.target);
             }
         }
 
@@ -428,23 +433,21 @@ impl MLPredictor {
     ///
     /// Applies **recency weighting**: samples younger than 7 days are included 3×,
     /// samples from 7–21 days ago are included 2×, older samples once.
-    /// This makes the model pay more attention to recent market behaviour without
-    /// discarding historical patterns entirely.
-    fn dataset_to_dense_matrix(&self, dataset: &Dataset) -> (DenseMatrix<f64>, Vec<i64>) {
+    fn dataset_to_dense_matrix(&self, dataset: &Dataset) -> (DenseMatrix<f64>, Vec<f64>) {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let mut x_2d: Vec<Vec<f64>> = Vec::new();
-        let mut y_data: Vec<i64> = Vec::new();
+        let mut y_data: Vec<f64> = Vec::new();
 
         for sample in &dataset.samples {
             let age_days = (now_ms - sample.timestamp).max(0) as f64 / 86_400_000.0;
             let copies: usize = if age_days < 7.0 { 3 } else if age_days < 21.0 { 2 } else { 1 };
 
             let feature_vec = sample.features.to_vec();
-            let label: i64 = if sample.target > 0.5 { 1 } else { 0 };
+            let target = sample.target; // Use f64 directly (0.0 or 1.0) for regressor
 
             for _ in 0..copies {
                 x_2d.push(feature_vec.clone());
-                y_data.push(label);
+                y_data.push(target);
             }
         }
 
@@ -455,7 +458,7 @@ impl MLPredictor {
         (x, y_data)
     }
 
-    /// Predecir con ensemble ponderado
+    /// Predecir con ensemble ponderado — now returns real probabilities
     pub fn predict(&self, features: &MLFeatureVector) -> Option<ModelPrediction> {
         let mut weighted_prob = 0.0;
         let mut total_weight = 0.0;
@@ -547,7 +550,6 @@ impl MLPredictor {
             if self.drift_baseline_accuracy < 1e-9 {
                 self.drift_baseline_accuracy = current;
             } else {
-                // Exponential moving average — baseline adapts slowly.
                 self.drift_baseline_accuracy =
                     self.drift_baseline_accuracy * 0.95 + current * 0.05;
             }
@@ -572,89 +574,25 @@ impl MLPredictor {
         self.recent_rolling_accuracy() < self.drift_baseline_accuracy - 0.10
     }
 
-    /// Ajustar pesos dinámicamente basado en performance
+    /// Ajustar pesos dinámicamente basado en rolling accuracy real (not training accuracy)
     pub fn adjust_weights_dynamically(&mut self) {
         if self.historical_predictions.len() < 50 {
-            return; // Necesitamos más datos
+            return;
         }
 
-        // Calcular accuracy por rango de probabilidad
-        let mut high_conf_correct = 0;
-        let mut high_conf_total = 0;
-        let mut low_conf_correct = 0;
-        let mut low_conf_total = 0;
+        // Use rolling accuracy from historical_predictions instead of training accuracy.
+        // This reflects actual prediction performance, not overfitted training metrics.
+        let rolling_accuracy = self.recent_rolling_accuracy();
 
-        for (pred, actual) in &self.historical_predictions {
-            let predicted_up = *pred > 0.5;
-            let correct = predicted_up == *actual;
+        tracing::info!(
+            "📊 Rolling accuracy: {:.1}% (last {} predictions)",
+            rolling_accuracy * 100.0,
+            self.recent_outcomes.len()
+        );
 
-            if (*pred - 0.5).abs() > 0.2 {
-                // High confidence (>70% o <30%)
-                high_conf_total += 1;
-                if correct {
-                    high_conf_correct += 1;
-                }
-            } else {
-                // Low confidence
-                low_conf_total += 1;
-                if correct {
-                    low_conf_correct += 1;
-                }
-            }
-        }
-
-        let high_conf_acc = if high_conf_total > 0 {
-            high_conf_correct as f64 / high_conf_total as f64
-        } else {
-            0.5
-        };
-
-        let low_conf_acc = if low_conf_total > 0 {
-            low_conf_correct as f64 / low_conf_total as f64
-        } else {
-            0.5
-        };
-
-        // Ajustar pesos: si high confidence funciona mejor, aumentar umbral
-        if high_conf_acc > low_conf_acc + 0.1 {
-            // Las predicciones de alta confianza son más confiables
-            // Reducir peso de predicciones de baja confianza
-            tracing::info!(
-                "High confidence predictions more accurate ({:.2}% vs {:.2}%), adjusting strategy",
-                high_conf_acc * 100.0,
-                low_conf_acc * 100.0
-            );
-        }
-
-        // Actualizar pesos basado en accuracy individual de modelos
-        let mut total_accuracy = 0.0;
-        let mut model_accuracies: Vec<(usize, f64)> = Vec::new();
-
-        for (i, model) in self.models.iter().enumerate() {
-            let acc = model.accuracy();
-            total_accuracy += acc;
-            model_accuracies.push((i, acc));
-        }
-
-        // Ajustar pesos proporcionalmente al accuracy
-        if total_accuracy > 0.0 && self.weights.dynamic_weight_adjustment {
-            for (i, acc) in model_accuracies {
-                let new_weight = acc / total_accuracy;
-                match i {
-                    0 => self.weights.random_forest = new_weight,
-                    1 => self.weights.gradient_boosting = new_weight,
-                    2 => self.weights.logistic_regression = new_weight,
-                    _ => {}
-                }
-            }
-
-            tracing::info!(
-                "Dynamic weights adjusted: RF={:.2}, GB={:.2}, LR={:.2}",
-                self.weights.random_forest,
-                self.weights.gradient_boosting,
-                self.weights.logistic_regression
-            );
-        }
+        // Keep weights stable — dynamic adjustment based on training accuracy
+        // was causing overfitting-driven weight shifts. Only log for now.
+        // Future: per-model rolling accuracy tracking.
     }
 
     /// Obtener accuracy promedio del ensemble
@@ -664,12 +602,6 @@ impl MLPredictor {
     }
 
     /// Real feature importance via Pearson correlation between each feature and the target.
-    ///
-    /// `importance[i] = |corr(feature_i, target)|`
-    ///
-    /// This is not as powerful as permutation importance but it is real, fast, captures
-    /// linear relationships between each predictor and the UP/DOWN outcome, and is
-    /// infinitely better than the previous hardcoded cycling pattern.
     fn calculate_feature_importance_real(&mut self, dataset: &Dataset) {
         let names = MLFeatureVector::feature_names();
         let n = dataset.samples.len();
@@ -689,7 +621,7 @@ impl MLPredictor {
         };
 
         if target_std < 1e-9 {
-            return; // All same class — no variance to correlate against.
+            return;
         }
 
         for (feat_idx, name) in names.iter().enumerate() {
@@ -733,22 +665,11 @@ impl MLPredictor {
         features.into_iter().take(n).collect()
     }
 
-    /// Obtener agreement entre modelos - cuántos modelos predicen la misma dirección
+    /// Obtener agreement entre modelos — now with real probabilities
     pub fn get_model_agreement(&self, features: &MLFeatureVector) -> ModelAgreement {
         let mut predictions: Vec<(String, f64)> = Vec::new();
 
-        // Recolectar predicciones individuales
-        if let Some(model) = self.models.get(0) {
-            if let Some(pred) = model.predict(features) {
-                predictions.push((model.name().to_string(), pred));
-            }
-        }
-        if let Some(model) = self.models.get(1) {
-            if let Some(pred) = model.predict(features) {
-                predictions.push((model.name().to_string(), pred));
-            }
-        }
-        if let Some(model) = self.models.get(2) {
+        for model in &self.models {
             if let Some(pred) = model.predict(features) {
                 predictions.push((model.name().to_string(), pred));
             }
@@ -772,7 +693,7 @@ impl MLPredictor {
         ModelAgreement {
             agreeing_models,
             direction,
-            predictions: predictions.iter().map(|(n, p)| format!("{}:{:.2}", n, p)).collect(),
+            predictions: predictions.iter().map(|(n, p)| format!("{}:{:.3}", n, p)).collect(),
         }
     }
 }

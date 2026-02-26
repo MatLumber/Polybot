@@ -470,6 +470,7 @@ impl PolymarketDataClient {
                         exit_price: final_price,
                         pnl: if is_win { 0.8 } else { -1.0 },
                         estimated_edge: (final_price - 0.5).abs(),
+                        predicted_prob_up: None,
                         indicators_triggered: vec!["historical".to_string()],
                     };
 

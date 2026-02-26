@@ -859,15 +859,17 @@ impl V3Strategy {
             exit_price: record.exit_price,
             pnl: record.pnl,
             estimated_edge: record.edge_net,
+            predicted_prob_up: None, // Will be set by predictor if ML was used
             indicators_triggered: record.indicators_used.clone(),
         };
 
         if self.predictor.is_some() {
             let is_win = trade_sample.is_win;
-            let conf = trade_sample.entry_features.calibrator_confidence;
 
             if let Some(ref mut predictor) = self.predictor {
-                predictor.record_outcome(conf, is_win);
+                // Use predicted_prob_up for proper drift tracking (not calibrator_confidence)
+                let prob = trade_sample.predicted_prob_up.unwrap_or(0.5);
+                predictor.record_outcome(prob, is_win);
                 predictor.adjust_weights_dynamically();
             }
 

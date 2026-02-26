@@ -65,8 +65,15 @@ pub struct TradeSample {
     pub pnl: f64,
     /// Edge estimado al entrar
     pub estimated_edge: f64,
+    /// Probabilidad ML (prob_up) al momento de la predicción
+    #[serde(default = "default_prob")]
+    pub predicted_prob_up: Option<f64>,
     /// Lista de indicadores que generaron señal
     pub indicators_triggered: Vec<String>,
+}
+
+fn default_prob() -> Option<f64> {
+    None
 }
 
 /// Dataset completo para ML
