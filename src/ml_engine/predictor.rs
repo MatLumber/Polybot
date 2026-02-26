@@ -72,13 +72,37 @@ impl MLStrategyPredictor {
             return None;
         };
 
+        // 3.5 FILTRO DE MODEL AGREEMENT
+        // Solo operar cuando los 3 modelos están de acuerdo o 2 de 3 con alta confianza
+        if let Some(ref predictor) = self.ml_predictor {
+            let agreement = predictor.get_model_agreement(&ml_features);
+            // Requerir al menos 2 de 3 modelos de acuerdo
+            if agreement.agreeing_models < 2 {
+                warn!(
+                    "Señal filtrada por falta de acuerdo entre modelos: {}/3",
+                    agreement.agreeing_models
+                );
+                return None;
+            }
+            // Si solo 2 de 3 de acuerdo, requerir edge más alto
+            if agreement.agreeing_models == 2 {
+                let edge_2_of_3 = (ml_prediction.prob_up - 0.5).abs();
+                if edge_2_of_3 < 0.12 {
+                    // 12% edge mínimo cuando solo 2 modelos acuerdan
+                    return None;
+                }
+            }
+        }
+
         // 4. Calibrar probabilidad
         let calibrated_prob = self.calibrator.calibrate(ml_prediction.prob_up);
 
         // 5. Calcular edge
         let edge = (calibrated_prob - 0.5).abs();
 
-        if edge < 0.03 {
+        // UMbral de edge más alto para filtrar señales débiles
+        // 0.08 = 8% edge mínimo (antes era 3%)
+        if edge < 0.08 {
             return None;
         }
 
@@ -89,11 +113,13 @@ impl MLStrategyPredictor {
             Direction::Down
         };
 
-        // 7. Calcular confianza final
-        let confidence = ml_prediction.confidence * (1.0 + edge * 2.0).min(1.5);
+        // 7. Calcular confianza final con boost por edge fuerte
+        let edge_boost = if edge > 0.15 { 1.2 } else if edge > 0.10 { 1.1 } else { 1.0 };
+        let confidence = ml_prediction.confidence * (1.0 + edge * 2.0).min(1.5) * edge_boost;
 
-        // 8. Verificar mínima confianza
-        if confidence < 0.55 {
+        // 8. Verificar mínima confianza - más alto para mejor win rate
+        // 0.60 = 60% confianza mínima (antes era 55%)
+        if confidence < 0.60 {
             return None;
         }
 
@@ -149,14 +175,23 @@ impl MLStrategyPredictor {
             return Ok(());
         }
 
+        // BALANCEO DE CLASES: crucial para evitar sesgo hacia clase mayoritaria
+        let mut balanced_dataset = dataset.clone();
+        balanced_dataset.balance_classes();
+        info!(
+            "📊 Dataset balanceado: {} muestras (original: {})",
+            balanced_dataset.len(),
+            dataset.len()
+        );
+
         let weights = EnsembleWeights::from_config(&self.config.ensemble);
         let mut predictor = MLPredictor::new(weights);
 
-        // Entrenar con SmartCore REAL
-        predictor.train(&dataset)?;
+        // Entrenar con SmartCore REAL usando dataset balanceado
+        predictor.train(&balanced_dataset)?;
 
         self.ml_predictor = Some(predictor);
-        self.dataset = dataset;
+        self.dataset = dataset; // Guardar original para futuro retraining
 
         info!("✅ Modelo ML entrenado exitosamente");
 
@@ -166,6 +201,9 @@ impl MLStrategyPredictor {
                 "📊 Ensemble accuracy: {:.2}%",
                 pred.ensemble_accuracy() * 100.0
             );
+            // Log top features
+            let top = pred.top_features(5);
+            info!("📊 Top 5 features: {:?}", top);
         }
 
         Ok(())
@@ -241,9 +279,22 @@ impl MLStrategyPredictor {
         info!("🔄 Actualizando modelo incrementalmente...");
 
         if let Some(ref mut predictor) = self.ml_predictor {
-            predictor.train(&self.dataset)?;
+            // Balancear clases antes de reentrenar
+            let mut balanced = self.dataset.clone();
+            balanced.balance_classes();
+
+            predictor.train(&balanced)?;
             self.state.last_retraining = Some(chrono::Utc::now().timestamp());
-            info!("✅ Modelo actualizado");
+
+            // Log métricas post-retraining
+            info!(
+                "✅ Modelo actualizado - accuracy: {:.2}%",
+                predictor.ensemble_accuracy() * 100.0
+            );
+
+            // Log feature importance top 5
+            let top = predictor.top_features(5);
+            info!("📊 Top features: {:?}", top);
         }
 
         Ok(())

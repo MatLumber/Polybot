@@ -732,4 +732,58 @@ impl MLPredictor {
         features.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
         features.into_iter().take(n).collect()
     }
+
+    /// Obtener agreement entre modelos - cuántos modelos predicen la misma dirección
+    pub fn get_model_agreement(&self, features: &MLFeatureVector) -> ModelAgreement {
+        let mut predictions: Vec<(String, f64)> = Vec::new();
+
+        // Recolectar predicciones individuales
+        if let Some(model) = self.models.get(0) {
+            if let Some(pred) = model.predict(features) {
+                predictions.push((model.name().to_string(), pred));
+            }
+        }
+        if let Some(model) = self.models.get(1) {
+            if let Some(pred) = model.predict(features) {
+                predictions.push((model.name().to_string(), pred));
+            }
+        }
+        if let Some(model) = self.models.get(2) {
+            if let Some(pred) = model.predict(features) {
+                predictions.push((model.name().to_string(), pred));
+            }
+        }
+
+        if predictions.is_empty() {
+            return ModelAgreement {
+                agreeing_models: 0,
+                direction: 0.5,
+                predictions: vec![],
+            };
+        }
+
+        // Contar cuántos predicen UP vs DOWN
+        let up_count = predictions.iter().filter(|(_, p)| *p > 0.5).count();
+        let down_count = predictions.iter().filter(|(_, p)| *p <= 0.5).count();
+
+        let agreeing_models = up_count.max(down_count);
+        let direction = if up_count > down_count { 1.0 } else if down_count > up_count { 0.0 } else { 0.5 };
+
+        ModelAgreement {
+            agreeing_models,
+            direction,
+            predictions: predictions.iter().map(|(n, p)| format!("{}:{:.2}", n, p)).collect(),
+        }
+    }
+}
+
+/// Resultado del agreement entre modelos
+#[derive(Debug, Clone)]
+pub struct ModelAgreement {
+    /// Número de modelos que acuerdan en la dirección
+    pub agreeing_models: usize,
+    /// Dirección consensuada (1.0 = UP, 0.0 = DOWN, 0.5 = empate)
+    pub direction: f64,
+    /// Predicciones individuales para debug
+    pub predictions: Vec<String>,
 }

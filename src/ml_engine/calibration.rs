@@ -52,14 +52,18 @@ impl CalibrationCurve {
             return;
         }
 
-        // Más bins para mejor resolución (10 → 20)
-        let n_bins = 20;
+        // Más bins para mejor resolución (20 → 25)
+        let n_bins = 25;
         let mut bins: Vec<(f64, usize)> = vec![(0.0, 0); n_bins]; // (sum_weighted, count)
 
-        for (pred, outcome) in predictions.iter().zip(outcomes.iter()) {
+        // Recency weighting: observaciones más recientes pesan más
+        let n = predictions.len();
+        for (i, (pred, outcome)) in predictions.iter().zip(outcomes.iter()).enumerate() {
             let bin_idx = ((pred * n_bins as f64) as usize).min(n_bins - 1);
+            // Peso exponencial: últimas observaciones pesan hasta 2x más
+            let recency_weight = 1.0 + (i as f64 / n as f64); // 1.0 a 2.0
             bins[bin_idx].1 += 1; // count
-            bins[bin_idx].0 += if *outcome { 1.0 } else { 0.0 }; // sum
+            bins[bin_idx].0 += if *outcome { recency_weight } else { 0.0 }; // weighted sum
         }
 
         // Calcular frecuencia real por bin
@@ -67,7 +71,9 @@ impl CalibrationCurve {
         for (i, (sum, count)) in bins.iter().enumerate() {
             if *count > 0 {
                 let raw_prob = (i as f64 + 0.5) / n_bins as f64;
-                let actual_prob = sum / *count as f64;
+                // Normalizar por el peso promedio
+                let avg_weight = 1.5; // aproximación del peso promedio
+                let actual_prob = (sum / (*count as f64 * avg_weight)).clamp(0.01, 0.99);
                 self.points.push((raw_prob, actual_prob));
             }
         }
@@ -200,15 +206,16 @@ impl ProbabilityCalibrator {
             self.prediction_history.remove(0);
         }
 
-        // Recalibrar cada 30 observaciones (más frecuente para adaptarse rápido)
-        if self.prediction_history.len() % 30 == 0 {
+        // Recalibrar cada 50 observaciones (balance entre estabilidad y adaptación)
+        if self.prediction_history.len() % 50 == 0 {
             self.recalibrate();
         }
     }
 
     /// Recalibrar usando historial actual con logging de métricas
     pub fn recalibrate(&mut self) {
-        if self.prediction_history.len() < 30 {
+        // Mínimo 50 observaciones para calibración confiable
+        if self.prediction_history.len() < 50 {
             return;
         }
 
