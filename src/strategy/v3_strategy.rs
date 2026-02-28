@@ -72,6 +72,8 @@ pub struct V3Strategy {
     volume_history: HashMap<(Asset, Timeframe), VecDeque<f64>>,
     /// Counter of window observations (NOT trades) — used for retraining trigger.
     window_observations_count: usize,
+    /// One-per-window throttle: tracks the last window open_ts we entered per market.
+    last_entry_window: HashMap<(Asset, Timeframe), i64>,
 }
 
 impl V3Strategy {
@@ -171,6 +173,7 @@ impl V3Strategy {
             window_history: HashMap::new(),
             volume_history: HashMap::new(),
             window_observations_count: 0,
+            last_entry_window: HashMap::new(),
         };
 
         // Auto-train models on startup if we have enough samples
@@ -265,6 +268,18 @@ impl V3Strategy {
                     dataset_before = self.dataset.len(),
                     "🪟 Window closed — recording ground-truth observation"
                 );
+                // Skip samples with mostly-zero features (captured before indicator warmup)
+                let feat_vec = obs.features.to_vec();
+                let non_zero = feat_vec.iter().filter(|&&v| v.abs() > 1e-10).count();
+                if non_zero < feat_vec.len() / 3 {
+                    info!(
+                        non_zero,
+                        total = feat_vec.len(),
+                        "⚠️ Skipping low-quality window observation ({}/{} non-zero features)",
+                        non_zero,
+                        feat_vec.len()
+                    );
+                } else {
                 self.dataset.add_window_observation(
                     obs.features,
                     target,
@@ -298,6 +313,7 @@ impl V3Strategy {
                         warn!("⚠️ Retraining after window observations failed: {}", e);
                     }
                 }
+                } // end else (non-zero filter)
             }
         }
 
@@ -394,9 +410,27 @@ impl V3Strategy {
             }
         }
 
+        // One-per-window throttle: max 1 trade per (asset, timeframe) window
+        let already_entered_this_window = self
+            .last_entry_window
+            .get(&(asset, timeframe))
+            .copied()
+            .map(|last| last == win_open_ts)
+            .unwrap_or(false);
+
+        if already_entered_this_window {
+            tracing::info!(
+                ?asset, ?timeframe, win_open_ts,
+                "⏸ Signal throttled — already entered this window"
+            );
+            self.last_filter_reason = Some("one_per_window_throttle".to_string());
+            return None;
+        }
+
         // Try ML prediction if available
         if ml_available && dataset_size >= min_samples {
             if let Some(prediction) = self.try_ml_prediction(&ml_features, features, &context) {
+                self.last_entry_window.insert((asset, timeframe), win_open_ts);
                 return Some(prediction);
             }
         }
@@ -426,6 +460,7 @@ impl V3Strategy {
                 confidence = signal.confidence,
                 "📊 Fallback signal generated"
             );
+            self.last_entry_window.insert((asset, timeframe), win_open_ts);
             return Some(signal);
         }
 
@@ -590,21 +625,10 @@ impl V3Strategy {
             }
         }
 
-        // 4. Extreme Overbought/Oversold Penalties
-        // Instead of trading RSI mean-reverting everywhere, only penalize EXTREMES
-        if let Some(rsi) = features.rsi {
-            if rsi > 80.0 {
-                score -= 1.0; // Penalty against UP
-                reasons.push("RSI_extreme_overbought".to_string());
-            } else if rsi < 20.0 {
-                score += 1.0; // Penalty against DOWN
-                reasons.push("RSI_extreme_oversold".to_string());
-            }
-        }
-
-        // Calculate confidence based on maximum possible absolute score (which is ~3.0 for all aligned)
-        let max_score = 3.0; // 1.0 (EMA) + 0.5 (MACD) + 0.5 (HA) + 1.0 (RSI penalty)
-        let confidence = ((score as f64).abs() / max_score).min(1.0) * 0.4 + 0.6; // Scale base line to 0.6 minimum
+        // RSI removed — in crypto/BTC, RSI overbought means momentum continuation (not reversal)
+        // Only EMA(1.0), MACD(0.5), HA(0.5) are used. Max score = 2.0 when all 3 agree.
+        let max_score = 2.0;
+        let confidence = ((score as f64).abs() / max_score).min(1.0) * 0.5 + 0.5; // 0.5 floor
 
         if confidence < self.config.min_confidence {
             tracing::info!(
@@ -618,13 +642,13 @@ impl V3Strategy {
             return None;
         }
 
-        // Ensure strong directional conviction: EMA and MACD must be somewhat aligned
-        if score.abs() < 1.0 {
+        // Require full alignment: EMA(1.0) + MACD(0.5) + HA(0.5) = 2.0 — all 3 must agree
+        if score.abs() < 2.0 {
             tracing::info!(
                 ?features.asset,
                 ?features.timeframe,
                 score,
-                "❌ Fallback signal rejected (insufficient directional alignment)"
+                "❌ Fallback signal rejected (insufficient directional alignment — need all 3 indicators)"
             );
             self.last_filter_reason = Some("fallback_weak_directional_score".to_string());
             return None;
@@ -1062,6 +1086,20 @@ impl V3Strategy {
 
     /// Agregar un trade al dataset de entrenamiento (acumulativo)
     pub fn add_trade_to_dataset(&mut self, trade: TradeSample) {
+        // Skip samples with mostly-zero features (captured before indicator warmup)
+        let feature_vec = trade.entry_features.to_vec();
+        let non_zero = feature_vec.iter().filter(|&&v| v.abs() > 1e-10).count();
+        if non_zero < feature_vec.len() / 3 {
+            info!(
+                non_zero,
+                total = feature_vec.len(),
+                "⚠️ Skipping low-quality trade sample ({}/{} non-zero features)",
+                non_zero,
+                feature_vec.len()
+            );
+            return;
+        }
+
         let previous_size = self.dataset.len();
         self.dataset.add_trade(trade);
 

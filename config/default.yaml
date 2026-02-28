@@ -48,8 +48,8 @@ features:
 # STRATEGY - Configuración mejorada
 # ============================================================================
 strategy:
-  # Umbral de confianza aumentado (era 0.60)
-  min_confidence: 0.65
+  # Umbral de confianza: con 3 indicadores alineados score=2.0 → conf=1.0
+  min_confidence: 0.75
   
   entry_delay_secs: 60
   min_time_to_expiry_secs: 120
@@ -83,12 +83,12 @@ risk:
   min_oracle_confidence: 0.7
   
   # Checkpoint trailing stops
-  checkpoint_arm_roi: 0.05
+  checkpoint_arm_roi: 0.08
   checkpoint_initial_floor_roi: 0.022
   checkpoint_trail_gap_roi: 0.012
   
-  # Hard stop adaptativo: -1.5x ATR dinámico
-  hard_stop_roi: -0.07
+  # Hard stop ampliado para tokens Polymarket que oscilan antes de resolver
+  hard_stop_roi: -0.15
   hard_stop_atr_multiplier: 1.5
   
   time_stop_seconds_to_expiry: 90
@@ -143,9 +143,9 @@ paper_trading:
 kelly:
   enabled: true
   fraction_15m: 0.25
-  fraction_1h: 0.50
+  fraction_1h: 0.25
   max_bankroll_fraction_15m: 0.035  # 3.5% (reducido)
-  max_bankroll_fraction_1h: 0.075   # 7.5% (reducido)
+  max_bankroll_fraction_1h: 0.04    # 4.0% (reducido de 7.5%)
   # ETH multipliers (más conservador)
   eth_size_multiplier: 0.8  # Reducir sizing ETH en 20%
 
@@ -165,7 +165,7 @@ use_v3_strategy: true  # Set to true to enable ML-powered trading
 ml_engine:
   enabled: true
   model_type: "ensemble"
-  min_confidence: 0.55
+  min_confidence: 0.65
   
   # Training parameters
   retrain_interval_trades: 50

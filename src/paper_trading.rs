@@ -1193,8 +1193,8 @@ impl PaperTradingEngine {
             min_floor,
             max_floor,
         ) = match pos.timeframe {
-            Timeframe::Min15 => (0.45, 0.40, 0.06, 0.030, 0.03, -0.16, -0.04),
-            Timeframe::Hour1 => (0.30, 0.25, 0.08, 0.022, 0.02, -0.20, -0.05),
+            Timeframe::Min15 => (0.25, 0.20, 0.04, 0.015, 0.02, -0.30, -0.12),
+            Timeframe::Hour1 => (0.25, 0.20, 0.06, 0.018, 0.02, -0.30, -0.10),
         };
 
         let widen_vol = (local_range * vol_scale * early_phase).clamp(0.0, 0.06);
