@@ -1789,6 +1789,24 @@ impl PaperTradingEngine {
             return Ok(false);
         }
 
+        // Guard: reject tokens with near-zero liquidity.
+        // A share price below $0.05 means the market assigns <5% probability to this outcome,
+        // which is implausible for a near-term BTC/ETH move AND produces absurd share counts
+        // (e.g. $8 / $0.01 = 800 shares → $800 phantom profit if it wins).
+        // This same guard will fire in live trading, preventing real capital loss.
+        let min_share_price = 0.05;
+        if share_price < min_share_price {
+            info!(
+                asset = %signal.asset,
+                timeframe = ?signal.timeframe,
+                direction = direction_str,
+                share_price = share_price,
+                min = min_share_price,
+                "[PAPER] Share price below liquidity floor, skipping signal"
+            );
+            return Ok(false);
+        }
+
         let min_depth_top5 = 0.0;
         let top_of_book_depth = entry_bid_size + entry_ask_size;
         let usable_depth = if entry_depth_top5 > 0.0 {
