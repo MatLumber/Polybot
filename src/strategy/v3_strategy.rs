@@ -509,10 +509,27 @@ impl V3Strategy {
             Direction::Down
         };
 
-        // Calculate final confidence naturally
-        let confidence = prediction.confidence * (prediction.prob_up - 0.5).abs() * 2.0;
+        // Calculate final confidence: blend model confidence with edge strength.
+        // Previous formula (model_conf * edge * 2.0) required prob_up > 0.76 to pass
+        // min_confidence=0.52, which silently rejected every ML signal.
+        // New formula: confidence = model_conf * (0.5 + edge).
+        // At edge=0.15 (prob_up=0.65): confidence = model_conf * 0.65
+        // At edge=0.30 (prob_up=0.80): confidence = model_conf * 0.80
+        let edge = (prediction.prob_up - 0.5).abs();
+        let confidence = (prediction.confidence * (0.5 + edge)).clamp(0.0, 1.0);
 
-        // Check minimum confidence again after applying multiplier
+        // Require a minimum edge (at least 5% = prob_up > 0.55 or < 0.45)
+        if edge < 0.05 {
+            let reason = format!(
+                "ml_edge_too_small: {:.3} < 0.05",
+                edge
+            );
+            tracing::debug!(%reason, "ML prediction edge too small");
+            self.last_filter_reason = Some(reason);
+            return None;
+        }
+
+        // Check minimum confidence after edge blending
         if confidence < self.config.min_confidence {
             let reason = format!(
                 "low_edge_confidence: {:.2} < {:.2}",

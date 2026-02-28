@@ -868,10 +868,10 @@ impl FeatureEngine {
                 return Some(50.0); // No movement = neutral
             }
             if avg_loss == 0.0 {
-                return Some(100.0);
+                return Some(99.0); // All gains — clamp consistent with Wilder's path
             }
             if avg_gain == 0.0 {
-                return Some(0.0);
+                return Some(1.0); // All losses — clamp consistent with Wilder's path
             }
             let rs = avg_gain / avg_loss;
             let rsi = 100.0 - (100.0 / (1.0 + rs));
