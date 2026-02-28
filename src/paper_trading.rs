@@ -1305,7 +1305,7 @@ impl PaperTradingEngine {
         let conf = pos.confidence.clamp(0.50, 0.95);
         let conf_boost = (conf - 0.50) / 0.45;
         arm *= 1.0 + conf_boost * 0.25;
-        arm = arm.clamp(arm_min, base_arm * 1.30);
+        arm = arm.clamp(arm_min, (base_arm * 1.30).max(arm_min));
 
         // Keep floor safely below arm.
         let floor_cap = (arm - gap_min * 0.5).max(floor_min);
