@@ -253,6 +253,8 @@ pub struct MLConfig {
     pub logistic_regression_weight: f64,
     /// Dynamic weight adjustment
     pub dynamic_weight_adjustment: bool,
+    /// Minimum confidence threshold for ML predictions and fallback signals
+    pub min_confidence: f64,
     /// Filter configuration
     pub max_spread_bps_15m: f64,
     pub max_spread_bps_1h: f64,
@@ -276,6 +278,7 @@ impl Default for MLConfig {
             gradient_boosting_weight: 0.35,
             logistic_regression_weight: 0.25,
             dynamic_weight_adjustment: true,
+            min_confidence: 0.65,
             max_spread_bps_15m: 100.0,
             max_spread_bps_1h: 150.0,
             min_depth_usdc: 0.0,

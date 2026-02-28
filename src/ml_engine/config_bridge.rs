@@ -39,7 +39,7 @@ impl MLConfigConvertible for MLConfig {
                 optimal_hours_only: self.optimal_hours_only,
                 max_window_progress: 0.90,    // Default - más permisivo
                 min_time_to_close_minutes: 2.0, // Default
-                min_model_confidence: 0.52,   // Default - más permisivo para empezar
+                min_model_confidence: self.min_confidence,
             },
             training: TrainingConfig {
                 retrain_interval_trades: self.retrain_interval_trades,
@@ -49,7 +49,7 @@ impl MLConfigConvertible for MLConfig {
                 walk_forward_test_days: 7,   // Default
                 early_stopping_patience: 10, // Default
             },
-            min_confidence: 0.52, // Default más permisivo
+            min_confidence: self.min_confidence,
         }
     }
 }
