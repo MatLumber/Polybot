@@ -165,6 +165,14 @@ async fn main() -> Result<()> {
     let risk_manager = Arc::new(RiskManager::new(risk_cfg));
     let dry_run = config.bot.dry_run;
     let clob_client = Arc::new(ClobClient::with_dry_run(config.execution.clone(), dry_run));
+    // Derive L2 HMAC credentials from PRIVATE_KEY so get_balance() / order submission work
+    if !dry_run {
+        if let Err(e) = clob_client.initialize().await {
+            warn!(error = %e, "⚠️  CLOB L2 init failed — live balance fetch will not work");
+        } else {
+            info!("🔑 CLOB L2 credentials initialized (live balance + order submission ready)");
+        }
+    }
     let paper_trading_enabled = config.paper_trading.enabled;
     if paper_trading_enabled {
         info!(
