@@ -97,21 +97,12 @@ impl V3Strategy {
                 };
 
                 let mut ml_state = MLEngineState::new(ml_config.clone());
-                ml_state.total_predictions = persisted.total_predictions;
-                ml_state.correct_predictions = persisted.correct_predictions;
-                ml_state.incorrect_predictions = persisted.incorrect_predictions;
+                // Don't restore prediction counters — the persisted values can be stale/corrupted
+                // across restarts. Let accuracy accumulate freshly from closed trades this session.
                 ml_state.last_retraining = persisted.last_retraining;
 
-                let accuracy = if persisted.total_predictions > 0 {
-                    persisted.correct_predictions as f64 / persisted.total_predictions as f64
-                } else {
-                    0.5
-                };
-
                 info!(
-                    "✅ ML state restored: {} predictions, {:.1}% accuracy, {} samples in dataset",
-                    persisted.total_predictions,
-                    accuracy * 100.0,
+                    "✅ ML state restored: {} samples in dataset (prediction accuracy resets each session)",
                     loaded_dataset.len()
                 );
 
