@@ -135,11 +135,13 @@ impl RestClient {
         let (address, api_key, api_secret, api_passphrase) = self.auth_tuple()?;
 
         let timestamp = Utc::now().timestamp().to_string();
+        // Polymarket HMAC signs only the base path (no query string)
+        let sign_path = request_path.split('?').next().unwrap_or(request_path);
         let message = format!(
             "{}{}{}{}",
             timestamp,
             method.to_uppercase(),
-            request_path,
+            sign_path,
             body
         );
 
