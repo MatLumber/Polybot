@@ -756,9 +756,11 @@ impl RestClient {
 
     /// Get USDC balance for the authenticated wallet
     pub async fn get_balance(&self) -> Result<f64> {
-        let request_path = "/balance-allowance?asset_type=COLLATERAL&signature_type=0";
+        // Use signature_type=1 (Gnosis/proxy) when a separate funder wallet is configured
+        let sig_type = if std::env::var("POLYMARKET_WALLET").ok().is_some() { 1 } else { 0 };
+        let request_path = format!("/balance-allowance?asset_type=COLLATERAL&signature_type={}", sig_type);
         let url = format!("{}{}", self.base_url, request_path);
-        let headers = self.build_l2_headers("GET", request_path, "")?;
+        let headers = self.build_l2_headers("GET", &request_path, "")?;
 
         let response = self
             .client
@@ -784,7 +786,9 @@ impl RestClient {
             .or_else(|| raw.get("amount").and_then(|v| v.as_str()))
             .context("balance field missing in balance-allowance response")?;
 
-        balance_str.parse().context("Failed to parse balance value")
+        // USDC on Polygon has 6 decimals — convert from wei units to USDC
+        let raw_units: f64 = balance_str.parse().context("Failed to parse balance value")?;
+        Ok(raw_units / 1_000_000.0)
     }
 
     /// Get midpoint price for a token
