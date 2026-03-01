@@ -325,6 +325,8 @@ pub enum WsMessage {
     MLMetricsUpdate(MLMetricsPayload),
     /// Heartbeat
     Heartbeat(i64),
+    /// Trading mode changed (true = paper, false = live)
+    TradingModeChanged(bool),
 }
 
 /// ML State update payload for WebSocket

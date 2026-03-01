@@ -7,10 +7,10 @@ use axum::{
     extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -70,6 +70,8 @@ pub fn create_router(
         .route("/api/ml/models", get(get_ml_models))
         .route("/api/ml/features", get(get_ml_features))
         .route("/api/ml/training", get(get_ml_training_status))
+        // Trading mode toggle (paper ↔ live without restart)
+        .route("/api/trading-mode", get(get_trading_mode).post(set_trading_mode))
         // WebSocket
         .route("/ws", axum::routing::get(websocket_handler))
         // State
@@ -613,4 +615,64 @@ async fn get_ml_features(State((memory, _, _)): State<AppState>) -> impl IntoRes
 async fn get_ml_training_status(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let training = memory.get_ml_training_status().await;
     Json(ApiResponse::success(training))
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Trading Mode Toggle
+// ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct TradingModeRequest {
+    mode: String, // "paper" or "live"
+}
+
+#[derive(Debug, Serialize)]
+struct TradingModeResponse {
+    mode: String,
+    is_paper: bool,
+}
+
+/// GET /api/trading-mode - Returns current trading mode
+async fn get_trading_mode(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
+    let is_paper = memory.trading_mode.load(std::sync::atomic::Ordering::Relaxed);
+    Json(ApiResponse::success(TradingModeResponse {
+        mode: if is_paper { "paper".into() } else { "live".into() },
+        is_paper,
+    }))
+}
+
+/// POST /api/trading-mode - Switch between paper and live trading at runtime
+async fn set_trading_mode(
+    State((memory, broadcaster, _)): State<AppState>,
+    Json(req): Json<TradingModeRequest>,
+) -> Response {
+    let is_paper = match req.mode.as_str() {
+        "paper" => true,
+        "live" => false,
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<TradingModeResponse>::error(
+                    "Invalid mode — use \"paper\" or \"live\"",
+                )),
+            )
+                .into_response();
+        }
+    };
+
+    memory
+        .trading_mode
+        .store(is_paper, std::sync::atomic::Ordering::SeqCst);
+
+    // Broadcast the change so all connected dashboards update instantly
+    broadcaster.broadcast(&super::types::WsMessage::TradingModeChanged(is_paper));
+
+    let mode_str = if is_paper { "paper" } else { "live" };
+    tracing::info!(mode = mode_str, "🔀 Trading mode switched");
+
+    Json(ApiResponse::success(TradingModeResponse {
+        mode: mode_str.into(),
+        is_paper,
+    }))
+    .into_response()
 }

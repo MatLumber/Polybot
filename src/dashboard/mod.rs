@@ -79,6 +79,8 @@ pub struct DashboardMemory {
     pub execution_diagnostics: RwLock<ExecutionDiagnosticsResponse>,
     /// Data feed health snapshot for /api/health.
     pub health: RwLock<HealthResponse>,
+    /// Runtime trading mode: true = paper, false = live (toggleable without restart)
+    pub trading_mode: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Default for DashboardMemory {
@@ -115,6 +117,7 @@ impl Default for DashboardMemory {
                 stale_threshold_ms: 20_000,
                 ..HealthResponse::default()
             }),
+            trading_mode: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         }
     }
 }

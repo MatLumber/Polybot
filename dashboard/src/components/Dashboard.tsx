@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Activity,
   AlertTriangle,
@@ -378,13 +378,65 @@ function RejectionDiagnosticsPanel({
   )
 }
 
+const API_BASE = (import.meta.env.VITE_API_BASE ?? 'http://localhost:3000').replace(/\/$/, '')
+
 export function Dashboard() {
   const stream = useDashboardStream()
   const [mode, setMode] = useState<Mode>('paper')
+  // Reflects the backend's ACTUAL execution mode (not just the display tab)
+  const [backendIsLive, setBackendIsLive] = useState(false)
   const [chartAsset, setChartAsset] = useState<ChartAsset>('BTC')
   const [chartStyle, setChartStyle] = useState<ChartStyle>('cyber')
   const [heartbeatNow, setHeartbeatNow] = useState(() => Date.now())
   const dashboard = stream.dashboard
+
+  // Sync backend mode on connect
+  useEffect(() => {
+    fetch(`${API_BASE}/api/trading-mode`, {
+      headers: { 'ngrok-skip-browser-warning': 'true' },
+    })
+      .then((r) => r.json())
+      .then((payload: { success: boolean; data?: { is_paper: boolean } }) => {
+        if (payload.success && payload.data) {
+          const isPaper = payload.data.is_paper
+          setBackendIsLive(!isPaper)
+          setMode(isPaper ? 'paper' : 'live')
+        }
+      })
+      .catch(() => {/* ignore — bot might not support the endpoint yet */})
+  }, [stream.connected])
+
+  // Handle mode toggle: display tab + backend execution
+  const handleModeChange = useCallback(async (newMode: Mode) => {
+    if (newMode === 'live' && !backendIsLive) {
+      const confirmed = window.confirm(
+        '⚠️  ADVERTENCIA: Cambiar a LIVE enviará órdenes REALES con dinero REAL en Polymarket.\n\n¿Estás seguro?'
+      )
+      if (!confirmed) return
+    }
+    setMode(newMode)
+    try {
+      const res = await fetch(`${API_BASE}/api/trading-mode`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
+        body: JSON.stringify({ mode: newMode }),
+      })
+      const payload = await res.json() as { success: boolean; data?: { is_paper: boolean }; error?: string }
+      if (payload.success && payload.data) {
+        setBackendIsLive(!payload.data.is_paper)
+      } else {
+        alert(`Error al cambiar modo: ${payload.error ?? 'desconocido'}`)
+        // Revert display
+        setMode(backendIsLive ? 'live' : 'paper')
+      }
+    } catch (e) {
+      alert(`Error de red: ${e}`)
+      setMode(backendIsLive ? 'live' : 'paper')
+    }
+  }, [backendIsLive])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -468,18 +520,28 @@ export function Dashboard() {
             {stream.connected ? <Wifi size={12} /> : <WifiOff size={12} />}
             <span>{connectionLabel}</span>
           </div>
-          <div className="toggle">
+          <div className="toggle" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {backendIsLive && (
+              <span style={{
+                fontSize: '9px', fontWeight: 700, padding: '2px 6px',
+                background: 'rgba(234,179,8,0.15)', border: '1px solid rgba(234,179,8,0.4)',
+                borderRadius: '4px', color: '#fbbf24', letterSpacing: '0.05em'
+              }}>
+                ⚡ LIVE ORDERS
+              </span>
+            )}
             <button
               className={mode === 'paper' ? 'active' : ''}
-              onClick={() => setMode('paper')}
+              onClick={() => handleModeChange('paper')}
               type="button"
             >
               Paper
             </button>
             <button
               className={mode === 'live' ? 'active' : ''}
-              onClick={() => setMode('live')}
+              onClick={() => handleModeChange('live')}
               type="button"
+              style={mode === 'live' ? { color: '#fbbf24' } : {}}
             >
               Live
             </button>

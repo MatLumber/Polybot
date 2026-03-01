@@ -1,13 +1,15 @@
 import { cn } from "../lib/utils";
-import { Wifi, WifiOff, Bot } from "lucide-react";
+import { Wifi, WifiOff, Bot, Zap } from "lucide-react";
 
 interface HeaderProps {
   connected: boolean;
   mode: "paper" | "live";
   onModeChange?: (mode: "paper" | "live") => void;
+  /** Whether the bot backend is actually executing live orders right now */
+  backendIsLive?: boolean;
 }
 
-export function Header({ connected, mode, onModeChange }: HeaderProps) {
+export function Header({ connected, mode, onModeChange, backendIsLive }: HeaderProps) {
   return (
     <header className="border-b border-border/40 bg-card/20 backdrop-blur-lg sticky top-0 z-50 shadow-sm">
       <div className="container mx-auto px-3 h-12 flex items-center justify-between">
@@ -24,6 +26,13 @@ export function Header({ connected, mode, onModeChange }: HeaderProps) {
 
         {/* Mode Toggle */}
         <div className="flex items-center gap-2.5">
+          {/* Backend execution indicator */}
+          {backendIsLive && (
+            <div className="flex items-center gap-1 px-2 py-0.5 bg-yellow-500/10 border border-yellow-500/30 rounded text-[10px] text-yellow-400 font-semibold">
+              <Zap className="h-3 w-3" />
+              LIVE ORDERS
+            </div>
+          )}
           <div className="flex bg-secondary/80 backdrop-blur-sm rounded-md p-0.5 border border-border/30">
             <button
               onClick={() => onModeChange?.("paper")}
@@ -41,7 +50,7 @@ export function Header({ connected, mode, onModeChange }: HeaderProps) {
               className={cn(
                 "px-2.5 py-0.5 text-[11px] font-medium rounded transition-all duration-200",
                 mode === "live"
-                  ? "bg-background text-foreground shadow-sm border border-border/50"
+                  ? "bg-yellow-500/20 text-yellow-300 shadow-sm border border-yellow-500/40"
                   : "text-muted-foreground hover:text-foreground hover:bg-background/50"
               )}
             >
