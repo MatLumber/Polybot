@@ -76,6 +76,8 @@ export function mapPosition(position: PositionWire): Position {
     checkpointPeakPct: position.checkpoint_peak_pct ?? 0,
     tradingRoi: position.trading_roi ?? 0,
     predictionRoi: position.prediction_roi ?? 0,
+    entrySharePrice: position.entry_share_price ?? 0,
+    currentSharePrice: position.current_share_price ?? 0,
   }
 }
 

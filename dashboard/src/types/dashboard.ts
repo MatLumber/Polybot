@@ -41,6 +41,8 @@ export interface Position {
   trough_price: number;
   market_close_ts: number;
   time_remaining_secs: number;
+  entry_share_price?: number;
+  current_share_price?: number;
 }
 
 export interface Trade {

@@ -158,31 +158,37 @@ function PositionTable({ positions, now }: { positions: Position[]; now: number 
           <tr>
             <th>Market</th>
             <th>Dir</th>
-            <th>Entry</th>
-            <th>Now</th>
+            <th title="Token entry probability (0–100¢)">Entry Token</th>
+            <th title="Token current bid (0–100¢)">Now Token</th>
             <th>Size</th>
             <th>PnL</th>
-            <th>%</th>
+            <th title="Trading ROI based on token price movement">%</th>
             <th title="Dynamic stop-loss threshold (token ROI)">SL</th>
-            <th title="Dynamic take-profit ceiling (token ROI)">TP</th>
-            <th title="Checkpoint floor — armed when prediction ROI hits arm threshold">CP</th>
+            <th title="Checkpoint floor — armed when token ROI hits arm threshold">CP</th>
             <th>Time Left</th>
           </tr>
         </thead>
         <tbody>
           {positions.map((position) => {
             const timeLeft = Math.max(0, Math.floor((position.marketCloseTs - now) / 1000))
+            const entryTok = position.entrySharePrice > 0
+              ? `${(position.entrySharePrice * 100).toFixed(1)}¢`
+              : '—'
+            const nowTok = position.currentSharePrice > 0
+              ? `${(position.currentSharePrice * 100).toFixed(1)}¢`
+              : '—'
+            const tokUp = position.currentSharePrice > position.entrySharePrice
+            const tokDown = position.currentSharePrice < position.entrySharePrice
             return (
               <tr key={position.id}>
                 <td>{formatMarketLabel(position.asset, position.timeframe)}</td>
                 <td className={positionDirectionClass(position.direction)}>{position.direction.toUpperCase()}</td>
-                <td>{formatCurrency(position.entryPrice)}</td>
-                <td>{formatCurrency(position.currentPrice)}</td>
+                <td>{entryTok}</td>
+                <td className={tokUp ? 'text-positive' : tokDown ? 'text-negative' : ''}>{nowTok}</td>
                 <td>{formatCurrency(position.sizeUsdc)}</td>
                 <td className={pnlClass(position.pnl)}>{formatSignedCurrency(position.pnl)}</td>
                 <td className={pnlClass(position.pnlPct)}>{formatPercent(position.pnlPct)}</td>
                 <td className="text-negative">-{position.stopLossPct.toFixed(1)}%</td>
-                <td className="text-positive">+{position.takeProfitPct.toFixed(1)}%</td>
                 <td className={position.checkpointArmed ? 'text-warning' : 'text-muted'}>
                   {position.checkpointArmed
                     ? `🔒 ${position.checkpointFloorPct.toFixed(1)}%`

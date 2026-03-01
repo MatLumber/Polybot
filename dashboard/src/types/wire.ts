@@ -53,6 +53,9 @@ export interface PositionWire {
   checkpoint_peak_pct: number
   trading_roi: number
   prediction_roi: number
+  // Token (probability) prices
+  entry_share_price: number   // token price at entry (0–1, e.g. 0.42 = 42¢)
+  current_share_price: number // token current bid (0–1, e.g. 0.69 = 69¢)
 }
 
 export interface TradeWire {

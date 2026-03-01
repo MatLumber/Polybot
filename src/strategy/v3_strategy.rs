@@ -336,10 +336,19 @@ impl V3Strategy {
                 (current_token_price - obs.token_price_at_open) / obs.token_price_at_open
             } else { 0.0 };
             ml_features.token_price_change_window = change.clamp(-1.0, 1.0);
+
+            // price_vs_strike_pct: how far BTC/ETH has moved from the window-open price.
+            // Positive = above strike (favors UP), negative = below (favors DOWN).
+            // Clipped to [-10, +10] percent to avoid extreme values distorting the model.
+            if obs.price_at_open > 1e-9 {
+                let pct = (current_btc_price - obs.price_at_open) / obs.price_at_open * 100.0;
+                ml_features.price_vs_strike_pct = pct.clamp(-10.0, 10.0);
+            }
         } else {
             // First tick of this window — no change yet.
             ml_features.token_price_window_open = current_token_price;
             ml_features.token_price_change_window = 0.0;
+            ml_features.price_vs_strike_pct = 0.0;
         }
 
         // 3. Register this window if we haven't seen it yet (one snapshot per window).

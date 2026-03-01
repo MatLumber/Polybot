@@ -197,6 +197,8 @@ pub struct PositionResponse {
     pub checkpoint_peak_pct: f64,  // highest prediction ROI achieved as %
     pub trading_roi: f64,          // current trading ROI as % (e.g. 15.3)
     pub prediction_roi: f64,       // current prediction ROI as % (BTC move in predicted direction)
+    pub entry_share_price: f64,    // token entry price 0–1 (probability paid)
+    pub current_share_price: f64,  // token current bid price 0–1 (live probability)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

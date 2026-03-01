@@ -47,6 +47,8 @@ export interface Position {
   checkpointPeakPct: number
   tradingRoi: number
   predictionRoi: number
+  entrySharePrice: number   // token entry price 0–1
+  currentSharePrice: number // token current bid 0–1
 }
 
 export interface Trade {

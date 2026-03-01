@@ -318,6 +318,8 @@ pub struct PaperPosition {
     // ── Prediction Market Fields ──
     /// Share price at entry (probability-based, $0.01-$0.99)
     pub share_price: f64,
+    /// Current token bid price (updated each tick)
+    pub current_share_price: f64,
     /// Highest share price seen since entry (for trailing take profit)
     pub peak_share_price: f64,
     /// Whether the position is currently winning (price moved in correct direction)
@@ -1037,6 +1039,7 @@ impl PaperTradingEngine {
                     unrealized_pnl: serialized.unrealized_pnl,
                     trail_pct: serialized.trail_pct,
                     share_price: serialized.share_price,
+                    current_share_price: serialized.share_price, // restored: use entry price as baseline
                     peak_share_price: serialized.peak_share_price,
                     is_winning: serialized.is_winning,
                     checkpoint_armed: serialized.checkpoint_armed,
@@ -1328,13 +1331,12 @@ impl PaperTradingEngine {
         let conf = pos.confidence.clamp(0.50, 0.95);
         let conf_factor = (conf - 0.50) / 0.45; // 0.0 at 50% conf, 1.0 at 95% conf
 
-        let base_tp = match pos.timeframe {
-            Timeframe::Min15 => 0.72,
-            Timeframe::Hour1 => 0.68,
-        };
+        // TP acts as a safety-net ceiling — the checkpoint trailing system is the
+        // primary exit. Set high enough that it almost never fires before checkpoints.
+        let base_tp = 0.92_f64;
 
-        // Confidence adjusts range: 0.62 (low conf) to 0.87 (high conf)
-        let mut tp = base_tp + conf_factor * 0.15 - (1.0 - conf_factor) * 0.10;
+        // Confidence adjusts range: 0.85 (low conf) to 0.92 (high conf)
+        let mut tp = base_tp - (1.0 - conf_factor) * 0.07;
 
         // Near expiry: take whatever gains are available rather than risk reversal
         if progress >= 0.85 {
@@ -1343,7 +1345,7 @@ impl PaperTradingEngine {
             tp *= 0.90;
         }
 
-        tp.clamp(0.50, 0.90)
+        tp.clamp(0.55, 0.92)
     }
 
     // ── Price updates ──────────────────────────────────────────
@@ -1418,6 +1420,7 @@ impl PaperTradingEngine {
                 };
 
                 let sell_share_price = bid_share.clamp(0.01, 0.99);
+                pos.current_share_price = sell_share_price;
                 pos.is_winning = sell_share_price > pos.share_price;
 
                 if sell_share_price > pos.peak_share_price {
@@ -1486,7 +1489,10 @@ impl PaperTradingEngine {
                     // Track peak trading ROI and raise the floor as profit grows
                     if trading_roi > pos.checkpoint_peak_roi {
                         pos.checkpoint_peak_roi = trading_roi;
-                        let dynamic_floor = (pos.checkpoint_peak_roi - trail_gap).max(floor_base);
+                        // Dynamic gap: scales with peak (25% of peak, min = trail_gap from config)
+                        // Example: peak=10% → gap=5%, peak=30% → gap=7.5%, peak=50% → gap=12.5%
+                        let dynamic_gap = (pos.checkpoint_peak_roi * 0.25_f64).max(trail_gap);
+                        let dynamic_floor = (pos.checkpoint_peak_roi - dynamic_gap).max(floor_base);
                         if dynamic_floor > pos.checkpoint_floor_roi {
                             pos.checkpoint_floor_roi = dynamic_floor;
                         }
@@ -1962,6 +1968,7 @@ impl PaperTradingEngine {
             unrealized_pnl: 0.0,
             trail_pct: self.config.checkpoint_trail_gap_roi,
             share_price,
+            current_share_price: share_price,
             peak_share_price: share_price,
             is_winning: false,
             checkpoint_armed: false,

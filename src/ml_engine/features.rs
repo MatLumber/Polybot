@@ -162,6 +162,12 @@ pub struct MLFeatureVector {
     pub token_price_change_window: f64,
     /// Tendencia de volumen 24h: +1=subiendo, -1=bajando, 0=estable
     pub volume_trend: f64,
+
+    // ============ Polymarket Alpha ============
+    /// BTC/ETH distance from window-open strike price (%).
+    /// Positive = price is above strike (UP prediction favored).
+    /// Clipped to [-10, +10] to avoid extreme outliers.
+    pub price_vs_strike_pct: f64,
 }
 
 impl MLFeatureVector {
@@ -233,11 +239,13 @@ impl MLFeatureVector {
             self.token_price_window_open,
             self.token_price_change_window,
             self.volume_trend,
+            // Polymarket Alpha (1)
+            self.price_vs_strike_pct,
         ]
     }
 
-    /// Número total de features (61 - 6 dead = 55)
-    pub const NUM_FEATURES: usize = 55;
+    /// Número total de features (61 - 6 dead + 1 new = 56)
+    pub const NUM_FEATURES: usize = 56;
 
     /// Nombres de las features (para importancia)
     pub fn feature_names() -> Vec<&'static str> {
@@ -298,6 +306,8 @@ impl MLFeatureVector {
             "token_price_window_open",
             "token_price_change_window",
             "volume_trend",
+            // Polymarket Alpha
+            "price_vs_strike_pct",
         ]
     }
 }

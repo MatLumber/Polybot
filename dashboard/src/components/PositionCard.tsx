@@ -58,16 +58,20 @@ export function PositionCard({ position }: PositionCardProps) {
           </div>
         </div>
         
-        {/* Price info */}
+        {/* Token probability prices */}
         <div className="flex justify-between items-center text-[10px]">
           <div className="flex items-center gap-3">
             <div>
               <span className="text-muted-foreground">Entry </span>
-              <span className="font-mono-nums">{formatCurrency(position.entry_price)}</span>
+              <span className="font-mono-nums">
+                {formatCurrency(position.entry_price)}
+              </span>
             </div>
             <div>
               <span className="text-muted-foreground">Now </span>
-              <span className="font-mono-nums">{formatCurrency(position.current_price)}</span>
+              <span className="font-mono-nums">
+                {formatCurrency(position.current_price)}
+              </span>
             </div>
           </div>
         </div>

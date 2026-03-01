@@ -522,7 +522,9 @@ impl MLPredictor {
         let confidence = (1.0 - mean_diff * 2.0).clamp(0.0, 1.0);
         let extreme_boost = (ensemble_prob - 0.5).abs() * 2.0;
 
-        let neutral_penalty = if (ensemble_prob - 0.5).abs() < 0.02 { 0.4 } else { 1.0 };
+        // Only lightly penalize signals that are very close to 50% (< 5% edge).
+        // The min_edge gate already filters out true noise; this catches extreme ambiguity.
+        let neutral_penalty = if (ensemble_prob - 0.5).abs() < 0.05 { 0.7 } else { 1.0 };
 
         ((confidence * 0.7 + extreme_boost * 0.3) * neutral_penalty).clamp(0.0, 1.0)
     }

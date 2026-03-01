@@ -93,12 +93,12 @@ risk:
   max_drawdown_pct: 15.0
   kill_switch_enabled: true
   min_oracle_confidence: 0.7
-  # Lowered from 0.05 → 0.02 to arm trailing stops earlier in 15m windows
-  checkpoint_arm_roi: 0.02
-  # Lowered from 0.022 → 0.008 to match lower arm threshold
-  checkpoint_initial_floor_roi: 0.008
-  # Tightened from 0.012 → 0.008 for quicker gain protection
-  checkpoint_trail_gap_roi: 0.008
+  # Arm checkpoint at +10% token ROI (enough profit to be worth protecting)
+  checkpoint_arm_roi: 0.10
+  # Initial floor once armed: +5% (minimum locked profit)
+  checkpoint_initial_floor_roi: 0.05
+  # Base trail gap: 5% (dynamic gap = max(0.05, peak*0.25) so it scales with gains)
+  checkpoint_trail_gap_roi: 0.05
   hard_stop_roi: -0.07
   time_stop_seconds_to_expiry: 90
 
