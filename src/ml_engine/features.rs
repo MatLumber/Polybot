@@ -168,6 +168,12 @@ pub struct MLFeatureVector {
     /// Positive = price is above strike (UP prediction favored).
     /// Clipped to [-10, +10] to avoid extreme outliers.
     pub price_vs_strike_pct: f64,
+
+    // ============ Market Edge ============
+    /// Market certainty: |polymarket_price - 0.5|, range [0, 0.49].
+    /// High value = market has strong consensus (little room for edge).
+    /// Low value = market is uncertain (50/50) — more room for ML divergence.
+    pub market_certainty: f64,
 }
 
 impl MLFeatureVector {
@@ -241,11 +247,13 @@ impl MLFeatureVector {
             self.volume_trend,
             // Polymarket Alpha (1)
             self.price_vs_strike_pct,
+            // Market Edge (1)
+            self.market_certainty,
         ]
     }
 
-    /// Número total de features (61 - 6 dead + 1 new = 56)
-    pub const NUM_FEATURES: usize = 56;
+    /// Número total de features (56 + 1 market_certainty = 57)
+    pub const NUM_FEATURES: usize = 57;
 
     /// Nombres de las features (para importancia)
     pub fn feature_names() -> Vec<&'static str> {
@@ -308,6 +316,8 @@ impl MLFeatureVector {
             "volume_trend",
             // Polymarket Alpha
             "price_vs_strike_pct",
+            // Market Edge
+            "market_certainty",
         ]
     }
 }
@@ -430,6 +440,11 @@ impl FeatureEngine {
         ml_features.polymarket_price_momentum = self.calculate_polymarket_momentum(ml_features.polymarket_price);
         ml_features.polymarket_volume_24hr = features.polymarket_volume_24hr.unwrap_or(0.0);
         ml_features.polymarket_liquidity = features.polymarket_liquidity.unwrap_or(0.0);
+
+        // ============ Market Edge ============
+        // market_certainty = how far the token price is from 50% (market consensus strength).
+        // Range [0, 0.49]. High = market is certain (less room for ML divergence).
+        ml_features.market_certainty = (ml_features.polymarket_price - 0.5).abs();
 
         // Guardar en historial
         self.feature_history

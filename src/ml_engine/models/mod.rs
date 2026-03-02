@@ -348,14 +348,34 @@ impl MLPredictor {
     /// 3. LR trains on the full dataset.
     /// 4. Real feature importance computed via Pearson correlation with target.
     pub fn train(&mut self, dataset: &Dataset) -> anyhow::Result<()> {
-        // === Step 1: Build recency-weighted matrix ===
-        let (x, y) = self.dataset_to_dense_matrix(dataset);
+        // === Temporal train/test split (80% oldest → train, 20% newest → test) ===
+        // Sort samples by timestamp to ensure chronological ordering.
+        // We never use random splits — that would leak future data into training.
+        let mut samples_sorted = dataset.samples.clone();
+        samples_sorted.sort_by_key(|s| s.timestamp);
+
+        let total = samples_sorted.len();
+        let train_end = (total as f64 * 0.80) as usize;
+        let train_samples = &samples_sorted[..train_end];
+        let test_samples = &samples_sorted[train_end..];
+
+        tracing::info!(
+            "📊 Train/test split: {} train samples ({:.0}%), {} test samples ({:.0}%)",
+            train_samples.len(), 100.0 * train_samples.len() as f64 / total as f64,
+            test_samples.len(), 100.0 * test_samples.len() as f64 / total as f64,
+        );
+
+        // Build a training-only dataset for matrix construction
+        let train_dataset = Dataset { samples: train_samples.to_vec(), trade_samples: Vec::new() };
+
+        // === Step 1: Build recency-weighted training matrix ===
+        let (x, y) = self.dataset_to_dense_matrix(&train_dataset);
 
         // === Step 2: Train Random Forest ===
         if let Some(rf) = self.models.get_mut(0) {
             match rf.train(&x, &y) {
                 Ok(_) => tracing::info!(
-                    "🌲 RF trained — accuracy: {:.1}%",
+                    "🌲 RF trained (train accuracy: {:.1}%)",
                     rf.accuracy() * 100.0
                 ),
                 Err(e) => tracing::warn!("RF training failed: {}", e),
@@ -367,7 +387,7 @@ impl MLPredictor {
         let mut focused_y: Vec<f64> = Vec::new();
 
         if let Some(rf) = self.models.get(0) {
-            for sample in &dataset.samples {
+            for sample in train_samples {
                 let feat_vec = sample.features.to_vec();
                 let target = sample.target;
                 let pred = rf.predict(&sample.features);
@@ -388,7 +408,7 @@ impl MLPredictor {
                 }
             }
         } else {
-            for sample in &dataset.samples {
+            for sample in train_samples {
                 focused_2d.push(sample.features.to_vec());
                 focused_y.push(sample.target);
             }
@@ -401,7 +421,7 @@ impl MLPredictor {
                     if let Some(gb) = self.models.get_mut(1) {
                         match gb.train(&x_focused, &focused_y) {
                             Ok(_) => tracing::info!(
-                                "🔁 GB (error-focused) trained — accuracy: {:.1}%",
+                                "🔁 GB (error-focused) trained (train accuracy: {:.1}%)",
                                 gb.accuracy() * 100.0
                             ),
                             Err(e) => tracing::warn!("GB error-focused training failed: {}", e),
@@ -412,18 +432,55 @@ impl MLPredictor {
             }
         }
 
-        // === Step 4: Train Logistic Regression on full dataset ===
+        // === Step 4: Train Logistic Regression on training set ===
         if let Some(lr) = self.models.get_mut(2) {
             match lr.train(&x, &y) {
                 Ok(_) => tracing::info!(
-                    "📈 LR trained — accuracy: {:.1}%",
+                    "📈 LR trained (train accuracy: {:.1}%)",
                     lr.accuracy() * 100.0
                 ),
                 Err(e) => tracing::warn!("LR training failed: {}", e),
             }
         }
 
-        // === Step 5: Real feature importance (Pearson correlation with target) ===
+        // === Step 5: Test set evaluation (real out-of-sample accuracy) ===
+        if !test_samples.is_empty() {
+            let mut ensemble_correct = 0usize;
+            let mut model_correct = [0usize; 3]; // RF, GB, LR
+
+            for sample in test_samples {
+                let target_up = sample.target > 0.5;
+
+                // Evaluate each individual model
+                for (i, model) in self.models.iter().enumerate() {
+                    if let Some(prob) = model.predict(&sample.features) {
+                        if (prob > 0.5) == target_up {
+                            model_correct[i] += 1;
+                        }
+                    }
+                }
+
+                // Evaluate ensemble prediction
+                if let Some(pred) = self.predict(&sample.features) {
+                    if (pred.prob_up > 0.5) == target_up {
+                        ensemble_correct += 1;
+                    }
+                }
+            }
+
+            let n = test_samples.len() as f64;
+            tracing::info!(
+                "🎯 TEST SET accuracy ({} samples, most recent 20%): RF={:.1}% GB={:.1}% LR={:.1}% Ensemble={:.1}%",
+                test_samples.len(),
+                model_correct[0] as f64 / n * 100.0,
+                model_correct[1] as f64 / n * 100.0,
+                model_correct[2] as f64 / n * 100.0,
+                ensemble_correct as f64 / n * 100.0,
+            );
+        }
+
+        // === Step 6: Real feature importance (Pearson correlation with target) ===
+        // Use full dataset for feature importance to maximize signal
         self.calculate_feature_importance_real(dataset);
 
         Ok(())
