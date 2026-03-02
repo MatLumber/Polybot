@@ -228,19 +228,22 @@ impl V3Strategy {
         }
 
         // 1. Finalize any windows that have already closed (use current price as proxy for
-        //    the window-close BTC price — this is accurate to within one tick, ~1 second).
-        let current_btc_price = features.close;
+        //    the window-close price — this is accurate to within one tick, ~1 second).
+        //    IMPORTANT: only finalize windows for the *same asset* being processed here.
+        //    Each asset's features carry that asset's price; mixing prices across assets
+        //    produces wrong UP/DOWN labels and corrupts the ML training dataset.
+        let current_price = features.close;
         let current_token_price = features.polymarket_price.unwrap_or(0.5);
         let now_ts = features.ts;
         let expired_keys: Vec<_> = self
             .pending_windows
             .iter()
-            .filter(|(_, obs)| now_ts >= obs.close_ts)
+            .filter(|(_, obs)| now_ts >= obs.close_ts && obs.asset == asset)
             .map(|(k, _)| *k)
             .collect();
         for key in expired_keys {
             if let Some(obs) = self.pending_windows.remove(&key) {
-                let target = if current_btc_price >= obs.price_at_open { 1.0 } else { 0.0 };
+                let target = if current_price >= obs.price_at_open { 1.0 } else { 0.0 };
                 let direction_label = if target > 0.5 { "UP" } else { "DOWN" };
                 // Update window_history for this market so sequential features stay fresh.
                 {
@@ -254,7 +257,7 @@ impl V3Strategy {
                     asset = ?obs.asset,
                     timeframe = ?obs.timeframe,
                     price_open = obs.price_at_open,
-                    price_close = current_btc_price,
+                    price_close = current_price,
                     outcome = direction_label,
                     dataset_before = self.dataset.len(),
                     "🪟 Window closed — recording ground-truth observation"
@@ -278,7 +281,7 @@ impl V3Strategy {
                     obs.asset,
                     obs.timeframe,
                     obs.price_at_open,
-                    current_btc_price,
+                    current_price,
                 );
                 self.window_observations_count += 1;
                 info!(
@@ -332,7 +335,7 @@ impl V3Strategy {
             // Positive = above strike (favors UP), negative = below (favors DOWN).
             // Clipped to [-10, +10] percent to avoid extreme values distorting the model.
             if obs.price_at_open > 1e-9 {
-                let pct = (current_btc_price - obs.price_at_open) / obs.price_at_open * 100.0;
+                let pct = (current_price - obs.price_at_open) / obs.price_at_open * 100.0;
                 ml_features.price_vs_strike_pct = pct.clamp(-10.0, 10.0);
             }
         } else {
@@ -345,7 +348,7 @@ impl V3Strategy {
         // 3. Register this window if we haven't seen it yet (one snapshot per window).
         self.pending_windows.entry(win_key).or_insert_with(|| WindowObservation {
             features: ml_features.clone(),
-            price_at_open: current_btc_price,
+            price_at_open: current_price,
             token_price_at_open: current_token_price,
             close_ts: win_close_ts,
             asset,
