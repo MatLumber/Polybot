@@ -8,8 +8,11 @@ pub struct FeeQuote {
 }
 
 pub fn fee_rate_from_price(share_price: f64) -> f64 {
+    // Real Polymarket formula: effective_rate = 0.25 × (p × (1-p))²
+    // Max ~1.5625% at p=0.50. Crypto markets: 15m since Jan 19 2026, 1h since Mar 6 2026.
     let p = share_price.clamp(0.01, 0.99);
-    (p * (1.0 - p) * 0.0624).max(0.0)
+    let product = p * (1.0 - p);
+    (0.25 * product * product).max(0.0)
 }
 
 pub fn estimate_roundtrip_fees(

@@ -1763,19 +1763,11 @@ async fn main() -> Result<()> {
                         .into_iter()
                         .map(|p| {
                             let now_ms = chrono::Utc::now().timestamp_millis();
-                            let display_pnl = {
-                                let dir_sign = if format!("{:?}", p.direction) == "Up" { 1.0_f64 } else { -1.0_f64 };
-                                let price_diff = (tick.mid - p.entry_price) * dir_sign;
-                                let price_move_pct = if p.entry_price > 0.0 { price_diff / p.entry_price } else { 0.0 };
-                                let window_ms_disp = (p.market_close_ts - p.market_open_ts).max(1) as f64;
-                                let elapsed_ms = (now_ms - p.opened_at).max(0) as f64;
-                                let time_factor = 1.0 + (elapsed_ms / window_ms_disp).min(1.0) * 2.0;
-                                let sensitivity = if format!("{:?}", p.timeframe) == "Min15" { 15.0_f64 } else { 8.0_f64 };
-                                let sim_share = (p.share_price + price_move_pct * sensitivity * time_factor).clamp(0.02, 0.98);
-                                let fee_rate = crate::polymarket::fee_rate_from_price(sim_share);
-                                let gross = p.shares * sim_share;
-                                (gross * (1.0 - fee_rate)).max(0.0) - p.size_usdc
-                            };
+                            // Use engine's computed unrealized_pnl directly — it already uses
+                            // the correct per-asset price from the Polymarket orderbook (or
+                            // asset-specific simulation). Never use tick.mid across all assets,
+                            // as that applies BTC price to ETH positions (and vice versa).
+                            let display_pnl = p.unrealized_pnl;
                             let trading_roi = if p.size_usdc > 0.0 { display_pnl / p.size_usdc * 100.0 } else { 0.0 };
                             PositionResponse {
                             id: p.id.clone(),
@@ -1966,19 +1958,8 @@ async fn main() -> Result<()> {
                         .into_iter()
                         .map(|p| {
                             let now_ms = chrono::Utc::now().timestamp_millis();
-                            let display_pnl = {
-                                let dir_sign = if format!("{:?}", p.direction) == "Up" { 1.0_f64 } else { -1.0_f64 };
-                                let price_diff = (tick.mid - p.entry_price) * dir_sign;
-                                let price_move_pct = if p.entry_price > 0.0 { price_diff / p.entry_price } else { 0.0 };
-                                let window_ms_disp = (p.market_close_ts - p.market_open_ts).max(1) as f64;
-                                let elapsed_ms = (now_ms - p.opened_at).max(0) as f64;
-                                let time_factor = 1.0 + (elapsed_ms / window_ms_disp).min(1.0) * 2.0;
-                                let sensitivity = if format!("{:?}", p.timeframe) == "Min15" { 15.0_f64 } else { 8.0_f64 };
-                                let sim_share = (p.share_price + price_move_pct * sensitivity * time_factor).clamp(0.02, 0.98);
-                                let fee_rate = crate::polymarket::fee_rate_from_price(sim_share);
-                                let gross = p.shares * sim_share;
-                                (gross * (1.0 - fee_rate)).max(0.0) - p.size_usdc
-                            };
+                            // Use engine's computed unrealized_pnl — correct per-asset prices.
+                            let display_pnl = p.unrealized_pnl;
                             let trading_roi = if p.size_usdc > 0.0 { display_pnl / p.size_usdc * 100.0 } else { 0.0 };
                             PositionResponse {
                             id: p.id.clone(),

@@ -37,7 +37,7 @@ impl MLConfigConvertible for MLConfig {
                 max_volatility_5m: self.max_volatility_5m,
                 min_volatility_5m: 0.0001, // Lowered: 0.001 was blocking all Min15 signals (BTC 15m std dev is ~0.0003-0.0008 in normal conditions)
                 optimal_hours_only: self.optimal_hours_only,
-                max_window_progress: 0.90,    // Default - más permisivo
+                max_window_progress: 0.30,    // Only enter in first 30% of window — market makers widen spread in last 70%
                 min_time_to_close_minutes: 2.0, // Default
                 min_model_confidence: self.min_confidence,
             },

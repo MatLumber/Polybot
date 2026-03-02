@@ -505,6 +505,32 @@ impl V3Strategy {
             return None;
         }
 
+        // Token price divergence filter: only trade when our prediction diverges from the
+        // Polymarket market consensus by ≥8%. Low divergence means we agree with the market
+        // and have no edge — the token price already reflects our prediction.
+        // market_price ~0.5 when no real Polymarket data available (safe to proceed).
+        let market_token_price = ml_features.polymarket_price;
+        let divergence = (prediction.prob_up - market_token_price).abs();
+        if market_token_price > 0.45 && market_token_price < 0.55 {
+            // Market is near 50% (high uncertainty) — divergence filter less meaningful,
+            // allow if our signal has sufficient edge already (edge check below covers this).
+        } else if divergence < 0.08 {
+            let reason = format!(
+                "low_token_divergence: |ml={:.2} - mkt={:.2}| = {:.3} < 0.08",
+                prediction.prob_up, market_token_price, divergence
+            );
+            tracing::info!(
+                asset = ?features.asset,
+                timeframe = ?features.timeframe,
+                ml_prob = prediction.prob_up,
+                market_price = market_token_price,
+                divergence,
+                "❌ ML signal rejected — no edge vs market consensus"
+            );
+            self.last_filter_reason = Some(reason);
+            return None;
+        }
+
         // Determine direction
         let direction = if prediction.prob_up > 0.5 {
             Direction::Up
