@@ -51,6 +51,12 @@ pub struct MLEngineConfig {
     pub training: TrainingConfig,
     /// Confianza mínima para señales
     pub min_confidence: f64,
+    /// Edge neto mínimo requerido (probabilidad lado - costos)
+    pub min_edge_net: f64,
+    /// Permitir fallback cuando ML está listo pero rechaza la señal
+    pub allow_fallback_when_ml_ready: bool,
+    /// Balancear entrenamiento por segmento (asset x timeframe)
+    pub segmented_training: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +132,9 @@ impl Default for MLEngineConfig {
                 early_stopping_patience: 10,
             },
             min_confidence: 0.52, // Lower default for exploration phase
+            min_edge_net: 0.015,  // 1.5% net edge floor
+            allow_fallback_when_ml_ready: false,
+            segmented_training: true,
         }
     }
 }

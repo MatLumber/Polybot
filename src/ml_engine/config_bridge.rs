@@ -50,6 +50,9 @@ impl MLConfigConvertible for MLConfig {
                 early_stopping_patience: 10, // Default
             },
             min_confidence: self.min_confidence,
+            min_edge_net: self.min_edge_net,
+            allow_fallback_when_ml_ready: self.allow_fallback_when_ml_ready,
+            segmented_training: self.segmented_training,
         }
     }
 }
@@ -98,6 +101,10 @@ mod tests {
             gradient_boosting_weight: 0.35,
             logistic_regression_weight: 0.25,
             dynamic_weight_adjustment: true,
+            min_confidence: 0.65,
+            min_edge_net: 0.015,
+            allow_fallback_when_ml_ready: false,
+            segmented_training: true,
             max_spread_bps_15m: 150.0,
             max_spread_bps_1h: 200.0,
             min_depth_usdc: 0.0,
@@ -109,7 +116,10 @@ mod tests {
 
         assert!(engine_config.enabled);
         assert!(matches!(engine_config.model_type, ModelType::Ensemble));
-        assert_eq!(engine_config.min_confidence, 0.52);
+        assert_eq!(engine_config.min_confidence, 0.65);
+        assert_eq!(engine_config.min_edge_net, 0.015);
+        assert!(!engine_config.allow_fallback_when_ml_ready);
+        assert!(engine_config.segmented_training);
     }
 
     #[test]

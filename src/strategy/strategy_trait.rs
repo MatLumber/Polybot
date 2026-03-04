@@ -84,6 +84,7 @@ pub trait Strategy: Send + Sync {
             total_samples: 0,
             wins: 0,
             losses: 0,
+            by_segment: vec![],
         }
     }
 

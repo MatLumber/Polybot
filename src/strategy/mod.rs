@@ -169,6 +169,8 @@ pub struct GeneratedSignal {
     pub timeframe: Timeframe,
     pub direction: Direction,
     pub confidence: f64,
+    /// Probability that underlying market closes UP (0-1), if available.
+    pub model_prob_up: Option<f64>,
     pub reasons: Vec<String>,
     pub ts: i64,
     /// Indicators that contributed to this signal
@@ -1073,6 +1075,11 @@ impl StrategyEngine {
             timeframe: features.timeframe,
             direction,
             confidence,
+            model_prob_up: Some(if direction == Direction::Up {
+                confidence
+            } else {
+                1.0 - confidence
+            }),
             reasons,
             ts: features.ts,
             indicators_used,
@@ -1311,6 +1318,13 @@ impl StrategyEngine {
             timeframe: gen.timeframe,
             direction: gen.direction,
             confidence: gen.confidence,
+            model_prob_up: gen.model_prob_up.unwrap_or_else(|| {
+                if gen.direction == Direction::Up {
+                    gen.confidence
+                } else {
+                    1.0 - gen.confidence
+                }
+            }),
             features,
             strategy_id: "polybot-binary-v3".to_string(),
             market_slug: String::new(),

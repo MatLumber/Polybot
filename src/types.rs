@@ -306,6 +306,9 @@ pub struct Signal {
     pub direction: Direction,
     /// Confidence level (0.5 - 1.0)
     pub confidence: f64,
+    /// Probability that the underlying market resolves UP (0.0 - 1.0)
+    #[serde(default = "default_signal_model_prob_up")]
+    pub model_prob_up: f64,
     /// Features used for this prediction
     pub features: FeatureSet,
     /// Strategy that generated this signal
@@ -332,6 +335,10 @@ pub struct Signal {
     /// Indicators that contributed to this signal (for calibration)
     #[serde(default)]
     pub indicators_used: Vec<String>,
+}
+
+fn default_signal_model_prob_up() -> f64 {
+    0.5
 }
 
 /// Trade record

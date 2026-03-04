@@ -577,6 +577,11 @@ mod tests {
             timeframe: Timeframe::Min15,
             direction,
             confidence,
+            model_prob_up: if direction == Direction::Up {
+                confidence.clamp(0.0, 1.0)
+            } else {
+                (1.0 - confidence).clamp(0.0, 1.0)
+            },
             features: crate::types::FeatureSet {
                 ts: 0,
                 asset,

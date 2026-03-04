@@ -237,16 +237,30 @@ impl MLStrategyPredictor {
         // Agregar al dataset
         self.dataset.add_trade(trade.clone());
 
-        // Actualizar calibrador con la probabilidad ML (prob_up), no calibrator_confidence
-        self.calibrator
-            .add_observation(trade.predicted_prob_up.unwrap_or(0.5), trade.is_win);
+        // Actualizar calibrador con la probabilidad ML (prob_up), no calibrator_confidence.
+        // Si falta prob_up, no inyectamos un 0.5 artificial porque distorsiona calibracion.
+        if let Some(prob_up) = trade.predicted_prob_up {
+            self.calibrator.add_observation(prob_up, trade.is_win);
+        } else {
+            tracing::warn!(
+                trade_id = %trade.trade_id,
+                "Missing predicted_prob_up; skipping calibrator update"
+            );
+        }
 
         // Actualizar estadísticas
         self.state.add_prediction_result(trade.is_win);
 
-        // Actualizar predictor con la probabilidad ML real
+        // Actualizar predictor con la probabilidad ML real (si existe)
         if let Some(ref mut predictor) = self.ml_predictor {
-            predictor.record_outcome(trade.predicted_prob_up.unwrap_or(0.5), trade.is_win);
+            if let Some(prob_up) = trade.predicted_prob_up {
+                predictor.record_outcome(prob_up, trade.is_win);
+            } else {
+                tracing::warn!(
+                    trade_id = %trade.trade_id,
+                    "Missing predicted_prob_up; skipping predictor outcome update"
+                );
+            }
         }
 
         // Check for concept drift — if detected, force immediate retrain

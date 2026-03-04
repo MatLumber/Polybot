@@ -255,6 +255,12 @@ pub struct MLConfig {
     pub dynamic_weight_adjustment: bool,
     /// Minimum confidence threshold for ML predictions and fallback signals
     pub min_confidence: f64,
+    /// Minimum net edge required by strategy-level ML gate
+    pub min_edge_net: f64,
+    /// Allow fallback signals when ML is ready but rejects the current sample
+    pub allow_fallback_when_ml_ready: bool,
+    /// Balance training samples per segment (asset x timeframe)
+    pub segmented_training: bool,
     /// Filter configuration
     pub max_spread_bps_15m: f64,
     pub max_spread_bps_1h: f64,
@@ -279,6 +285,9 @@ impl Default for MLConfig {
             logistic_regression_weight: 0.25,
             dynamic_weight_adjustment: true,
             min_confidence: 0.65,
+            min_edge_net: 0.015,
+            allow_fallback_when_ml_ready: false,
+            segmented_training: true,
             max_spread_bps_15m: 100.0,
             max_spread_bps_1h: 150.0,
             min_depth_usdc: 0.0,
@@ -396,6 +405,10 @@ impl AppConfig {
             .set_default("ml_engine.gradient_boosting_weight", 0.35)?
             .set_default("ml_engine.logistic_regression_weight", 0.25)?
             .set_default("ml_engine.dynamic_weight_adjustment", true)?
+            .set_default("ml_engine.min_confidence", 0.65)?
+            .set_default("ml_engine.min_edge_net", 0.015)?
+            .set_default("ml_engine.allow_fallback_when_ml_ready", false)?
+            .set_default("ml_engine.segmented_training", true)?
             .set_default("ml_engine.max_spread_bps_15m", 100.0)?
             .set_default("ml_engine.max_spread_bps_1h", 150.0)?
             .set_default("ml_engine.min_depth_usdc", 0.0)?
