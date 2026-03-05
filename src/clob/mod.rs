@@ -473,10 +473,14 @@ impl ClobClient {
     /// Refresh market cache
     pub async fn refresh_markets(&self) -> Result<()> {
         const PAGE_SIZE: usize = 500;
+        const EVENT_PAGE_SIZE: usize = 500;
         // Gamma's active market universe is large and not strictly ordered by relevance.
-        // Scan deeper to avoid missing intraday BTC/ETH markets (updown-15m/1h/5m),
+        // Scan deeper to avoid missing intraday BTC/ETH markets (updown-15m/1h),
         // which can appear far beyond the first pages.
-        const MAX_PAGES: usize = 80;
+        const MAX_PAGES: usize = 24;
+        const MAX_EVENT_PAGES: usize = 8;
+        const EVENT_LOOKBACK_SECS: i64 = 6 * 60 * 60;
+        const EVENT_LOOKAHEAD_SECS: i64 = 48 * 60 * 60;
 
         let mut all_markets: Vec<MarketResponse> = Vec::new();
         let mut scanned_pages = 0usize;
@@ -494,6 +498,47 @@ impl ClobClient {
             }
         }
 
+        // Augment cache with near-term event markets to reliably capture current
+        // intraday crypto up/down lanes (15m/1h), which can be buried in deep pagination.
+        let now_secs = chrono::Utc::now().timestamp();
+        let end_date_min = Some(now_secs - EVENT_LOOKBACK_SECS);
+        let end_date_max = Some(now_secs + EVENT_LOOKAHEAD_SECS);
+        let mut scanned_event_pages = 0usize;
+        let mut injected_event_markets = 0usize;
+        for page in 0..MAX_EVENT_PAGES {
+            let offset = page * EVENT_PAGE_SIZE;
+            let page_events = match self
+                .rest
+                .get_events_with_date_filter(
+                    &self.config.gamma_url,
+                    EVENT_PAGE_SIZE,
+                    offset,
+                    end_date_min,
+                    end_date_max,
+                )
+                .await
+            {
+                Ok(events) => events,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        offset = offset,
+                        "Failed to fetch event page for near-term market augmentation"
+                    );
+                    break;
+                }
+            };
+            let page_len = page_events.len();
+            scanned_event_pages += 1;
+            for event in page_events {
+                injected_event_markets += event.markets.len();
+                all_markets.extend(event.markets);
+            }
+            if page_len < EVENT_PAGE_SIZE {
+                break;
+            }
+        }
+
         let mut cache = self.markets.write().await;
         cache.clear();
         for market in all_markets {
@@ -505,6 +550,8 @@ impl ClobClient {
             cached_markets = cache.len(),
             scanned_pages = scanned_pages,
             page_size = PAGE_SIZE,
+            scanned_event_pages = scanned_event_pages,
+            injected_event_markets = injected_event_markets,
             "Cached markets from Gamma API"
         );
         Ok(())
@@ -826,13 +873,18 @@ impl ClobClient {
                 continue;
             }
 
+            // Hard reject 5m markets: strategy scope is strictly 15m/1h.
+            let cadence = infer_market_cadence(&text);
+            if cadence == MarketCadence::Min5 {
+                continue;
+            }
+
             let mut score = 0i32;
             score += 45;
             if text.contains("up or down") || text.contains("updown") {
                 score += 55;
             }
 
-            let cadence = infer_market_cadence(&text);
             match timeframe {
                 Timeframe::Min15 => match cadence {
                     MarketCadence::Min15 => score += 60,
@@ -897,6 +949,10 @@ impl ClobClient {
                     Timeframe::Hour1 => TimeframeHint::Hour1,
                 };
                 if !text_matches_timeframe_hint(&text, timeframe_hint) {
+                    continue;
+                }
+                let cadence = infer_market_cadence(&text);
+                if cadence == MarketCadence::Min5 {
                     continue;
                 }
                 fallback_asset_matched += 1;
@@ -1442,29 +1498,23 @@ enum MarketCadence {
 
 fn infer_market_cadence(raw: &str) -> MarketCadence {
     let lower = raw.to_ascii_lowercase();
-    if lower.contains("5m")
-        || lower.contains("5 min")
-        || lower.contains("5-minute")
-        || lower.contains("5 minute")
-        || lower.contains("updown-5m")
-    {
+    let words = tokenized_words(&lower);
+    let has_5m_marker = words.iter().any(|w| {
+        w == "5m" || w == "5min" || w == "5mins" || w == "5minute" || w == "5minutes"
+    }) || lower.contains("updown-5m");
+    if has_5m_marker {
         return MarketCadence::Min5;
     }
-    if lower.contains("15m")
-        || lower.contains("15 min")
-        || lower.contains("15-minute")
-        || lower.contains("15 minute")
-        || lower.contains("updown-15m")
-    {
+    let has_15m_marker = words.iter().any(|w| {
+        w == "15m" || w == "15min" || w == "15mins" || w == "15minute" || w == "15minutes"
+    }) || lower.contains("updown-15m");
+    if has_15m_marker {
         return MarketCadence::Min15;
     }
-    if lower.contains("1h")
-        || lower.contains("1 hour")
-        || lower.contains("60m")
-        || lower.contains("60 min")
-        || lower.contains("updown-1h")
-        || looks_like_hourly_updown_market_text(&lower)
-    {
+    let has_1h_marker = words.iter().any(|w| {
+        w == "1h" || w == "60m" || w == "60min" || w == "hour1" || w == "1hour"
+    }) || lower.contains("updown-1h");
+    if has_1h_marker || looks_like_hourly_updown_market_text(&lower) {
         return MarketCadence::Hour1;
     }
     MarketCadence::Unknown

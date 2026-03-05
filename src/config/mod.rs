@@ -267,6 +267,21 @@ pub struct MLConfig {
     pub min_depth_usdc: f64,
     pub max_volatility_5m: f64,
     pub optimal_hours_only: bool,
+    /// Maximum allowed progress within the market window to open new entries.
+    /// 0.0 = only at window open, 1.0 = anytime before close.
+    #[serde(default = "default_ml_max_window_progress")]
+    pub max_window_progress: f64,
+    /// Minimum minutes remaining before expiry to allow opening new entries.
+    #[serde(default = "default_ml_min_time_to_close_minutes")]
+    pub min_time_to_close_minutes: f64,
+}
+
+fn default_ml_max_window_progress() -> f64 {
+    0.85
+}
+
+fn default_ml_min_time_to_close_minutes() -> f64 {
+    1.0
 }
 
 impl Default for MLConfig {
@@ -293,6 +308,8 @@ impl Default for MLConfig {
             min_depth_usdc: 0.0,
             max_volatility_5m: 0.06,
             optimal_hours_only: false,
+            max_window_progress: default_ml_max_window_progress(),
+            min_time_to_close_minutes: default_ml_min_time_to_close_minutes(),
         }
     }
 }

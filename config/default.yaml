@@ -189,6 +189,8 @@ ml_engine:
   min_depth_usdc: 0
   max_volatility_5m: 0.06
   optimal_hours_only: false
+  max_window_progress: 0.85
+  min_time_to_close_minutes: 1.0
 
 # ============================================================================
 # CALIBRATION - Configuración agresiva

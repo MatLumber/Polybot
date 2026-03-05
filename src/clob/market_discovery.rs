@@ -665,23 +665,6 @@ impl MarketDiscovery {
             return Some(Timeframe::Hour1);
         }
 
-        // For generic up/down markets WITHOUT explicit timeframe markers,
-        // infer from time to expiry
-        let is_updown = text_lower.contains("up or down")
-            || text_lower.contains("updown")
-            || text_lower.contains("up-down");
-
-        if is_updown {
-            // Only use time-based inference for markets without explicit markers
-            // 15m markets typically expire within 20 minutes
-            // 1h markets typically expire within 80 minutes
-            if minutes_to_end > 0 && minutes_to_end <= 20 {
-                return Some(Timeframe::Min15);
-            } else if minutes_to_end > 20 && minutes_to_end <= 90 {
-                return Some(Timeframe::Hour1);
-            }
-        }
-
         debug!(
             "Cannot detect timeframe: text='{}' minutes_to_end={}",
             text.chars().take(80).collect::<String>(),

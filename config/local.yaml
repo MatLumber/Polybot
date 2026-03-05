@@ -41,8 +41,11 @@ ml_engine:
   dynamic_weight_adjustment: true
   
   # Smart filters
-  # max_window_progress: 0.30 (hardcoded in Rust — only enter first 30% of each window)
-  # For 15m windows: enter only in first 4.5 min. For 1h: first 18 min.
+  # Late-entry gate
+  # 0.85 = allow entries until 85% of window life (while still avoiding the final stretch).
+  max_window_progress: 0.85
+  # Keep at least 1 minute before expiry for new entries
+  min_time_to_close_minutes: 1.0
   max_spread_bps_15m: 500     # ~5% spread on token price (hard cap; 800bps = illiquid)
   max_spread_bps_1h: 700      # 1h markets tolerate slightly wider spread
   min_depth_usdc: 0
