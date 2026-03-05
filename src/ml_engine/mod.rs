@@ -119,7 +119,7 @@ impl Default for MLEngineConfig {
                 max_volatility_5m: 0.05,        // Was 0.02 - too restrictive
                 min_volatility_5m: 0.0001,      // Was 0.001 - allow very low vol
                 optimal_hours_only: false,      // Was true - don't restrict by hour
-                max_window_progress: 0.30,      // Only enter in first 30% of window — market makers widen spread later
+                max_window_progress: 0.60,      // Only enter in first 60% of window — market makers widen spread later
                 min_time_to_close_minutes: 2.0, // Was 3.0 - slightly more permissive
                 min_model_confidence: 0.52,     // Was 0.55 - lower threshold for exploration
             },

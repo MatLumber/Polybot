@@ -356,6 +356,24 @@ impl V3Strategy {
             open_ts: win_open_ts,
         });
         // === END WINDOW OBSERVATION TRACKING ===
+        // One-per-window throttle: max 1 trade per (asset, timeframe) window.
+        // Run this before filters/ML to avoid repeated evaluations in the same window
+        // after a trade was already opened.
+        let already_entered_this_window = self
+            .last_entry_window
+            .get(&(asset, timeframe))
+            .copied()
+            .map(|last| last == win_open_ts)
+            .unwrap_or(false);
+
+        if already_entered_this_window {
+            tracing::info!(
+                ?asset, ?timeframe, win_open_ts,
+                "Signal throttled (one_per_window)"
+            );
+            self.last_filter_reason = Some("one_per_window_throttle".to_string());
+            return None;
+        }
 
         // Apply smart filters first
         let filter_context = FilterContext {
@@ -411,23 +429,6 @@ impl V3Strategy {
                     "âš ï¸ Concept drift detected â€” market regime may have changed, consider retraining"
                 );
             }
-        }
-
-        // One-per-window throttle: max 1 trade per (asset, timeframe) window
-        let already_entered_this_window = self
-            .last_entry_window
-            .get(&(asset, timeframe))
-            .copied()
-            .map(|last| last == win_open_ts)
-            .unwrap_or(false);
-
-        if already_entered_this_window {
-            tracing::info!(
-                ?asset, ?timeframe, win_open_ts,
-                "â¸ Signal throttled â€” already entered this window"
-            );
-            self.last_filter_reason = Some("one_per_window_throttle".to_string());
-            return None;
         }
 
         let ml_ready = ml_available && dataset_size >= min_samples;
