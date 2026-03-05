@@ -22,7 +22,9 @@ bot:
 ml_engine:
   enabled: true
   model_type: "ensemble"  # Options: random_forest, gradient_boosting, logistic_regression, ensemble
-  min_confidence: 0.55
+  min_confidence: 0.52
+  # Permite señal de respaldo basada en reglas cuando ML está listo pero rechaza por confianza.
+  allow_fallback_when_ml_ready: true
   
   # Features
   use_microstructure: true
