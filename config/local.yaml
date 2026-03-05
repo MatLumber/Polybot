@@ -6,6 +6,17 @@
 # ============================================================================
 use_v3_strategy: true
 
+# ============================================================================
+# STARTUP RESET SAFETY
+# ============================================================================
+reset:
+  enabled_on_start: false
+  mode: "hard_all_history"
+  no_backup: true
+  delete_prices: false
+  delete_learning_state: false
+  delete_paper_state: false
+
 bot:
   tag: "polybot-ml-v3.0"
   assets:
