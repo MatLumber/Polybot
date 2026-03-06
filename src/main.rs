@@ -1754,6 +1754,8 @@ async fn main() -> Result<()> {
                                         size,
                                     )
                                     .with_auth(config.execution.signature_type, None, None);
+                                    let mut close_order = close_order;
+                                    close_order.condition_id = pos.condition_id.clone();
                                     if let Err(e) = position_client.execute_order(&close_order).await {
                                         tracing::warn!(error = %e, token_id = %token_id, "Failed to submit live close order");
                                         live_pending_closes_for_monitor.lock().await.remove(&token_id);
@@ -2825,6 +2827,7 @@ async fn main() -> Result<()> {
                                 shares_size,
                             )
                             .with_auth(config.execution.signature_type, None, None);
+                            order.condition_id = Some(signal.condition_id.clone());
                             if exec_plan.post_only {
                                 order.expiration = signal.expires_at.max(0) as u64;
                             }

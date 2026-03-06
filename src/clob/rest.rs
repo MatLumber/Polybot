@@ -20,6 +20,7 @@ use sha2::Sha256;
 use std::collections::HashMap;
 use std::time::Duration;
 
+use super::signing::order_amounts;
 use super::types::{BookLevel, EventResponse, MarketResponse, Order, OrderBook, Side};
 
 fn parse_book_level(price: &str, size: &str) -> Option<BookLevel> {
@@ -163,6 +164,23 @@ impl RestClient {
             }
         }
         raw.get("data").and_then(Self::parse_fee_rate_bps)
+    }
+
+    fn parse_tick_size(raw: &serde_json::Value) -> Option<String> {
+        for candidate in ["minimum_tick_size", "minimumTickSize", "tick_size", "tickSize"] {
+            if let Some(value) = raw.get(candidate) {
+                if let Some(parsed) = value.as_str() {
+                    let tick = parsed.trim();
+                    if !tick.is_empty() {
+                        return Some(tick.to_string());
+                    }
+                }
+                if let Some(parsed) = value.as_f64() {
+                    return Some(parsed.to_string());
+                }
+            }
+        }
+        raw.get("data").and_then(Self::parse_tick_size)
     }
 
     fn parse_heartbeat_id(raw: &serde_json::Value) -> Option<String> {
@@ -599,13 +617,7 @@ impl RestClient {
             .fee_rate_bps
             .context("feeRateBps missing for CLOB POST /order")?;
 
-        let shares_scaled = (order.size.max(0.0) * 1_000_000.0).round() as u128;
-        let usdc_scaled =
-            (order.size.max(0.0) * order.price.max(0.0) * 1_000_000.0).round() as u128;
-        let (maker_amount, taker_amount) = match order.side {
-            Side::Buy => (usdc_scaled, shares_scaled),
-            Side::Sell => (shares_scaled, usdc_scaled),
-        };
+        let (maker_amount, taker_amount) = order_amounts(order)?;
 
         let side_label = match order.side {
             Side::Buy => "BUY",
@@ -616,7 +628,7 @@ impl RestClient {
 
         let payload = serde_json::json!({
             "order": {
-                "salt": order.salt.to_string(),
+                "salt": order.salt.as_u64(),
                 "maker": maker,
                 "signer": signer,
                 "taker": "0x0000000000000000000000000000000000000000",
@@ -937,6 +949,30 @@ impl RestClient {
 
         Self::parse_fee_rate_bps(&raw)
             .with_context(|| format!("fee rate missing in response for token {}: {}", token_id, raw))
+    }
+
+    pub async fn get_tick_size(&self, token_id: &str) -> Result<String> {
+        let url = format!("{}/tick-size?token_id={}", self.base_url, token_id);
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to fetch tick size")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            bail!("Failed to get tick size: {} - {}", status, text);
+        }
+
+        let raw: serde_json::Value = response
+            .json()
+            .await
+            .context("Failed to parse tick size response")?;
+
+        Self::parse_tick_size(&raw)
+            .with_context(|| format!("tick size missing in response for token {}: {}", token_id, raw))
     }
 
     /// Get midpoint price for a token

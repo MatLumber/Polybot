@@ -32,38 +32,138 @@ pub fn ctf_exchange_address() -> Address {
         .expect("valid Polygon exchange address")
 }
 
-fn ctf_exchange_address_for_chain(chain_id: u64) -> Result<Address> {
-    match chain_id {
-        137 => Ok(ctf_exchange_address()),
-        80002 => Ok("0xdFE02Eb6733538f8Ea35D585af8DE5958AD99E40"
+fn neg_risk_exchange_address() -> Address {
+    "0xC5d563A36AE78145C45a50134d48A1215220f80a"
+        .parse()
+        .expect("valid Polygon neg risk exchange address")
+}
+
+fn ctf_exchange_address_for_chain(chain_id: u64, neg_risk: bool) -> Result<Address> {
+    match (chain_id, neg_risk) {
+        (137, false) => Ok(ctf_exchange_address()),
+        (137, true) => Ok(neg_risk_exchange_address()),
+        (80002, _) => Ok("0xdFE02Eb6733538f8Ea35D585af8DE5958AD99E40"
             .parse()
             .context("invalid Amoy exchange address constant")?),
-        _ => bail!("Unsupported chain_id {} for CLOB order signing", chain_id),
+        _ => bail!(
+            "Unsupported chain_id {} for CLOB order signing (neg_risk={})",
+            chain_id,
+            neg_risk
+        ),
     }
 }
 
-fn order_amounts(order: &Order) -> (U256, U256) {
-    // Order.size is in shares for CLOB payload construction.
-    // BUY -> makerAmount: USDC notional, takerAmount: shares.
-    // SELL -> makerAmount: shares, takerAmount: USDC notional.
-    let shares_scaled = (order.size.max(0.0) * 1_000_000.0).round() as u128;
-    let usdc_scaled = (order.size.max(0.0) * order.price.max(0.0) * 1_000_000.0).round() as u128;
+#[derive(Clone, Copy)]
+struct RoundConfig {
+    price: u32,
+    size: u32,
+    amount: u32,
+}
+
+fn round_down(x: f64, digits: u32) -> f64 {
+    let factor = 10_f64.powi(digits as i32);
+    (x * factor).floor() / factor
+}
+
+fn round_normal(x: f64, digits: u32) -> f64 {
+    let factor = 10_f64.powi(digits as i32);
+    (x * factor).round() / factor
+}
+
+fn round_up(x: f64, digits: u32) -> f64 {
+    let factor = 10_f64.powi(digits as i32);
+    (x * factor).ceil() / factor
+}
+
+fn decimal_places(x: f64) -> u32 {
+    let repr = x.to_string();
+    repr.split('.').nth(1).map(|s| s.len() as u32).unwrap_or(0)
+}
+
+fn to_token_decimals(x: f64) -> u128 {
+    let scaled = x * 1_000_000.0;
+    let normalized = if decimal_places(scaled) > 0 {
+        round_normal(scaled, 0)
+    } else {
+        scaled
+    };
+    normalized.max(0.0) as u128
+}
+
+fn round_config_for_tick_size(tick_size: &str) -> Result<RoundConfig> {
+    match tick_size.trim() {
+        "0.1" => Ok(RoundConfig {
+            price: 1,
+            size: 2,
+            amount: 3,
+        }),
+        "0.01" => Ok(RoundConfig {
+            price: 2,
+            size: 2,
+            amount: 4,
+        }),
+        "0.001" => Ok(RoundConfig {
+            price: 3,
+            size: 2,
+            amount: 5,
+        }),
+        "0.0001" => Ok(RoundConfig {
+            price: 4,
+            size: 2,
+            amount: 6,
+        }),
+        other => bail!("Unsupported tick size '{}'", other),
+    }
+}
+
+pub fn order_amounts(order: &Order) -> Result<(U256, U256)> {
+    let tick_size = order.tick_size.as_deref().unwrap_or("0.01");
+    let round_config = round_config_for_tick_size(tick_size)?;
+    let raw_price = round_normal(order.price.max(0.0), round_config.price);
+
     match order.side {
-        Side::Buy => (U256::from(usdc_scaled), U256::from(shares_scaled)),
-        Side::Sell => (U256::from(shares_scaled), U256::from(usdc_scaled)),
+        Side::Buy => {
+            let raw_taker_amount = round_down(order.size.max(0.0), round_config.size);
+            let mut raw_maker_amount = raw_taker_amount * raw_price;
+            if decimal_places(raw_maker_amount) > round_config.amount {
+                raw_maker_amount = round_up(raw_maker_amount, round_config.amount + 4);
+                if decimal_places(raw_maker_amount) > round_config.amount {
+                    raw_maker_amount = round_down(raw_maker_amount, round_config.amount);
+                }
+            }
+            Ok((
+                U256::from(to_token_decimals(raw_maker_amount)),
+                U256::from(to_token_decimals(raw_taker_amount)),
+            ))
+        }
+        Side::Sell => {
+            let raw_maker_amount = round_down(order.size.max(0.0), round_config.size);
+            let mut raw_taker_amount = raw_maker_amount * raw_price;
+            if decimal_places(raw_taker_amount) > round_config.amount {
+                raw_taker_amount = round_up(raw_taker_amount, round_config.amount + 4);
+                if decimal_places(raw_taker_amount) > round_config.amount {
+                    raw_taker_amount = round_down(raw_taker_amount, round_config.amount);
+                }
+            }
+            Ok((
+                U256::from(to_token_decimals(raw_maker_amount)),
+                U256::from(to_token_decimals(raw_taker_amount)),
+            ))
+        }
     }
 }
 
 fn order_typed_data(order: &Order, maker: Address, signer: Address, chain_id: u64) -> Result<TypedData> {
     let token_id = U256::from_dec_str(&order.token_id)
         .with_context(|| format!("Invalid token_id '{}' for order signing", order.token_id))?;
-    let (maker_amount, taker_amount) = order_amounts(order);
+    let (maker_amount, taker_amount) = order_amounts(order)?;
+    let neg_risk = order.neg_risk.unwrap_or(false);
 
     let domain = EIP712Domain {
         name: Some(POLYMARKET_CTF_EXCHANGE_DOMAIN.to_string()),
         version: Some(DOMAIN_VERSION.to_string()),
         chain_id: Some(chain_id.into()),
-        verifying_contract: Some(ctf_exchange_address_for_chain(chain_id)?),
+        verifying_contract: Some(ctf_exchange_address_for_chain(chain_id, neg_risk)?),
         salt: None,
     };
 
@@ -417,5 +517,23 @@ mod tests {
         let sig = order.signature.unwrap();
         assert!(sig.starts_with("0x"));
         assert!(sig.len() >= 130);
+    }
+
+    #[test]
+    fn order_amounts_match_sdk_rounding_for_buy_orders() {
+        let mut order = Order::new("1".to_string(), Side::Buy, 0.551, 3.629764);
+        order.tick_size = Some("0.01".to_string());
+        let (maker_amount, taker_amount) = order_amounts(&order).unwrap();
+        assert_eq!(maker_amount, U256::from(1_991_000_u64));
+        assert_eq!(taker_amount, U256::from(3_620_000_u64));
+    }
+
+    #[test]
+    fn order_amounts_match_sdk_rounding_for_sell_orders() {
+        let mut order = Order::new("1".to_string(), Side::Sell, 0.551, 3.629764);
+        order.tick_size = Some("0.01".to_string());
+        let (maker_amount, taker_amount) = order_amounts(&order).unwrap();
+        assert_eq!(maker_amount, U256::from(3_620_000_u64));
+        assert_eq!(taker_amount, U256::from(1_991_000_u64));
     }
 }

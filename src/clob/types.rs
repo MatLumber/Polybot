@@ -97,6 +97,15 @@ pub struct Order {
     /// Polymarket fee rate in basis points, fetched per token before signing
     #[serde(default)]
     pub fee_rate_bps: Option<u64>,
+    /// Market minimum tick size used to quantize price and amounts
+    #[serde(default)]
+    pub tick_size: Option<String>,
+    /// Condition ID for the underlying market, used to resolve market metadata.
+    #[serde(default)]
+    pub condition_id: Option<String>,
+    /// Whether the market uses the Neg Risk exchange contract.
+    #[serde(default)]
+    pub neg_risk: Option<bool>,
 }
 
 impl Order {
@@ -121,6 +130,9 @@ impl Order {
             nonce: rand::random::<u64>(),
             expiration: 0,
             fee_rate_bps: None,
+            tick_size: None,
+            condition_id: None,
+            neg_risk: None,
         }
     }
 
@@ -334,6 +346,8 @@ pub struct MarketResponse {
     pub outcome_prices: Vec<String>,
     pub active: bool,
     pub closed: Option<bool>,
+    #[serde(default)]
+    pub neg_risk: Option<bool>,
     /// UMA resolution status when available (e.g. "resolved", "proposed")
     #[serde(default)]
     pub uma_resolution_status: Option<String>,
@@ -408,6 +422,7 @@ impl From<MarketResponse> for super::MarketInfo {
             outcomes: vec!["Yes".to_string(), "No".to_string()], // Default outcomes
             tokens,
             active: m.active && m.closed.unwrap_or(false) == false,
+            neg_risk: m.neg_risk.unwrap_or(false),
             min_tick: 0.01,
             max_tick: 0.99,
             slug: m.slug,

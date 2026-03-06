@@ -220,6 +220,7 @@ pub struct MarketInfo {
     pub outcomes: Vec<String>,
     pub tokens: Vec<TokenInfo>,
     pub active: bool,
+    pub neg_risk: bool,
     pub min_tick: f64,
     pub max_tick: f64,
     /// Market slug (e.g., "btc-15m")
@@ -354,6 +355,24 @@ impl ClobClient {
         }
         if to_submit.fee_rate_bps.is_none() {
             to_submit.fee_rate_bps = Some(self.rest.get_fee_rate_bps(&to_submit.token_id).await?);
+        }
+        if to_submit.tick_size.is_none() {
+            to_submit.tick_size = Some(self.rest.get_tick_size(&to_submit.token_id).await?);
+        }
+        if to_submit.neg_risk.is_none() {
+            if let Some(condition_id) = to_submit.condition_id.as_deref() {
+                let cached = self.get_market(condition_id).await.map(|market| market.neg_risk);
+                let fetched = if cached.is_none() {
+                    self.rest
+                        .get_market(&self.config.gamma_url, condition_id)
+                        .await
+                        .ok()
+                        .map(|market| market.neg_risk.unwrap_or(false))
+                } else {
+                    None
+                };
+                to_submit.neg_risk = cached.or(fetched);
+            }
         }
         if to_submit.signature.is_none() {
             let private_key = self
@@ -1834,6 +1853,7 @@ mod tests {
                 },
             ],
             active: true,
+            neg_risk: false,
             min_tick: 0.01,
             max_tick: 0.99,
             slug: Some("btc-15m".to_string()),
@@ -1842,6 +1862,8 @@ mod tests {
             accepting_orders: true,
             enable_order_book: true,
             liquidity_num: 1000.0,
+            volume_num: 0.0,
+            volume_24hr: 0.0,
             best_bid: 0.49,
             best_ask: 0.51,
         };
