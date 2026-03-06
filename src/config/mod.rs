@@ -501,9 +501,7 @@ impl AppConfig {
             if std::env::var("POLYMARKET_ADDRESS").is_err()
                 && std::env::var("POLYMARKET_WALLET").is_err()
             {
-                bail!(
-                    "POLYMARKET_ADDRESS (or legacy POLYMARKET_WALLET) is required for LIVE mode"
-                );
+                bail!("POLYMARKET_ADDRESS (or legacy POLYMARKET_WALLET) is required for LIVE mode");
             }
             if self.execution.signature_type > 0
                 && std::env::var("POLYMARKET_FUNDER").is_err()

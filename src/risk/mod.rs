@@ -229,6 +229,22 @@ impl RiskManager {
         self.current_balance.read().map(|b| *b).unwrap_or(0.0)
     }
 
+    fn checkpoint_floor_from_peak(&self, peak_roi: f64) -> f64 {
+        let dynamic_gap = (peak_roi * 0.25_f64).max(self.config.checkpoint_trail_gap_roi.max(0.0));
+        (peak_roi - dynamic_gap).max(self.config.checkpoint_initial_floor_roi.max(0.0))
+    }
+
+    fn roi_from_stop_price(direction: Direction, entry_price: f64, stop_price: f64) -> f64 {
+        if entry_price <= 0.0 {
+            return 0.0;
+        }
+
+        match direction {
+            Direction::Up => (stop_price - entry_price) / entry_price,
+            Direction::Down => (entry_price - stop_price) / entry_price,
+        }
+    }
+
     /// Calculate position size based on confidence and available balance
     pub fn calculate_position_size(&self, signal: &Signal) -> f64 {
         let confidence = signal.confidence;
@@ -418,6 +434,64 @@ impl RiskManager {
         }
     }
 
+    /// Restore a live position after a restart/crash so dynamic risk rules keep working.
+    pub fn restore_position(
+        &self,
+        asset: Asset,
+        direction: Direction,
+        size: f64,
+        entry_price: f64,
+        current_price: f64,
+        opened_at: i64,
+        expires_at: i64,
+        market_slug: String,
+        token_id: String,
+    ) {
+        if self.has_position(asset) || entry_price <= 0.0 || size <= 0.0 {
+            return;
+        }
+
+        let (stop_price, take_profit_price, peak_price) = match direction {
+            Direction::Up => (
+                entry_price * (1.0 - self.config.trailing_stop_pct),
+                entry_price * (1.0 + self.config.take_profit_pct),
+                entry_price.max(current_price),
+            ),
+            Direction::Down => (
+                entry_price * (1.0 + self.config.trailing_stop_pct),
+                entry_price * (1.0 - self.config.take_profit_pct),
+                entry_price.min(current_price),
+            ),
+        };
+
+        let position = Position {
+            asset,
+            direction,
+            size,
+            entry_price,
+            current_price,
+            pnl: 0.0,
+            pnl_pct: 0.0,
+            opened_at,
+            expires_at,
+            market_slug,
+            token_id,
+            peak_price,
+            stop_price,
+            take_profit_price,
+            checkpoint_armed: false,
+            checkpoint_peak_roi: 0.0,
+            checkpoint_floor_roi: 0.0,
+            checkpoint_breach_ticks: 0,
+            hard_stop_breach_ticks: 0,
+            dynamic_hard_stop_roi: self.config.hard_stop_roi,
+        };
+
+        if let Ok(mut positions) = self.positions.write() {
+            positions.insert(asset, position);
+        }
+    }
+
     /// Update position with current price and return exit reason if position should close
     pub fn update_position(&self, asset: Asset, current_price: f64) -> Option<ExitReason> {
         let mut positions = self.positions.write().ok()?;
@@ -432,46 +506,13 @@ impl RiskManager {
         };
         position.pnl = (price_diff / position.entry_price) * position.size;
         position.pnl_pct = price_diff / position.entry_price;
-        position.dynamic_hard_stop_roi = self.config.hard_stop_roi;
 
         if !position.checkpoint_armed && position.pnl_pct >= self.config.checkpoint_arm_roi {
             position.checkpoint_armed = true;
             position.checkpoint_peak_roi = position.pnl_pct;
-            position.checkpoint_floor_roi = self.config.checkpoint_initial_floor_roi.max(0.0);
+            position.checkpoint_floor_roi =
+                self.checkpoint_floor_from_peak(position.checkpoint_peak_roi);
             position.checkpoint_breach_ticks = 0;
-        }
-
-        if position.checkpoint_armed {
-            if position.pnl_pct > position.checkpoint_peak_roi {
-                position.checkpoint_peak_roi = position.pnl_pct;
-                let dynamic_gap =
-                    (position.checkpoint_peak_roi * 0.25_f64).max(self.config.checkpoint_trail_gap_roi);
-                let dynamic_floor =
-                    (position.checkpoint_peak_roi - dynamic_gap).max(self.config.checkpoint_initial_floor_roi);
-                if dynamic_floor > position.checkpoint_floor_roi {
-                    position.checkpoint_floor_roi = dynamic_floor;
-                }
-            }
-
-            if position.pnl_pct <= position.checkpoint_floor_roi {
-                position.checkpoint_breach_ticks = position.checkpoint_breach_ticks.saturating_add(1);
-            } else {
-                position.checkpoint_breach_ticks = 0;
-            }
-
-            if position.checkpoint_breach_ticks >= 2 {
-                return Some(ExitReason::CheckpointTakeProfit);
-            }
-        }
-
-        if position.pnl_pct <= position.dynamic_hard_stop_roi {
-            position.hard_stop_breach_ticks = position.hard_stop_breach_ticks.saturating_add(1);
-        } else {
-            position.hard_stop_breach_ticks = 0;
-        }
-
-        if position.hard_stop_breach_ticks >= 2 {
-            return Some(ExitReason::HardStop);
         }
 
         // Update peak price and trailing stop
@@ -496,6 +537,45 @@ impl RiskManager {
                     return Some(ExitReason::TrailingStop);
                 }
             }
+        }
+
+        let trailing_stop_roi = Self::roi_from_stop_price(
+            position.direction,
+            position.entry_price,
+            position.stop_price,
+        );
+        position.dynamic_hard_stop_roi = trailing_stop_roi.min(0.0).max(self.config.hard_stop_roi);
+
+        if position.checkpoint_armed {
+            if position.pnl_pct > position.checkpoint_peak_roi {
+                position.checkpoint_peak_roi = position.pnl_pct;
+            }
+
+            let desired_floor = self.checkpoint_floor_from_peak(position.checkpoint_peak_roi);
+            if desired_floor > position.checkpoint_floor_roi {
+                position.checkpoint_floor_roi = desired_floor;
+            }
+
+            if position.pnl_pct <= position.checkpoint_floor_roi {
+                position.checkpoint_breach_ticks =
+                    position.checkpoint_breach_ticks.saturating_add(1);
+            } else {
+                position.checkpoint_breach_ticks = 0;
+            }
+
+            if position.checkpoint_breach_ticks >= 1 {
+                return Some(ExitReason::CheckpointTakeProfit);
+            }
+        }
+
+        if position.pnl_pct <= self.config.hard_stop_roi {
+            position.hard_stop_breach_ticks = position.hard_stop_breach_ticks.saturating_add(1);
+        } else {
+            position.hard_stop_breach_ticks = 0;
+        }
+
+        if position.hard_stop_breach_ticks >= 1 {
+            return Some(ExitReason::HardStop);
         }
 
         // Check time-based expiry
@@ -827,5 +907,57 @@ mod tests {
         let result = rm.close_position(Asset::BTC, 51000.0, ExitReason::Manual);
         assert!(result.is_some());
         assert!(!rm.has_position(Asset::BTC));
+    }
+
+    #[test]
+    fn test_restore_position_rehydrates_live_state() {
+        let rm = RiskManager::default();
+
+        rm.restore_position(
+            Asset::BTC,
+            Direction::Up,
+            2.5,
+            50000.0,
+            50500.0,
+            1700000000000,
+            1700003600000,
+            "btc-test".to_string(),
+            "token-1".to_string(),
+        );
+
+        assert!(rm.has_position(Asset::BTC));
+
+        rm.update_position(Asset::BTC, 51000.0);
+        let position = rm.get_position(Asset::BTC).unwrap();
+        assert!(position.pnl > 0.0);
+        assert_eq!(position.market_slug, "btc-test");
+        assert_eq!(position.token_id, "token-1");
+    }
+
+    #[test]
+    fn test_checkpoint_take_profit_triggers_from_dynamic_floor() {
+        let config = RiskConfig {
+            checkpoint_arm_roi: 0.05,
+            checkpoint_initial_floor_roi: 0.02,
+            checkpoint_trail_gap_roi: 0.02,
+            trailing_stop_pct: 0.20,
+            hard_stop_roi: -0.20,
+            max_hold_duration_ms: i64::MAX,
+            ..Default::default()
+        };
+        let rm = RiskManager::new(config);
+        let sig = make_signal(Asset::BTC, 0.85, Direction::Up);
+
+        rm.open_position(&sig, 1000.0, 50000.0);
+
+        let exit = rm.update_position(Asset::BTC, 53000.0);
+        assert!(exit.is_none());
+
+        let position = rm.get_position(Asset::BTC).unwrap();
+        assert!(position.checkpoint_armed);
+        assert!(position.checkpoint_floor_roi >= 0.03);
+
+        let exit = rm.update_position(Asset::BTC, 51500.0);
+        assert_eq!(exit, Some(ExitReason::CheckpointTakeProfit));
     }
 }

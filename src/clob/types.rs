@@ -137,7 +137,12 @@ impl Order {
     }
 
     /// Attach signer/funder configuration required by live accounts.
-    pub fn with_auth(mut self, signature_type: u8, maker: Option<Address>, signer: Option<Address>) -> Self {
+    pub fn with_auth(
+        mut self,
+        signature_type: u8,
+        maker: Option<Address>,
+        signer: Option<Address>,
+    ) -> Self {
         self.signature_type = signature_type;
         self.maker = maker;
         self.signer = signer;

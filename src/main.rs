@@ -79,7 +79,7 @@ fn infer_direction_from_outcome(outcome: Option<&str>) -> Option<Direction> {
     None
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct LivePositionContext {
     signal_id: String,
     asset: Asset,
@@ -220,13 +220,13 @@ async fn main() -> Result<()> {
         * config.risk.max_open_positions as f64)
         .max(config.risk.max_position_usdc);
     risk_cfg.min_confidence = config.strategy.min_confidence.max(0.01).min(0.99);
-    
+
     // Scale confidence thresholds to match strategy min_confidence
     let mc = risk_cfg.min_confidence;
     risk_cfg.confidence_scale.low = (mc, 0.4);
     risk_cfg.confidence_scale.medium = (mc + (0.90 - mc) * 0.4, 0.7);
     risk_cfg.confidence_scale.high = (mc + (0.90 - mc) * 0.8, 1.0);
-    
+
     risk_cfg.kill_switch_enabled = config.risk.kill_switch_enabled;
     risk_cfg.take_profit_pct = config.risk.checkpoint_arm_roi.max(0.005);
     risk_cfg.checkpoint_arm_roi = config.risk.checkpoint_arm_roi.max(0.005);
@@ -236,7 +236,7 @@ async fn main() -> Result<()> {
     let live_signature_type = config.execution.signature_type;
     let live_stop_loss_pct = config.risk.hard_stop_roi.abs() * 100.0;
     let live_take_profit_pct = config.risk.checkpoint_arm_roi.max(0.0) * 100.0;
-        let risk_manager = Arc::new(RiskManager::new(risk_cfg));    
+    let risk_manager = Arc::new(RiskManager::new(risk_cfg));
     let dry_run = config.bot.dry_run;
     let paper_trading_enabled = config.paper_trading.enabled;
     let clob_client = Arc::new(ClobClient::with_dry_run(config.execution.clone(), dry_run));
@@ -276,7 +276,9 @@ async fn main() -> Result<()> {
             config.paper_trading.initial_balance,
         ));
         // Set initial trading mode from config (true = paper, false = live)
-        memory.trading_mode.store(paper_trading_enabled, std::sync::atomic::Ordering::SeqCst);
+        memory
+            .trading_mode
+            .store(paper_trading_enabled, std::sync::atomic::Ordering::SeqCst);
         memory
             .live_ready
             .store(live_ready, std::sync::atomic::Ordering::SeqCst);
@@ -295,9 +297,7 @@ async fn main() -> Result<()> {
         dashboard_memory
             .set_calibration_quality_stats(quality)
             .await;
-        dashboard_memory
-            .update_ml_metrics(initial_ml_metrics)
-            .await;
+        dashboard_memory.update_ml_metrics(initial_ml_metrics).await;
         dashboard_memory
             .update_ml_dataset_stats(initial_dataset_stats)
             .await;
@@ -536,103 +536,118 @@ async fn main() -> Result<()> {
         *dashboard_memory.paper_locked.write().await = locked;
         *dashboard_memory.paper_unrealized_pnl.write().await = unrealized;
         *dashboard_memory.paper_peak_balance.write().await = stats.peak_balance;
-                    let stats_response = PaperStatsResponse {
-                        total_trades: stats.total_trades,
-                        wins: stats.wins,
-                        losses: stats.losses,
-                        win_rate: if stats.total_trades > 0 {
-                            (stats.wins as f64 / stats.total_trades as f64) * 100.0
-                        } else {
-                            0.0
-                        },
-                        total_pnl: stats.total_pnl,
-                        total_fees: stats.total_fees,
-                        largest_win: stats.largest_win,
-                        largest_loss: stats.largest_loss,
-                        avg_win: if stats.wins > 0 {
-                            stats.sum_win_pnl / stats.wins as f64
-                        } else {
-                            0.0
-                        },
-                        avg_loss: if stats.losses > 0 {
-                            stats.sum_loss_pnl / stats.losses as f64
-                        } else {
-                            0.0
-                        },
-                        max_drawdown: stats.max_drawdown,
-                        current_drawdown: {
-                            let peak = stats.peak_balance;
-                            if peak > 0.0 {
-                                ((peak - equity) / peak * 100.0).max(0.0)
-                            } else {
-                                0.0
-                            }
-                        },
-                        peak_balance: stats.peak_balance,
-                        profit_factor: if stats.gross_loss > 0.0 {
-                            stats.gross_profit / stats.gross_loss
-                        } else if stats.gross_profit > 0.0 {
-                            f64::INFINITY
-                        } else {
-                            0.0
-                        },
-                        current_streak: stats.current_streak,
-                        best_streak: stats.best_streak,
-                        worst_streak: stats.worst_streak,
-                        exits_trailing_stop: stats.exits_trailing_stop,
-                        exits_take_profit: stats.exits_take_profit,
-                        exits_market_expiry: stats.exits_market_expiry,
-                        exits_time_expiry: stats.exits_time_expiry,
-                        predictions_correct: stats.predictions_correct,
-                        predictions_incorrect: stats.predictions_incorrect,
-                        prediction_win_rate: if stats.total_trades > 0 {
-                            (stats.predictions_correct as f64 / stats.total_trades as f64) * 100.0
-                        } else {
-                            0.0
-                        },
-                        trading_wins: stats.trading_wins,
-                        trading_losses: stats.trading_losses,
-                        trading_win_rate: if stats.trading_wins + stats.trading_losses > 0 {
-                            (stats.trading_wins as f64 / (stats.trading_wins + stats.trading_losses) as f64) * 100.0
-                        } else {
-                            0.0
-                        },
-                    };
+        let stats_response = PaperStatsResponse {
+            total_trades: stats.total_trades,
+            wins: stats.wins,
+            losses: stats.losses,
+            win_rate: if stats.total_trades > 0 {
+                (stats.wins as f64 / stats.total_trades as f64) * 100.0
+            } else {
+                0.0
+            },
+            total_pnl: stats.total_pnl,
+            total_fees: stats.total_fees,
+            largest_win: stats.largest_win,
+            largest_loss: stats.largest_loss,
+            avg_win: if stats.wins > 0 {
+                stats.sum_win_pnl / stats.wins as f64
+            } else {
+                0.0
+            },
+            avg_loss: if stats.losses > 0 {
+                stats.sum_loss_pnl / stats.losses as f64
+            } else {
+                0.0
+            },
+            max_drawdown: stats.max_drawdown,
+            current_drawdown: {
+                let peak = stats.peak_balance;
+                if peak > 0.0 {
+                    ((peak - equity) / peak * 100.0).max(0.0)
+                } else {
+                    0.0
+                }
+            },
+            peak_balance: stats.peak_balance,
+            profit_factor: if stats.gross_loss > 0.0 {
+                stats.gross_profit / stats.gross_loss
+            } else if stats.gross_profit > 0.0 {
+                f64::INFINITY
+            } else {
+                0.0
+            },
+            current_streak: stats.current_streak,
+            best_streak: stats.best_streak,
+            worst_streak: stats.worst_streak,
+            exits_trailing_stop: stats.exits_trailing_stop,
+            exits_take_profit: stats.exits_take_profit,
+            exits_market_expiry: stats.exits_market_expiry,
+            exits_time_expiry: stats.exits_time_expiry,
+            predictions_correct: stats.predictions_correct,
+            predictions_incorrect: stats.predictions_incorrect,
+            prediction_win_rate: if stats.total_trades > 0 {
+                (stats.predictions_correct as f64 / stats.total_trades as f64) * 100.0
+            } else {
+                0.0
+            },
+            trading_wins: stats.trading_wins,
+            trading_losses: stats.trading_losses,
+            trading_win_rate: if stats.trading_wins + stats.trading_losses > 0 {
+                (stats.trading_wins as f64 / (stats.trading_wins + stats.trading_losses) as f64)
+                    * 100.0
+            } else {
+                0.0
+            },
+        };
         *dashboard_memory.paper_stats.write().await = stats_response.clone();
         let positions: Vec<PositionResponse> = engine
             .get_positions()
             .into_iter()
             .map(|p| {
-                let trading_roi = if p.size_usdc > 0.0 { p.unrealized_pnl / p.size_usdc * 100.0 } else { 0.0 };
+                let trading_roi = if p.size_usdc > 0.0 {
+                    p.unrealized_pnl / p.size_usdc * 100.0
+                } else {
+                    0.0
+                };
                 PositionResponse {
-                id: p.id.clone(),
-                asset: format!("{:?}", p.asset),
-                timeframe: format!("{:?}", p.timeframe),
-                direction: format!("{:?}", p.direction),
-                entry_price: if p.price_at_market_open > 0.0 { p.price_at_market_open } else { p.entry_price },
-                current_price: p.current_price,
-                size_usdc: p.size_usdc,
-                pnl: p.unrealized_pnl,
-                pnl_pct: trading_roi, // token-based, consistent with pnl
-                opened_at: p.opened_at,
-                market_slug: p.market_slug.clone(),
-                confidence: p.confidence,
-                peak_price: p.peak_price,
-                trough_price: p.trough_price,
-                market_close_ts: p.market_close_ts,
-                time_remaining_secs: ((p.market_close_ts - chrono::Utc::now().timestamp_millis())
-                    / 1000)
-                    .max(0),
-                stop_loss_pct: p.dynamic_hard_stop_roi.abs() * 100.0,
-                take_profit_pct: crate::paper_trading::PaperTradingEngine::dynamic_take_profit_roi(&p, chrono::Utc::now().timestamp_millis()) * 100.0,
-                checkpoint_armed: p.checkpoint_armed,
-                checkpoint_floor_pct: p.checkpoint_floor_roi * 100.0,
-                checkpoint_peak_pct: p.checkpoint_peak_roi * 100.0,
-                trading_roi,
-                prediction_roi: p.prediction_roi * 100.0,
-                entry_share_price: p.share_price,
-                current_share_price: p.current_share_price,
-            }})
+                    id: p.id.clone(),
+                    asset: format!("{:?}", p.asset),
+                    timeframe: format!("{:?}", p.timeframe),
+                    direction: format!("{:?}", p.direction),
+                    entry_price: if p.price_at_market_open > 0.0 {
+                        p.price_at_market_open
+                    } else {
+                        p.entry_price
+                    },
+                    current_price: p.current_price,
+                    size_usdc: p.size_usdc,
+                    pnl: p.unrealized_pnl,
+                    pnl_pct: trading_roi, // token-based, consistent with pnl
+                    opened_at: p.opened_at,
+                    market_slug: p.market_slug.clone(),
+                    confidence: p.confidence,
+                    peak_price: p.peak_price,
+                    trough_price: p.trough_price,
+                    market_close_ts: p.market_close_ts,
+                    time_remaining_secs: ((p.market_close_ts
+                        - chrono::Utc::now().timestamp_millis())
+                        / 1000)
+                        .max(0),
+                    stop_loss_pct: p.dynamic_hard_stop_roi.abs() * 100.0,
+                    take_profit_pct:
+                        crate::paper_trading::PaperTradingEngine::dynamic_take_profit_roi(
+                            &p,
+                            chrono::Utc::now().timestamp_millis(),
+                        ) * 100.0,
+                    checkpoint_armed: p.checkpoint_armed,
+                    checkpoint_floor_pct: p.checkpoint_floor_roi * 100.0,
+                    checkpoint_peak_pct: p.checkpoint_peak_roi * 100.0,
+                    trading_roi,
+                    prediction_roi: p.prediction_roi * 100.0,
+                    entry_share_price: p.share_price,
+                    current_share_price: p.current_share_price,
+                }
+            })
             .collect();
         *dashboard_memory.paper_positions.write().await = positions.clone();
         dashboard_broadcaster.broadcast_positions(positions);
@@ -941,9 +956,13 @@ async fn main() -> Result<()> {
                     tracing::info!(                        asset = ?tick.asset,                        timeframe = ?timeframe,                        candle_count = candle_count,                        "🕯️ Candle count"                    );
                 } // Need at least 30 candles for meaningful technical indicators
                 if candle_count >= 30 {
-                    if let Some(mut features) = feature_engine_inner.lock().await.compute(&candles) {
+                    if let Some(mut features) = feature_engine_inner.lock().await.compute(&candles)
+                    {
                         // Let's enrich the features with Polymarket volume and liquidity context
-                        if let Some(market) = feature_clob_client.find_tradeable_market_for_signal(tick.asset, timeframe).await {
+                        if let Some(market) = feature_clob_client
+                            .find_tradeable_market_for_signal(tick.asset, timeframe)
+                            .await
+                        {
                             features.polymarket_volume_24hr = Some(market.volume_24hr);
                             features.polymarket_liquidity = Some(market.liquidity_num);
                         }
@@ -1448,14 +1467,14 @@ async fn main() -> Result<()> {
                 let sig = Signal {
                     id: uuid::Uuid::new_v4().to_string(),
                     ts: signal.ts,
-                            asset: signal.asset,
-                            timeframe: signal.timeframe,
-                            direction: signal.direction,
-                            confidence: signal.confidence,
-                            model_prob_up,
-                            features: feature_set,
-                            strategy_id: "rules_v1".to_string(),
-                            market_slug,
+                    asset: signal.asset,
+                    timeframe: signal.timeframe,
+                    direction: signal.direction,
+                    confidence: signal.confidence,
+                    model_prob_up,
+                    features: feature_set,
+                    strategy_id: "rules_v1".to_string(),
+                    market_slug,
                     condition_id,
                     token_id,
                     expires_at,
@@ -1511,11 +1530,14 @@ async fn main() -> Result<()> {
     > = Arc::new(Mutex::new(std::collections::HashMap::new()));
     let live_indicators_for_monitor = live_position_indicators.clone();
     let live_indicators_for_main = live_position_indicators.clone();
-    let live_position_contexts: Arc<
-        Mutex<std::collections::HashMap<String, LivePositionContext>>,
-    > = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let live_contexts_path = live_position_contexts_path(&config.persistence.data_dir);
+    let persisted_live_contexts = load_live_position_contexts(&live_contexts_path);
+    let live_position_contexts: Arc<Mutex<std::collections::HashMap<String, LivePositionContext>>> =
+        Arc::new(Mutex::new(persisted_live_contexts));
     let live_contexts_for_monitor = live_position_contexts.clone();
     let live_contexts_for_main = live_position_contexts.clone();
+    let live_contexts_path_for_monitor = live_contexts_path.clone();
+    let live_contexts_path_for_main = live_contexts_path.clone();
     let live_pending_closes: Arc<Mutex<std::collections::HashSet<String>>> =
         Arc::new(Mutex::new(std::collections::HashSet::new()));
     let live_pending_closes_for_monitor = live_pending_closes.clone();
@@ -1547,13 +1569,16 @@ async fn main() -> Result<()> {
         .or_else(|| std::env::var("POLYMARKET_ADDRESS").ok())
         .unwrap_or_default();
     let position_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
         loop {
             interval.tick().await;
             if wallet_address.is_empty() {
                 continue;
             }
-            match position_client.fetch_wallet_positions(&wallet_address).await {
+            match position_client
+                .fetch_wallet_positions(&wallet_address)
+                .await
+            {
                 Ok(positions) => {
                     #[cfg(feature = "dashboard")]
                     let mut live_dashboard_positions: Vec<PositionResponse> = Vec::new();
@@ -1573,7 +1598,7 @@ async fn main() -> Result<()> {
                             .and_then(|price| price.parse().ok())
                             .unwrap_or(avg_price);
                         let token_id = pos.token_id.clone().unwrap_or_else(|| pos.asset.clone());
-                        let live_context = {
+                        let mut live_context = {
                             live_contexts_for_monitor
                                 .lock()
                                 .await
@@ -1588,9 +1613,82 @@ async fn main() -> Result<()> {
                         {
                             continue;
                         }
+
+                        let fallback_market = if live_context.is_none() {
+                            if let Some(condition_id) = pos.condition_id.as_deref() {
+                                position_client.get_market(condition_id).await
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        let fallback_market_text = fallback_market
+                            .as_ref()
+                            .map(|market| {
+                                format!(
+                                    "{} {}",
+                                    market.slug.clone().unwrap_or_default(),
+                                    market.question
+                                )
+                            })
+                            .unwrap_or_default();
+
+                        if live_context.is_none() {
+                            if let (Some(asset), Some(timeframe)) = (
+                                infer_asset_from_market_text(&fallback_market_text)
+                                    .or_else(|| infer_asset_from_market_text(&pos.asset)),
+                                parse_timeframe_from_market_text(&fallback_market_text)
+                                    .or_else(|| parse_timeframe_from_market_text(&pos.asset)),
+                            ) {
+                                let inferred_context = LivePositionContext {
+                                    signal_id: format!("rehydrated_{}", token_id),
+                                    asset,
+                                    timeframe,
+                                    direction: infer_direction_from_outcome(pos.outcome.as_deref())
+                                        .unwrap_or(Direction::Up),
+                                    confidence: 0.0,
+                                    market_slug: fallback_market
+                                        .as_ref()
+                                        .and_then(|market| market.slug.clone())
+                                        .unwrap_or_else(|| pos.asset.clone()),
+                                    token_id: token_id.clone(),
+                                    condition_id: pos.condition_id.clone().unwrap_or_default(),
+                                    size_usdc: size * avg_price,
+                                    shares_size: size,
+                                    entry_share_price: avg_price,
+                                    opened_at_ms: chrono::Utc::now().timestamp_millis(),
+                                    expires_at_ms: fallback_market
+                                        .as_ref()
+                                        .and_then(|market| {
+                                            market
+                                                .end_date
+                                                .as_deref()
+                                                .or(market.end_date_iso.as_deref())
+                                        })
+                                        .and_then(
+                                            crate::clob::ClobClient::parse_expiry_to_timestamp,
+                                        )
+                                        .unwrap_or(0),
+                                };
+                                {
+                                    let mut contexts = live_contexts_for_monitor.lock().await;
+                                    contexts
+                                        .entry(token_id.clone())
+                                        .or_insert_with(|| inferred_context.clone());
+                                    persist_live_position_contexts(
+                                        &live_contexts_path_for_monitor,
+                                        &contexts,
+                                    );
+                                }
+                                live_context = Some(inferred_context);
+                            }
+                        }
+
                         let timeframe = live_context
                             .as_ref()
                             .map(|ctx| ctx.timeframe)
+                            .or_else(|| parse_timeframe_from_market_text(&fallback_market_text))
                             .or_else(|| parse_timeframe_from_market_text(&pos.asset))
                             .unwrap_or(Timeframe::Min15);
                         let direction = live_context
@@ -1598,7 +1696,10 @@ async fn main() -> Result<()> {
                             .map(|ctx| ctx.direction)
                             .or_else(|| infer_direction_from_outcome(pos.outcome.as_deref()))
                             .unwrap_or(Direction::Up);
-                        let confidence = live_context.as_ref().map(|ctx| ctx.confidence).unwrap_or(0.0);
+                        let confidence = live_context
+                            .as_ref()
+                            .map(|ctx| ctx.confidence)
+                            .unwrap_or(0.0);
                         let size_usdc = live_context
                             .as_ref()
                             .map(|ctx| ctx.size_usdc)
@@ -1608,35 +1709,51 @@ async fn main() -> Result<()> {
                             .map(|ctx| ctx.entry_share_price)
                             .unwrap_or(avg_price);
                         let entry_cost = size * entry_share_price;
-                        let open_fee = entry_cost * crate::polymarket::fee_rate_from_price(entry_share_price);
+                        let open_fee =
+                            entry_cost * crate::polymarket::fee_rate_from_price(entry_share_price);
                         let gross_exit_value = size * current_price;
                         let unrealized_close_fee = gross_exit_value
                             * crate::polymarket::fee_rate_from_price(current_price);
                         let unrealized_pnl =
                             gross_exit_value - unrealized_close_fee - entry_cost - open_fee;
 
-                        let asset_str = pos.asset.to_uppercase();
-                        let asset = if asset_str.contains("BTC") {
-                            Some(Asset::BTC)
-                        } else if asset_str.contains("ETH") {
-                            Some(Asset::ETH)
-                        } else if asset_str.contains("SOL") {
-                            Some(Asset::SOL)
-                        } else if asset_str.contains("XRP") {
-                            Some(Asset::XRP)
-                        } else {
-                            None
-                        };
+                        let asset = live_context
+                            .as_ref()
+                            .map(|ctx| ctx.asset)
+                            .or_else(|| infer_asset_from_market_text(&fallback_market_text))
+                            .or_else(|| infer_asset_from_market_text(&pos.asset));
+
+                        if let (Some(asset), Some(ctx)) = (asset, live_context.as_ref()) {
+                            if position_risk_for_monitor.get_position(asset).is_none() {
+                                position_risk_for_monitor.restore_position(
+                                    asset,
+                                    direction,
+                                    size_usdc,
+                                    entry_share_price,
+                                    current_price,
+                                    ctx.opened_at_ms,
+                                    ctx.expires_at_ms,
+                                    ctx.market_slug.clone(),
+                                    token_id.clone(),
+                                );
+                            }
+                        }
 
                         #[cfg(feature = "dashboard")]
                         {
                             total_live_unrealized += unrealized_pnl;
-                            let live_checkpoint_state = asset
-                                .and_then(|asset_value| position_risk_for_monitor.get_position(asset_value));
+                            let live_checkpoint_state = asset.and_then(|asset_value| {
+                                position_risk_for_monitor.get_position(asset_value)
+                            });
                             live_dashboard_positions.push(PositionResponse {
                                 id: token_id.clone(),
                                 asset: asset
                                     .map(|value| value.to_string())
+                                    .or_else(|| {
+                                        fallback_market
+                                            .as_ref()
+                                            .and_then(|market| market.slug.clone())
+                                    })
                                     .unwrap_or_else(|| pos.asset.clone()),
                                 timeframe: timeframe.to_string(),
                                 direction: direction.to_string(),
@@ -1656,6 +1773,11 @@ async fn main() -> Result<()> {
                                 market_slug: live_context
                                     .as_ref()
                                     .map(|ctx| ctx.market_slug.clone())
+                                    .or_else(|| {
+                                        fallback_market
+                                            .as_ref()
+                                            .and_then(|market| market.slug.clone())
+                                    })
                                     .unwrap_or_else(|| pos.asset.clone()),
                                 confidence,
                                 peak_price: current_price,
@@ -1666,7 +1788,12 @@ async fn main() -> Result<()> {
                                     .unwrap_or(0),
                                 time_remaining_secs: live_context
                                     .as_ref()
-                                    .map(|ctx| ((ctx.expires_at_ms - chrono::Utc::now().timestamp_millis()) / 1000).max(0))
+                                    .map(|ctx| {
+                                        ((ctx.expires_at_ms
+                                            - chrono::Utc::now().timestamp_millis())
+                                            / 1000)
+                                            .max(0)
+                                    })
                                     .unwrap_or(0),
                                 stop_loss_pct: live_checkpoint_state
                                     .as_ref()
@@ -1697,7 +1824,9 @@ async fn main() -> Result<()> {
                         }
 
                         if let Some(asset) = asset {
-                            if let Some(exit_reason) = position_risk_for_monitor.update_position(asset, current_price) {
+                            if let Some(exit_reason) =
+                                position_risk_for_monitor.update_position(asset, current_price)
+                            {
                                 let should_close = {
                                     let mut pending = live_pending_closes_for_monitor.lock().await;
                                     pending.insert(token_id.clone())
@@ -1706,23 +1835,29 @@ async fn main() -> Result<()> {
                                     continue;
                                 }
 
-                                let official_result = if let Some(condition_id) = pos.condition_id.as_deref() {
-                                    position_client
-                                        .official_result_for_token(condition_id, &token_id)
-                                        .await
-                                } else {
-                                    None
-                                };
+                                let official_result =
+                                    if let Some(condition_id) = pos.condition_id.as_deref() {
+                                        position_client
+                                            .official_result_for_token(condition_id, &token_id)
+                                            .await
+                                    } else {
+                                        None
+                                    };
 
-                                let exit_share_price = if official_result.as_deref() == Some("WIN") {
+                                let exit_share_price = if official_result.as_deref() == Some("WIN")
+                                {
                                     if let Some(condition_id) = pos.condition_id.as_deref() {
                                         let redeem_key = format!("{}:{}", condition_id, token_id);
                                         let should_attempt = {
-                                            let mut redeemed = redeemed_claims_for_monitor.lock().await;
+                                            let mut redeemed =
+                                                redeemed_claims_for_monitor.lock().await;
                                             redeemed.insert(redeem_key.clone())
                                         };
                                         if !should_attempt {
-                                            live_pending_closes_for_monitor.lock().await.remove(&token_id);
+                                            live_pending_closes_for_monitor
+                                                .lock()
+                                                .await
+                                                .remove(&token_id);
                                             continue;
                                         }
                                         if let Err(e) = position_client
@@ -1730,8 +1865,14 @@ async fn main() -> Result<()> {
                                             .await
                                         {
                                             tracing::warn!(error = %e, condition_id = %condition_id, token_id = %token_id, "Redemption attempt failed");
-                                            redeemed_claims_for_monitor.lock().await.remove(&redeem_key);
-                                            live_pending_closes_for_monitor.lock().await.remove(&token_id);
+                                            redeemed_claims_for_monitor
+                                                .lock()
+                                                .await
+                                                .remove(&redeem_key);
+                                            live_pending_closes_for_monitor
+                                                .lock()
+                                                .await
+                                                .remove(&token_id);
                                             continue;
                                         }
                                     }
@@ -1743,7 +1884,10 @@ async fn main() -> Result<()> {
                                         Ok(quote) => quote,
                                         Err(e) => {
                                             tracing::warn!(error = %e, token_id = %token_id, "Failed to quote token for live close");
-                                            live_pending_closes_for_monitor.lock().await.remove(&token_id);
+                                            live_pending_closes_for_monitor
+                                                .lock()
+                                                .await
+                                                .remove(&token_id);
                                             continue;
                                         }
                                     };
@@ -1756,15 +1900,24 @@ async fn main() -> Result<()> {
                                     .with_auth(config.execution.signature_type, None, None);
                                     let mut close_order = close_order;
                                     close_order.condition_id = pos.condition_id.clone();
-                                    if let Err(e) = position_client.execute_order(&close_order).await {
+                                    if let Err(e) =
+                                        position_client.execute_order(&close_order).await
+                                    {
                                         tracing::warn!(error = %e, token_id = %token_id, "Failed to submit live close order");
-                                        live_pending_closes_for_monitor.lock().await.remove(&token_id);
+                                        live_pending_closes_for_monitor
+                                            .lock()
+                                            .await
+                                            .remove(&token_id);
                                         continue;
                                     }
                                     close_order.price
                                 };
 
-                                let _ = position_risk_for_monitor.close_position(asset, exit_share_price, exit_reason);
+                                let _ = position_risk_for_monitor.close_position(
+                                    asset,
+                                    exit_share_price,
+                                    exit_reason,
+                                );
                                 let pnl = (size * exit_share_price)
                                     - ((size * exit_share_price)
                                         * crate::polymarket::fee_rate_from_price(exit_share_price))
@@ -1774,7 +1927,10 @@ async fn main() -> Result<()> {
                                 use crate::persistence::{LiveTradeRecord, WinLossRecord};
                                 let record = WinLossRecord {
                                     timestamp: chrono::Utc::now().timestamp(),
-                                    market_slug: format!("{:?}", asset),
+                                    market_slug: live_context
+                                        .as_ref()
+                                        .map(|ctx| ctx.market_slug.clone())
+                                        .unwrap_or_else(|| pos.asset.clone()),
                                     token_id: token_id.clone(),
                                     entry_price: entry_share_price,
                                     exit_price: exit_share_price,
@@ -1789,7 +1945,15 @@ async fn main() -> Result<()> {
                                     tracing::warn!(error = %e, token_id = %token_id, "Failed to persist live win/loss record");
                                 }
 
-                                let live_context = live_contexts_for_monitor.lock().await.remove(&token_id);
+                                let live_context = {
+                                    let mut contexts = live_contexts_for_monitor.lock().await;
+                                    let removed = contexts.remove(&token_id);
+                                    persist_live_position_contexts(
+                                        &live_contexts_path_for_monitor,
+                                        &contexts,
+                                    );
+                                    removed
+                                };
                                 let close_fee = (size * exit_share_price)
                                     * crate::polymarket::fee_rate_from_price(exit_share_price);
                                 let live_trade_record = LiveTradeRecord {
@@ -1806,7 +1970,11 @@ async fn main() -> Result<()> {
                                     exit_price: exit_share_price,
                                     size_usdc,
                                     pnl,
-                                    pnl_pct: if size_usdc > 0.0 { (pnl / size_usdc) * 100.0 } else { 0.0 },
+                                    pnl_pct: if size_usdc > 0.0 {
+                                        (pnl / size_usdc) * 100.0
+                                    } else {
+                                        0.0
+                                    },
                                     result: internal_result.to_string(),
                                     prediction_correct: official_result
                                         .as_deref()
@@ -1815,7 +1983,12 @@ async fn main() -> Result<()> {
                                     exit_reason: exit_reason.to_string(),
                                     hold_duration_secs: live_context
                                         .as_ref()
-                                        .map(|ctx| ((chrono::Utc::now().timestamp_millis() - ctx.opened_at_ms) / 1000).max(0))
+                                        .map(|ctx| {
+                                            ((chrono::Utc::now().timestamp_millis()
+                                                - ctx.opened_at_ms)
+                                                / 1000)
+                                                .max(0)
+                                        })
                                         .unwrap_or(0),
                                     balance_after: position_tracker.available_balance()
                                         + ((size * exit_share_price) - close_fee),
@@ -1830,7 +2003,13 @@ async fn main() -> Result<()> {
                                     tracing::warn!(error = %e, token_id = %token_id, "Failed to persist live trade");
                                 }
 
-                                let parsed_timeframe = parse_timeframe_from_market_text(&pos.asset);
+                                let parsed_timeframe = live_context
+                                    .as_ref()
+                                    .map(|ctx| ctx.timeframe)
+                                    .or_else(|| {
+                                        parse_timeframe_from_market_text(&fallback_market_text)
+                                    })
+                                    .or_else(|| parse_timeframe_from_market_text(&pos.asset));
                                 let (timeframe, indicators, p_model) = {
                                     let mut pending = live_indicators_for_monitor.lock().await;
                                     if let Some(tf) = parsed_timeframe {
@@ -1846,23 +2025,141 @@ async fn main() -> Result<()> {
                                             .collect();
                                         if keys.len() == 1 {
                                             let key = keys[0];
-                                            let (inds, p_model) = pending.remove(&key).unwrap_or((Vec::new(), 0.5));
+                                            let (inds, p_model) =
+                                                pending.remove(&key).unwrap_or((Vec::new(), 0.5));
                                             (key.1, inds, p_model)
                                         } else {
                                             (Timeframe::Min15, Vec::new(), 0.5)
                                         }
                                     }
                                 };
+
+                                let ml_trade_record = crate::paper_trading::PaperTradeRecord {
+                                    timestamp: live_trade_record.timestamp,
+                                    trade_id: live_trade_record.trade_id.clone(),
+                                    signal_id: live_context
+                                        .as_ref()
+                                        .map(|ctx| ctx.signal_id.clone())
+                                        .unwrap_or_else(|| live_trade_record.trade_id.clone()),
+                                    asset: asset.to_string(),
+                                    timeframe: timeframe.to_string(),
+                                    direction: direction.to_string(),
+                                    confidence,
+                                    entry_price: entry_share_price,
+                                    exit_price: exit_share_price,
+                                    size_usdc,
+                                    shares: size,
+                                    fee_paid: open_fee + close_fee,
+                                    pnl,
+                                    pnl_pct: if size_usdc > 0.0 {
+                                        (pnl / size_usdc) * 100.0
+                                    } else {
+                                        0.0
+                                    },
+                                    result: internal_result.to_string(),
+                                    exit_reason: exit_reason.to_string(),
+                                    hold_duration_ms: live_trade_record.hold_duration_secs * 1000,
+                                    balance_after: live_trade_record.balance_after,
+                                    market_open_ts: live_context
+                                        .as_ref()
+                                        .map(|ctx| ctx.opened_at_ms)
+                                        .unwrap_or(live_trade_record.timestamp),
+                                    market_close_ts: live_context
+                                        .as_ref()
+                                        .map(|ctx| ctx.expires_at_ms)
+                                        .unwrap_or(live_trade_record.timestamp),
+                                    time_remaining_at_entry_secs: live_context
+                                        .as_ref()
+                                        .map(|ctx| {
+                                            ((ctx.expires_at_ms - ctx.opened_at_ms) / 1000).max(0)
+                                        })
+                                        .unwrap_or(0),
+                                    indicators_used: indicators.clone(),
+                                    market_id: pos.condition_id.clone().unwrap_or_default(),
+                                    token_id: token_id.clone(),
+                                    outcome: pos.outcome.clone().unwrap_or_default(),
+                                    entry_bid: entry_share_price,
+                                    entry_ask: entry_share_price,
+                                    entry_mid: entry_share_price,
+                                    exit_bid: exit_share_price,
+                                    exit_ask: exit_share_price,
+                                    exit_mid: exit_share_price,
+                                    fee_open: open_fee,
+                                    fee_close: close_fee,
+                                    slippage_open: 0.0,
+                                    slippage_close: 0.0,
+                                    p_market: 0.0,
+                                    p_model,
+                                    edge_net: 0.0,
+                                    kelly_raw: 0.0,
+                                    kelly_applied: 0.0,
+                                    exit_reason_detail: exit_reason.to_string(),
+                                    window_open_price: entry_share_price,
+                                    window_close_price: exit_share_price,
+                                    actual_price_direction: if live_trade_record.prediction_correct
+                                    {
+                                        direction.to_string()
+                                    } else if direction == Direction::Up {
+                                        Direction::Down.to_string()
+                                    } else {
+                                        Direction::Up.to_string()
+                                    },
+                                    prediction_correct: live_trade_record.prediction_correct,
+                                    trading_pnl: pnl,
+                                    trading_win: pnl >= 0.0,
+                                };
+
+                                {
+                                    let mut strat = strategy_for_live_calibration.lock().await;
+                                    strat.register_closed_trade_result(&ml_trade_record);
+                                    #[cfg(feature = "dashboard")]
+                                    {
+                                        let ml_state = strat.get_ml_state();
+                                        let weights = ml_state.model_info.clone();
+                                        live_dashboard_memory_for_positions
+                                            .update_ml_metrics(ml_state.clone())
+                                            .await;
+                                        live_dashboard_memory_for_positions
+                                            .update_ml_dataset_stats(strat.get_dataset_stats())
+                                            .await;
+                                        live_dashboard_broadcaster_for_positions
+                                            .broadcast_ml_metrics(
+                                                ml_state.model_accuracy,
+                                                ml_state.win_rate,
+                                                ml_state.loss_rate,
+                                                ml_state.total_predictions,
+                                                ml_state.correct_predictions,
+                                                ml_state.incorrect_predictions,
+                                                weights,
+                                                ml_state.training_epoch,
+                                                ml_state.dataset_size,
+                                            );
+                                    }
+                                }
+
                                 if !indicators.is_empty() {
                                     let is_win = pnl >= 0.0;
-                                    let result = if is_win { TradeResult::Win } else { TradeResult::Loss };
+                                    let result = if is_win {
+                                        TradeResult::Win
+                                    } else {
+                                        TradeResult::Loss
+                                    };
                                     let mut strat = strategy_for_live_calibration.lock().await;
-                                    strat.record_trade_with_indicators_for_market(asset, timeframe, &indicators, result);
-                                    strat.record_prediction_outcome_for_market(asset, timeframe, p_model, is_win);
+                                    strat.record_trade_with_indicators_for_market(
+                                        asset,
+                                        timeframe,
+                                        &indicators,
+                                        result,
+                                    );
+                                    strat.record_prediction_outcome_for_market(
+                                        asset, timeframe, p_model, is_win,
+                                    );
                                     let stats = strat.export_calibrator_state_v2();
                                     drop(strat);
                                     if let Ok(json) = serde_json::to_string_pretty(&stats) {
-                                        if let Err(e) = std::fs::write(&calibrator_save_path_live, &json) {
+                                        if let Err(e) =
+                                            std::fs::write(&calibrator_save_path_live, &json)
+                                        {
                                             tracing::warn!(error = %e, "Failed to save calibrator state (live)");
                                         }
                                     }
@@ -1884,9 +2181,11 @@ async fn main() -> Result<()> {
                                             pnl: live_trade_record.pnl,
                                             pnl_pct: live_trade_record.pnl_pct,
                                             result: live_trade_record.result.clone(),
-                                            prediction_correct: live_trade_record.prediction_correct,
+                                            prediction_correct: live_trade_record
+                                                .prediction_correct,
                                             exit_reason: live_trade_record.exit_reason.clone(),
-                                            hold_duration_secs: live_trade_record.hold_duration_secs,
+                                            hold_duration_secs: live_trade_record
+                                                .hold_duration_secs,
                                             balance_after: live_trade_record.balance_after,
                                             entry_share_price: live_trade_record.entry_share_price,
                                             exit_share_price: live_trade_record.exit_share_price,
@@ -1903,19 +2202,27 @@ async fn main() -> Result<()> {
                                     .lock()
                                     .await
                                     .insert(token_id.clone());
-                                live_pending_closes_for_monitor.lock().await.remove(&token_id);
+                                live_pending_closes_for_monitor
+                                    .lock()
+                                    .await
+                                    .remove(&token_id);
                             }
                         }
                     }
 
                     #[cfg(feature = "dashboard")]
                     {
-                        *live_dashboard_memory_for_positions.live_positions.write().await = live_dashboard_positions;
-                        *live_dashboard_memory_for_positions.live_unrealized_pnl.write().await = total_live_unrealized;
+                        *live_dashboard_memory_for_positions
+                            .live_positions
+                            .write()
+                            .await = live_dashboard_positions;
+                        *live_dashboard_memory_for_positions
+                            .live_unrealized_pnl
+                            .write()
+                            .await = total_live_unrealized;
                         let state = live_dashboard_memory_for_positions.get_state().await;
-                        live_dashboard_broadcaster_for_positions.broadcast(
-                            &WsMessage::FullState(state),
-                        );
+                        live_dashboard_broadcaster_for_positions
+                            .broadcast(&WsMessage::FullState(state));
                     }
                 }
                 Err(e) => {
@@ -1937,7 +2244,7 @@ async fn main() -> Result<()> {
         .or_else(|| std::env::var("POLYMARKET_ADDRESS").ok())
         .unwrap_or_default();
     let balance_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
         let mut initialized = false;
         loop {
             interval.tick().await; // Fetch balance from Polymarket
@@ -1993,9 +2300,7 @@ async fn main() -> Result<()> {
                         *live_dashboard_memory.live_balance.write().await = balance;
                         *live_dashboard_memory.live_locked.write().await = locked_in_positions;
                         let state = live_dashboard_memory.get_state().await;
-                        live_dashboard_broadcaster.broadcast(
-                            &WsMessage::FullState(state),
-                        );
+                        live_dashboard_broadcaster.broadcast(&WsMessage::FullState(state));
                     }
                 }
                 Err(e) => {
@@ -2078,18 +2383,19 @@ async fn main() -> Result<()> {
                 let exits = engine.update_price(tick.asset, tick.mid, tick.source);
                 #[cfg(feature = "dashboard")]
                 let mut closed_dashboard_trades: Vec<TradeResponse> = Vec::new();
-                
+
                 let mut closed_ml_trades: Vec<crate::paper_trading::PaperTradeRecord> = Vec::new();
-                
+
                 let had_exits = !exits.is_empty();
                 for ((asset, timeframe), reason) in exits {
                     if let Some(record) = engine.close_and_save(asset, timeframe, reason).await {
                         closed_ml_trades.push(record.clone());
                         #[cfg(feature = "dashboard")]
-                        closed_dashboard_trades.push(paper_trade_record_to_dashboard_trade(&record));
+                        closed_dashboard_trades
+                            .push(paper_trade_record_to_dashboard_trade(&record));
                     }
                 }
-                
+
                 // Allow V3 ML Strategy to learn continuously from paper trading resolved outcomes
                 if !closed_ml_trades.is_empty() {
                     let mut strat = paper_ml_strategy.lock().await;
@@ -2213,7 +2519,9 @@ async fn main() -> Result<()> {
                         trading_wins: stats.trading_wins,
                         trading_losses: stats.trading_losses,
                         trading_win_rate: if stats.trading_wins + stats.trading_losses > 0 {
-                            (stats.trading_wins as f64 / (stats.trading_wins + stats.trading_losses) as f64) * 100.0
+                            (stats.trading_wins as f64
+                                / (stats.trading_wins + stats.trading_losses) as f64)
+                                * 100.0
                         } else {
                             0.0
                         },
@@ -2299,7 +2607,9 @@ async fn main() -> Result<()> {
                         trading_wins: stats.trading_wins,
                         trading_losses: stats.trading_losses,
                         trading_win_rate: if stats.trading_wins + stats.trading_losses > 0 {
-                            (stats.trading_wins as f64 / (stats.trading_wins + stats.trading_losses) as f64) * 100.0
+                            (stats.trading_wins as f64
+                                / (stats.trading_wins + stats.trading_losses) as f64)
+                                * 100.0
                         } else {
                             0.0
                         },
@@ -2419,7 +2729,7 @@ async fn main() -> Result<()> {
                     let closed_trades = engine.close_all_expired_positions().await;
                     if !closed_trades.is_empty() {
                         tracing::info!(count = closed_trades.len(), "📋 Closed expired positions");
-                        
+
                         let mut strat = expired_ml_strategy.lock().await;
                         for record in &closed_trades {
                             // Register trade outcome into the ML model so it can learn continuously
@@ -2792,12 +3102,16 @@ async fn main() -> Result<()> {
                             };
 
                             let live_available_usdc = position_risk.get_balance().max(0.0);
+                            let live_sizing_cap = config.risk.max_position_usdc.max(0.0);
                             let mut effective_size_usdc = if live_available_usdc > 0.0 {
                                 position_risk
                                     .calculate_position_size(&signal)
                                     .min(live_available_usdc)
                             } else {
-                                signal.suggested_size_usdc.max(0.0)
+                                signal
+                                    .suggested_size_usdc
+                                    .max(0.0)
+                                    .min(live_sizing_cap)
                             };
 
                             if effective_size_usdc <= 0.0 {
@@ -2824,10 +3138,14 @@ async fn main() -> Result<()> {
                                 let min_order_size = market.order_min_size.max(0.0);
                                 if min_order_size > 0.0 && shares_size + f64::EPSILON < min_order_size {
                                     let required_size_usdc = min_order_size * exec_plan.entry_price;
+                                    let within_live_cap =
+                                        required_size_usdc <= live_sizing_cap + f64::EPSILON;
                                     let can_raise_with_balance = live_available_usdc > 0.0
-                                        && required_size_usdc <= live_available_usdc + f64::EPSILON;
+                                        && required_size_usdc <= live_available_usdc + f64::EPSILON
+                                        && within_live_cap;
                                     let can_raise_without_balance = live_available_usdc <= 0.0
-                                        && required_size_usdc <= effective_size_usdc + f64::EPSILON;
+                                        && required_size_usdc <= effective_size_usdc + f64::EPSILON
+                                        && within_live_cap;
 
                                     if can_raise_with_balance || can_raise_without_balance {
                                         info!(
@@ -2849,6 +3167,7 @@ async fn main() -> Result<()> {
                                             effective_size_usdc,
                                             required_size_usdc,
                                             live_available_usdc,
+                                            live_sizing_cap,
                                             condition_id = %signal.condition_id,
                                             "Skipping LIVE order below market minimum size"
                                         );
@@ -2882,24 +3201,31 @@ async fn main() -> Result<()> {
                                     live_pending_closes_for_main.lock().await.remove(&signal.token_id);
 
                                     position_risk.open_position(&signal, effective_size_usdc, exec_plan.entry_price);
-                                    live_contexts_for_main.lock().await.insert(
-                                        signal.token_id.clone(),
-                                        LivePositionContext {
-                                            signal_id: signal.id.clone(),
-                                            asset: signal.asset,
-                                            timeframe: signal.timeframe,
-                                            direction: signal.direction,
-                                            confidence: signal.confidence,
-                                            market_slug: signal.market_slug.clone(),
-                                            token_id: signal.token_id.clone(),
-                                            condition_id: signal.condition_id.clone(),
-                                            size_usdc: effective_size_usdc,
-                                            shares_size,
-                                            entry_share_price: exec_plan.entry_price,
-                                            opened_at_ms: chrono::Utc::now().timestamp_millis(),
-                                            expires_at_ms: signal.expires_at,
-                                        },
-                                    );
+                                    {
+                                        let mut contexts = live_contexts_for_main.lock().await;
+                                        contexts.insert(
+                                            signal.token_id.clone(),
+                                            LivePositionContext {
+                                                signal_id: signal.id.clone(),
+                                                asset: signal.asset,
+                                                timeframe: signal.timeframe,
+                                                direction: signal.direction,
+                                                confidence: signal.confidence,
+                                                market_slug: signal.market_slug.clone(),
+                                                token_id: signal.token_id.clone(),
+                                                condition_id: signal.condition_id.clone(),
+                                                size_usdc: effective_size_usdc,
+                                                shares_size,
+                                                entry_share_price: exec_plan.entry_price,
+                                                opened_at_ms: chrono::Utc::now().timestamp_millis(),
+                                                expires_at_ms: signal.expires_at,
+                                            },
+                                        );
+                                        persist_live_position_contexts(
+                                            &live_contexts_path_for_main,
+                                            &contexts,
+                                        );
+                                    }
                                     live_window_bias.lock().await.insert(live_bias_key, signal.direction);
 
                                     if !signal.indicators_used.is_empty() {
@@ -3014,14 +3340,14 @@ async fn main() -> Result<()> {
         if let Err(e) = engine.save_state() {
             warn!("Failed to save paper engine state on shutdown: {}", e);
         }
-    } 
-    
+    }
+
     // Explicitly explicitly save ML state and calibrators for safe restarts
     {
         let mut s = strategy.lock().await;
         s.force_save_state();
     }
-    
+
     // Flush pending data
     // csv_persistence automatically flushes on each write
     info!("👋 PolyBot stopped");
@@ -3038,7 +3364,11 @@ fn paper_trade_record_to_dashboard_trade(
         timeframe: record.timeframe.clone(),
         direction: record.direction.clone(),
         confidence: record.confidence,
-        entry_price: if record.window_open_price > 0.0 { record.window_open_price } else { record.entry_price },
+        entry_price: if record.window_open_price > 0.0 {
+            record.window_open_price
+        } else {
+            record.entry_price
+        },
         exit_price: record.exit_price,
         size_usdc: record.size_usdc,
         pnl: record.pnl,
@@ -3412,6 +3742,77 @@ fn parse_timeframe_from_market_text(raw: &str) -> Option<Timeframe> {
         return Some(Timeframe::Hour1);
     }
     None
+}
+
+fn infer_asset_from_market_text(raw: &str) -> Option<Asset> {
+    let text = raw.to_ascii_lowercase();
+    if text.contains("btc") || text.contains("bitcoin") {
+        return Some(Asset::BTC);
+    }
+    if text.contains("eth") || text.contains("ethereum") {
+        return Some(Asset::ETH);
+    }
+    if text.contains("sol") || text.contains("solana") {
+        return Some(Asset::SOL);
+    }
+    if text.contains("xrp") || text.contains("ripple") {
+        return Some(Asset::XRP);
+    }
+    None
+}
+
+fn live_position_contexts_path(data_dir: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(data_dir).join("live_position_contexts.json")
+}
+
+fn load_live_position_contexts(
+    path: &std::path::Path,
+) -> std::collections::HashMap<String, LivePositionContext> {
+    match std::fs::read_to_string(path) {
+        Ok(json) => match serde_json::from_str::<
+            std::collections::HashMap<String, LivePositionContext>,
+        >(&json)
+        {
+            Ok(contexts) => contexts,
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    path = %path.display(),
+                    "Failed to parse persisted live position contexts"
+                );
+                std::collections::HashMap::new()
+            }
+        },
+        Err(_) => std::collections::HashMap::new(),
+    }
+}
+
+fn persist_live_position_contexts(
+    path: &std::path::Path,
+    contexts: &std::collections::HashMap<String, LivePositionContext>,
+) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    match serde_json::to_string_pretty(contexts) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(path, json) {
+                warn!(
+                    error = %e,
+                    path = %path.display(),
+                    "Failed to persist live position contexts"
+                );
+            }
+        }
+        Err(e) => {
+            warn!(
+                error = %e,
+                path = %path.display(),
+                "Failed to serialize live position contexts"
+            );
+        }
+    }
 }
 
 fn init_logging() -> Result<()> {

@@ -238,7 +238,8 @@ impl ProbabilityCalibrator {
 
         // Log calibration metrics
         if predictions.len() >= 100 {
-            let overall_accuracy = outcomes.iter().filter(|&&o| o).count() as f64 / outcomes.len() as f64;
+            let overall_accuracy =
+                outcomes.iter().filter(|&&o| o).count() as f64 / outcomes.len() as f64;
             let mean_pred = predictions.iter().sum::<f64>() / predictions.len() as f64;
             let calibration_gap = (mean_pred - overall_accuracy).abs();
 

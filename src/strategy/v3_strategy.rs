@@ -107,7 +107,28 @@ impl V3Strategy {
                 let mut ml_state = MLEngineState::new(ml_config.clone());
                 // Don't restore prediction counters â€” the persisted values can be stale/corrupted
                 // across restarts. Let accuracy accumulate freshly from closed trades this session.
+                ml_state.total_predictions = persisted.total_predictions;
+                ml_state.correct_predictions = persisted.correct_predictions;
+                ml_state.incorrect_predictions = persisted.incorrect_predictions;
                 ml_state.last_retraining = persisted.last_retraining;
+
+                if ml_state.total_predictions == 0 && !loaded_dataset.samples.is_empty() {
+                    let reconstructed_correct = loaded_dataset
+                        .samples
+                        .iter()
+                        .filter(|sample| sample.target > 0.5)
+                        .count();
+                    ml_state.total_predictions = loaded_dataset.len();
+                    ml_state.correct_predictions = reconstructed_correct;
+                    ml_state.incorrect_predictions =
+                        loaded_dataset.len().saturating_sub(reconstructed_correct);
+                    info!(
+                        total_predictions = ml_state.total_predictions,
+                        correct_predictions = ml_state.correct_predictions,
+                        incorrect_predictions = ml_state.incorrect_predictions,
+                        "Reconstructed ML counters from persisted dataset because saved counters were empty"
+                    );
+                }
 
                 info!(
                     "âœ… ML state restored: {} samples in dataset (prediction accuracy resets each session)",
@@ -228,11 +249,14 @@ impl V3Strategy {
         // Track recent Polymarket volume for the volume_trend feature.
         let current_volume = features.polymarket_volume_24hr.unwrap_or(0.0);
         {
-            let vh = self.volume_history
+            let vh = self
+                .volume_history
                 .entry((asset, timeframe))
                 .or_insert_with(|| VecDeque::with_capacity(20));
             vh.push_back(current_volume);
-            if vh.len() > 20 { vh.pop_front(); }
+            if vh.len() > 20 {
+                vh.pop_front();
+            }
         }
 
         // 1. Finalize any windows that have already closed (use current price as proxy for
@@ -251,15 +275,22 @@ impl V3Strategy {
             .collect();
         for key in expired_keys {
             if let Some(obs) = self.pending_windows.remove(&key) {
-                let target = if current_price >= obs.price_at_open { 1.0 } else { 0.0 };
+                let target = if current_price >= obs.price_at_open {
+                    1.0
+                } else {
+                    0.0
+                };
                 let direction_label = if target > 0.5 { "UP" } else { "DOWN" };
                 // Update window_history for this market so sequential features stay fresh.
                 {
-                    let wh = self.window_history
+                    let wh = self
+                        .window_history
                         .entry((obs.asset, obs.timeframe))
                         .or_insert_with(|| VecDeque::with_capacity(6));
                     wh.push_back(target);
-                    if wh.len() > 5 { wh.pop_front(); }
+                    if wh.len() > 5 {
+                        wh.pop_front();
+                    }
                 }
                 info!(
                     asset = ?obs.asset,
@@ -282,39 +313,44 @@ impl V3Strategy {
                         feat_vec.len()
                     );
                 } else {
-                self.dataset.add_window_observation(
-                    obs.features,
-                    target,
-                    obs.open_ts,
-                    obs.asset,
-                    obs.timeframe,
-                    obs.price_at_open,
-                    current_price,
-                );
-                self.window_observations_count += 1;
-                info!(
+                    self.dataset.add_window_observation(
+                        obs.features,
+                        target,
+                        obs.open_ts,
+                        obs.asset,
+                        obs.timeframe,
+                        obs.price_at_open,
+                        current_price,
+                    );
+                    self.window_observations_count += 1;
+                    info!(
                     "ðŸ“Š Window observation added to dataset: {} samples total ({} windows recorded)",
                     self.dataset.len(),
                     self.window_observations_count
                 );
-                // Auto-save every 10 new observations (reuses trade-save interval logic)
-                if self.dataset.len() % 10 == 0 {
-                    if let Err(e) = self.dataset.save(self.persistence.dataset_file()) {
-                        warn!("Failed to auto-save dataset after window observation: {}", e);
+                    // Auto-save every 10 new observations (reuses trade-save interval logic)
+                    if self.dataset.len() % 10 == 0 {
+                        if let Err(e) = self.dataset.save(self.persistence.dataset_file()) {
+                            warn!(
+                                "Failed to auto-save dataset after window observation: {}",
+                                e
+                            );
+                        }
                     }
-                }
-                // Check if we need to retrain based on window observations
-                if self.window_observations_count % self.config.training.retrain_interval_window_observations == 0
-                    && self.dataset.len() >= self.config.training.min_samples_for_training
-                {
-                    info!(
-                        "ðŸ”„ Retraining after {} window observations...",
-                        self.window_observations_count
-                    );
-                    if let Err(e) = self.train_initial_model(vec![]) {
-                        warn!("âš ï¸ Retraining after window observations failed: {}", e);
+                    // Check if we need to retrain based on window observations
+                    if self.window_observations_count
+                        % self.config.training.retrain_interval_window_observations
+                        == 0
+                        && self.dataset.len() >= self.config.training.min_samples_for_training
+                    {
+                        info!(
+                            "ðŸ”„ Retraining after {} window observations...",
+                            self.window_observations_count
+                        );
+                        if let Err(e) = self.train_initial_model(vec![]) {
+                            warn!("âš ï¸ Retraining after window observations failed: {}", e);
+                        }
                     }
-                }
                 } // end else (non-zero filter)
             }
         }
@@ -336,7 +372,9 @@ impl V3Strategy {
             ml_features.token_price_window_open = obs.token_price_at_open;
             let change = if obs.token_price_at_open > 1e-9 {
                 (current_token_price - obs.token_price_at_open) / obs.token_price_at_open
-            } else { 0.0 };
+            } else {
+                0.0
+            };
             ml_features.token_price_change_window = change.clamp(-1.0, 1.0);
 
             // price_vs_strike_pct: how far BTC/ETH has moved from the window-open price.
@@ -354,15 +392,17 @@ impl V3Strategy {
         }
 
         // 3. Register this window if we haven't seen it yet (one snapshot per window).
-        self.pending_windows.entry(win_key).or_insert_with(|| WindowObservation {
-            features: ml_features.clone(),
-            price_at_open: current_price,
-            token_price_at_open: current_token_price,
-            close_ts: win_close_ts,
-            asset,
-            timeframe,
-            open_ts: win_open_ts,
-        });
+        self.pending_windows
+            .entry(win_key)
+            .or_insert_with(|| WindowObservation {
+                features: ml_features.clone(),
+                price_at_open: current_price,
+                token_price_at_open: current_token_price,
+                close_ts: win_close_ts,
+                asset,
+                timeframe,
+                open_ts: win_open_ts,
+            });
         // === END WINDOW OBSERVATION TRACKING ===
         // One-per-window throttle: max 1 trade per (asset, timeframe) window.
         // Run this before filters/ML to avoid repeated evaluations in the same window
@@ -376,7 +416,9 @@ impl V3Strategy {
 
         if already_entered_this_window {
             tracing::info!(
-                ?asset, ?timeframe, win_open_ts,
+                ?asset,
+                ?timeframe,
+                win_open_ts,
                 "Signal throttled (one_per_window)"
             );
             self.last_filter_reason = Some("one_per_window_throttle".to_string());
@@ -444,7 +486,8 @@ impl V3Strategy {
         // Try ML prediction if available
         if ml_ready {
             if let Some(prediction) = self.try_ml_prediction(&ml_features, features, &context) {
-                self.last_entry_window.insert((asset, timeframe), win_open_ts);
+                self.last_entry_window
+                    .insert((asset, timeframe), win_open_ts);
                 return Some(prediction);
             }
 
@@ -486,7 +529,8 @@ impl V3Strategy {
                     confidence = signal.confidence,
                     "Fallback signal generated"
                 );
-                self.last_entry_window.insert((asset, timeframe), win_open_ts);
+                self.last_entry_window
+                    .insert((asset, timeframe), win_open_ts);
                 return Some(signal);
             }
         }
@@ -605,10 +649,7 @@ impl V3Strategy {
 
         // Require a minimum edge (at least 5% = prob_up > 0.55 or < 0.45)
         if edge < 0.05 {
-            let reason = format!(
-                "ml_edge_too_small: {:.3} < 0.05",
-                edge
-            );
+            let reason = format!("ml_edge_too_small: {:.3} < 0.05", edge);
             tracing::debug!(%reason, "ML prediction edge too small");
             self.last_filter_reason = Some(reason);
             return None;
@@ -848,7 +889,8 @@ impl V3Strategy {
         // Crear predictor si aÃºn no existe (caso de full reset)
         if self.predictor.is_none() && self.config.enabled {
             info!("ðŸ†• Creating new predictor (no persisted state found)");
-            let weights = crate::ml_engine::models::EnsembleWeights::from_config(&self.config.ensemble);
+            let weights =
+                crate::ml_engine::models::EnsembleWeights::from_config(&self.config.ensemble);
             self.predictor = Some(crate::ml_engine::models::MLPredictor::new(weights));
         }
 
@@ -1145,20 +1187,33 @@ impl V3Strategy {
             )
         };
 
-        let incorrect = self.state.incorrect_predictions;
-        let correct = self.state.correct_predictions;
-        let total = self.state.total_predictions;
+        let (total, correct, incorrect) = self.effective_prediction_counters();
+        let accuracy = if total == 0 {
+            0.5
+        } else {
+            correct as f64 / total as f64
+        };
+        let win_rate = if total == 0 {
+            0.0
+        } else {
+            correct as f64 / total as f64
+        };
+        let loss_rate = if total == 0 {
+            0.0
+        } else {
+            incorrect as f64 / total as f64
+        };
 
         MLStateResponse {
             enabled: self.config.enabled,
             model_type: format!("{:?}", self.config.model_type),
             version: "3.0".to_string(),
-            model_accuracy: self.state.accuracy(),
-            total_predictions: self.state.total_predictions,
-            correct_predictions: self.state.correct_predictions,
-            incorrect_predictions: self.state.incorrect_predictions,
-            win_rate: self.state.win_rate(),
-            loss_rate: self.state.loss_rate(),
+            model_accuracy: accuracy,
+            total_predictions: total,
+            correct_predictions: correct,
+            incorrect_predictions: incorrect,
+            win_rate,
+            loss_rate,
             is_calibrated: self.is_calibrated(),
             last_filter_reason: self.last_filter_reason.clone(),
             ensemble_weights,
@@ -1166,6 +1221,33 @@ impl V3Strategy {
             training_epoch: self.state.training_epoch,
             dataset_size: self.dataset.len(),
         }
+    }
+
+    fn effective_prediction_counters(&self) -> (usize, usize, usize) {
+        if self.state.total_predictions > 0
+            || self.state.correct_predictions > 0
+            || self.state.incorrect_predictions > 0
+        {
+            return (
+                self.state.total_predictions,
+                self.state.correct_predictions,
+                self.state.incorrect_predictions,
+            );
+        }
+
+        if self.dataset.samples.is_empty() {
+            return (0, 0, 0);
+        }
+
+        let correct = self
+            .dataset
+            .samples
+            .iter()
+            .filter(|sample| sample.target > 0.5)
+            .count();
+        let total = self.dataset.len();
+        let incorrect = total.saturating_sub(correct);
+        (total, correct, incorrect)
     }
 
     /// Save ML state manually
@@ -1301,15 +1383,21 @@ impl V3Strategy {
             Timeframe::Min15 => Timeframe::Hour1,
             Timeframe::Hour1 => Timeframe::Min15,
         };
-        let my_last = self.window_history
+        let my_last = self
+            .window_history
             .get(&(asset, timeframe))
             .and_then(|h| h.back().copied());
-        let other_last = self.window_history
+        let other_last = self
+            .window_history
             .get(&(asset, other_tf))
             .and_then(|h| h.back().copied());
         match (my_last, other_last) {
             (Some(mine), Some(other)) => {
-                if (mine > 0.5) == (other > 0.5) { 1.0 } else { -1.0 }
+                if (mine > 0.5) == (other > 0.5) {
+                    1.0
+                } else {
+                    -1.0
+                }
             }
             _ => 0.0,
         }
@@ -1328,7 +1416,13 @@ impl V3Strategy {
                 return 0.0;
             }
             let change = (recent - older) / older;
-            if change > 0.10 { 1.0 } else if change < -0.10 { -1.0 } else { 0.0 }
+            if change > 0.10 {
+                1.0
+            } else if change < -0.10 {
+                -1.0
+            } else {
+                0.0
+            }
         } else {
             0.0
         }
@@ -1340,8 +1434,10 @@ impl V3Strategy {
         if !self.config.segmented_training {
             return self.dataset.clone();
         }
-        let mut grouped: HashMap<(Asset, Timeframe), Vec<crate::ml_engine::dataset::LabeledSample>> =
-            HashMap::new();
+        let mut grouped: HashMap<
+            (Asset, Timeframe),
+            Vec<crate::ml_engine::dataset::LabeledSample>,
+        > = HashMap::new();
         for sample in &self.dataset.samples {
             grouped
                 .entry((sample.asset, sample.timeframe))

@@ -284,18 +284,14 @@ impl MarketDiscovery {
         // Use events endpoint with date filtering (Unix timestamps)
         let now_ts = now.timestamp();
         let end_ts = window_end.timestamp();
-        info!("🔍 Fetching events for {:?} {:?} (window: {} to {})", 
-              asset, timeframe, now_ts, end_ts);
-        
+        info!(
+            "🔍 Fetching events for {:?} {:?} (window: {} to {})",
+            asset, timeframe, now_ts, end_ts
+        );
+
         let events = self
             .rest_client
-            .get_events_with_date_filter(
-                &self.gamma_url, 
-                200, 
-                0,
-                Some(now_ts),
-                Some(end_ts),
-            )
+            .get_events_with_date_filter(&self.gamma_url, 200, 0, Some(now_ts), Some(end_ts))
             .await?;
         info!("📊 Events endpoint returned {} events", events.len());
 
@@ -363,14 +359,20 @@ impl MarketDiscovery {
 
             info!(
                 "🎯 Found candidate event: '{}' (slug='{}') active={} ends={} markets={}",
-                event_title, event_slug, event.active, 
+                event_title,
+                event_slug,
+                event.active,
                 end_date.map(|d| d.to_string()).unwrap_or_default(),
                 event.markets.len()
             );
 
             // Process markets in this event
             for market in event.markets {
-                debug!("Processing market: slug={:?} question={}", market.slug, market.question.chars().take(50).collect::<String>());
+                debug!(
+                    "Processing market: slug={:?} question={}",
+                    market.slug,
+                    market.question.chars().take(50).collect::<String>()
+                );
                 if let Some(discovered) = self.convert_market_response(market, asset, timeframe) {
                     all_markets.push(discovered);
                 }
@@ -611,40 +613,52 @@ impl MarketDiscovery {
 
         // EXCLUSIONS - reject markets that don't match our timeframes
         // IMPORTANT: Check these BEFORE positive patterns to avoid substring matches
-        
+
         // 5-minute markets (but NOT 15m which contains "5m")
         // Match patterns like "btc-updown-5m-", "eth-updown-5m-", etc.
-        let is_5m = text_lower.contains("-5m-") 
+        let is_5m = text_lower.contains("-5m-")
             || text_lower.contains("updown-5m-")
             || text_lower.contains("_5m-")
             || text_lower.contains("-5m-");
         // But exclude 15m markets
-        let is_15m_marker = text_lower.contains("-15m-") 
+        let is_15m_marker = text_lower.contains("-15m-")
             || text_lower.contains("updown-15m-")
             || text_lower.contains("15-minute")
             || text_lower.contains("15 minute")
             || text_lower.contains("min15");
-        
+
         if is_5m && !is_15m_marker {
-            debug!("Rejecting 5-minute market: {}", text.chars().take(50).collect::<String>());
+            debug!(
+                "Rejecting 5-minute market: {}",
+                text.chars().take(50).collect::<String>()
+            );
             return None;
         }
-        
+
         // 4-hour markets
         if text_lower.contains("-4h-") || text_lower.contains("updown-4h-") {
-            debug!("Rejecting 4-hour market: {}", text.chars().take(50).collect::<String>());
+            debug!(
+                "Rejecting 4-hour market: {}",
+                text.chars().take(50).collect::<String>()
+            );
             return None;
         }
-        
+
         // Daily/longer markets
-        if text_lower.contains("-24h-") || text_lower.contains("24-hour") || text_lower.contains("daily") {
-            debug!("Rejecting daily market: {}", text.chars().take(50).collect::<String>());
+        if text_lower.contains("-24h-")
+            || text_lower.contains("24-hour")
+            || text_lower.contains("daily")
+        {
+            debug!(
+                "Rejecting daily market: {}",
+                text.chars().take(50).collect::<String>()
+            );
             return None;
         }
 
         // Pattern matching for 15-minute markets
-        let is_15m_explicit = is_15m_marker
-            || text_lower.contains("15m-") && !text_lower.contains("-5m-");
+        let is_15m_explicit =
+            is_15m_marker || text_lower.contains("15m-") && !text_lower.contains("-5m-");
 
         // Pattern matching for 1-hour markets
         let is_1h_explicit = text_lower.contains("-1h-")
@@ -653,8 +667,7 @@ impl MarketDiscovery {
             || text_lower.contains("hourly");
 
         // Hourly patterns like "2am-et", "3pm-et", etc.
-        let has_hour_pattern = text_lower.contains("am-et")
-            || text_lower.contains("pm-et");
+        let has_hour_pattern = text_lower.contains("am-et") || text_lower.contains("pm-et");
 
         // Decision logic - explicit patterns take priority
         if is_15m_explicit {

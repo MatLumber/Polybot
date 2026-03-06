@@ -155,7 +155,12 @@ pub fn order_amounts(order: &Order) -> Result<(U256, U256)> {
     }
 }
 
-fn order_typed_data(order: &Order, maker: Address, signer: Address, chain_id: u64) -> Result<TypedData> {
+fn order_typed_data(
+    order: &Order,
+    maker: Address,
+    signer: Address,
+    chain_id: u64,
+) -> Result<TypedData> {
     let token_id = U256::from_dec_str(&order.token_id)
         .with_context(|| format!("Invalid token_id '{}' for order signing", order.token_id))?;
     let (maker_amount, taker_amount) = order_amounts(order)?;
@@ -227,7 +232,10 @@ fn order_typed_data(order: &Order, maker: Address, signer: Address, chain_id: u6
     let mut message = BTreeMap::<String, Value>::new();
     message.insert("salt".to_string(), Value::String(order.salt.to_string()));
     message.insert("maker".to_string(), Value::String(format!("{:#x}", maker)));
-    message.insert("signer".to_string(), Value::String(format!("{:#x}", signer)));
+    message.insert(
+        "signer".to_string(),
+        Value::String(format!("{:#x}", signer)),
+    );
     message.insert("taker".to_string(), Value::String(ZERO_ADDRESS.to_string()));
     message.insert("tokenId".to_string(), Value::String(token_id.to_string()));
     message.insert(

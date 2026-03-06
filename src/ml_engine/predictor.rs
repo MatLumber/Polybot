@@ -114,7 +114,13 @@ impl MLStrategyPredictor {
         };
 
         // 7. Calcular confianza final con boost por edge fuerte
-        let edge_boost = if edge > 0.15 { 1.2 } else if edge > 0.10 { 1.1 } else { 1.0 };
+        let edge_boost = if edge > 0.15 {
+            1.2
+        } else if edge > 0.10 {
+            1.1
+        } else {
+            1.0
+        };
         let confidence = ml_prediction.confidence * (1.0 + edge * 2.0).min(1.5) * edge_boost;
 
         // 8. Verificar mínima confianza - más alto para mejor win rate

@@ -363,7 +363,10 @@ impl ClobClient {
         }
         if to_submit.neg_risk.is_none() {
             if let Some(condition_id) = to_submit.condition_id.as_deref() {
-                let cached = self.get_market(condition_id).await.map(|market| market.neg_risk);
+                let cached = self
+                    .get_market(condition_id)
+                    .await
+                    .map(|market| market.neg_risk);
                 let fetched = if cached.is_none() {
                     self.rest
                         .get_market(&self.config.gamma_url, condition_id)
@@ -528,7 +531,34 @@ impl ClobClient {
         // Fetch and cache markets
         self.refresh_markets().await?;
 
+        if !self.dry_run {
+            if let Err(e) = self.sync_open_orders().await {
+                tracing::warn!(error = %e, "Failed to rehydrate open orders during initialization");
+            }
+        }
+
         Ok(())
+    }
+
+    /// Rehydrate active orders from Polymarket so heartbeats survive restarts/crashes.
+    pub async fn sync_open_orders(&self) -> Result<usize> {
+        if self.dry_run {
+            return Ok(0);
+        }
+
+        let remote_orders = self.rest.get_open_orders().await?;
+        let active_remote_orders: Vec<Order> = remote_orders
+            .into_iter()
+            .filter(|order| order.is_active())
+            .collect();
+
+        let mut orders = self.orders.write().await;
+        orders.retain(|_, existing| !existing.is_active());
+        for order in &active_remote_orders {
+            orders.insert(order.id, order.clone());
+        }
+
+        Ok(active_remote_orders.len())
     }
 
     /// Start a background heartbeat loop for LIVE orders.
@@ -544,6 +574,10 @@ impl ClobClient {
 
             loop {
                 interval.tick().await;
+
+                if let Err(e) = self.sync_open_orders().await {
+                    tracing::warn!(error = %e, "Failed to sync open orders before heartbeat");
+                }
 
                 let active_orders = self.active_orders().await;
                 if active_orders.is_empty() {
@@ -1619,9 +1653,10 @@ enum MarketCadence {
 fn infer_market_cadence(raw: &str) -> MarketCadence {
     let lower = raw.to_ascii_lowercase();
     let words = tokenized_words(&lower);
-    let has_5m_marker = words.iter().any(|w| {
-        w == "5m" || w == "5min" || w == "5mins" || w == "5minute" || w == "5minutes"
-    }) || lower.contains("updown-5m");
+    let has_5m_marker = words
+        .iter()
+        .any(|w| w == "5m" || w == "5min" || w == "5mins" || w == "5minute" || w == "5minutes")
+        || lower.contains("updown-5m");
     if has_5m_marker {
         return MarketCadence::Min5;
     }
@@ -1631,9 +1666,10 @@ fn infer_market_cadence(raw: &str) -> MarketCadence {
     if has_15m_marker {
         return MarketCadence::Min15;
     }
-    let has_1h_marker = words.iter().any(|w| {
-        w == "1h" || w == "60m" || w == "60min" || w == "hour1" || w == "1hour"
-    }) || lower.contains("updown-1h");
+    let has_1h_marker = words
+        .iter()
+        .any(|w| w == "1h" || w == "60m" || w == "60min" || w == "hour1" || w == "1hour")
+        || lower.contains("updown-1h");
     if has_1h_marker || looks_like_hourly_updown_market_text(&lower) {
         return MarketCadence::Hour1;
     }

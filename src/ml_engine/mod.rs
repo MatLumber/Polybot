@@ -212,7 +212,7 @@ impl MLEngineState {
         if interval == 0 {
             return false;
         }
-        
+
         // Retrain exactly when hitting multiples of the interval
         if self.total_predictions > 0 && self.total_predictions % interval == 0 {
             true

@@ -1514,11 +1514,17 @@ impl BalanceTracker {
     }
 
     pub fn available_balance(&self) -> f64 {
-        self.current_balance.read().map(|value| *value).unwrap_or(0.0)
+        self.current_balance
+            .read()
+            .map(|value| *value)
+            .unwrap_or(0.0)
     }
 
     pub fn locked_balance(&self) -> f64 {
-        self.locked_balance.read().map(|value| *value).unwrap_or(0.0)
+        self.locked_balance
+            .read()
+            .map(|value| *value)
+            .unwrap_or(0.0)
     }
 
     pub fn total_equity(&self) -> f64 {

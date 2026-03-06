@@ -398,14 +398,15 @@ impl FeatureEngine {
             last_close = last.close,
             "FeatureEngine::compute starting"
         );
-        
+
         // Update cross asset analyzer with current price
         use chrono::TimeZone;
         let dt = chrono::Utc
             .timestamp_millis_opt(last.open_time)
             .single()
             .unwrap_or_else(|| chrono::Utc::now());
-        self.cross_asset_analyzer.update_price(last.asset, last.timeframe, last.close, dt);
+        self.cross_asset_analyzer
+            .update_price(last.asset, last.timeframe, last.close, dt);
 
         let key = (last.asset, last.timeframe);
         let mut features = Features {
@@ -785,9 +786,10 @@ impl FeatureEngine {
                 features.orderbook_ask_depth = Some(micro_features.ask_volume);
                 features.orderbook_depth_top5 =
                     Some((micro_features.bid_volume + micro_features.ask_volume).max(0.0));
-                
+
                 if micro_features.best_bid > 0.0 && micro_features.best_ask > 0.0 {
-                    features.polymarket_price = Some((micro_features.best_bid + micro_features.best_ask) / 2.0);
+                    features.polymarket_price =
+                        Some((micro_features.best_bid + micro_features.best_ask) / 2.0);
                 } else if micro_features.best_bid > 0.0 {
                     features.polymarket_price = Some(micro_features.best_bid);
                 } else if micro_features.best_ask > 0.0 {

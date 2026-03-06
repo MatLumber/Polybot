@@ -102,8 +102,20 @@ impl Dataset {
                 // For Up trades: win means price went Up → 1.0, loss means Down → 0.0.
                 // For Down trades: win means price went Down → 0.0, loss means Up → 1.0.
                 target: match trade.direction {
-                    Direction::Up => if trade.is_win { 1.0 } else { 0.0 },
-                    Direction::Down => if trade.is_win { 0.0 } else { 1.0 },
+                    Direction::Up => {
+                        if trade.is_win {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    }
+                    Direction::Down => {
+                        if trade.is_win {
+                            0.0
+                        } else {
+                            1.0
+                        }
+                    }
                 },
                 timestamp: trade.entry_ts,
                 asset: trade.asset,
@@ -139,8 +151,20 @@ impl Dataset {
             // For Up trades: win means price went Up → 1.0, loss means Down → 0.0.
             // For Down trades: win means price went Down → 0.0, loss means Up → 1.0.
             target: match trade.direction {
-                Direction::Up => if trade.is_win { 1.0 } else { 0.0 },
-                Direction::Down => if trade.is_win { 0.0 } else { 1.0 },
+                Direction::Up => {
+                    if trade.is_win {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }
+                Direction::Down => {
+                    if trade.is_win {
+                        0.0
+                    } else {
+                        1.0
+                    }
+                }
             },
             timestamp: trade.entry_ts,
             asset: trade.asset,

@@ -194,8 +194,8 @@ pub struct PositionResponse {
     pub market_close_ts: i64,
     pub time_remaining_secs: i64,
     // Dynamic risk thresholds (updated every tick)
-    pub stop_loss_pct: f64,       // current dynamic hard-stop as positive % (e.g. 8.5 = -8.5%)
-    pub take_profit_pct: f64,     // current dynamic take-profit threshold as % (e.g. 72.0 = 72%)
+    pub stop_loss_pct: f64, // current dynamic hard-stop as positive % (e.g. 8.5 = -8.5%)
+    pub take_profit_pct: f64, // current dynamic take-profit threshold as % (e.g. 72.0 = 72%)
     pub checkpoint_armed: bool,
     pub checkpoint_floor_pct: f64, // checkpoint floor protection as % of entry
     pub checkpoint_peak_pct: f64,  // highest prediction ROI achieved as %

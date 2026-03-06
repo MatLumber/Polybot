@@ -1467,7 +1467,10 @@ impl PaperTradingEngine {
                 // This acts as a hard ceiling above the checkpoint trailing system.
                 let tp_roi = Self::dynamic_take_profit_roi(pos, now);
                 if trading_roi >= tp_roi {
-                    exits.push(((*pos_asset, *pos_timeframe), PaperExitReason::CheckpointTakeProfit));
+                    exits.push((
+                        (*pos_asset, *pos_timeframe),
+                        PaperExitReason::CheckpointTakeProfit,
+                    ));
                     continue;
                 }
 
@@ -2096,10 +2099,8 @@ impl PaperTradingEngine {
         // trading_win (pnl > 0) separately tracks financial performance.
 
         // BTC direction: window_open_price vs current exit price
-        let actual_price_direction = Self::determine_price_direction(
-            position.price_at_market_open,
-            exit_price,
-        );
+        let actual_price_direction =
+            Self::determine_price_direction(position.price_at_market_open, exit_price);
         let predicted_direction = match position.direction {
             Direction::Up => "UP",
             Direction::Down => "DOWN",
@@ -2109,7 +2110,15 @@ impl PaperTradingEngine {
         let window_open_price = position.price_at_market_open;
         let window_close_price = exit_price;
 
-        let (return_amount, pnl, fee_close, exit_reason_detail, trading_pnl, trading_win, prediction_correct) = match reason {
+        let (
+            return_amount,
+            pnl,
+            fee_close,
+            exit_reason_detail,
+            trading_pnl,
+            trading_win,
+            prediction_correct,
+        ) = match reason {
             PaperExitReason::MarketExpiry => {
                 // BINARY PAYOUT: $1/share if direction correct, $0 if not.
                 // Direction determined by BTC window_open vs window_close.
@@ -2121,7 +2130,9 @@ impl PaperTradingEngine {
                 };
                 let detail = format!(
                     "MARKET_EXPIRY | window: ${:.2} -> ${:.2} ({}) | predicted: {} | {}",
-                    window_open_price, window_close_price, actual_price_direction,
+                    window_open_price,
+                    window_close_price,
+                    actual_price_direction,
                     predicted_direction,
                     if pc { "CORRECT" } else { "INCORRECT" }
                 );
@@ -2173,13 +2184,25 @@ impl PaperTradingEngine {
                 let ret = (gross_sell - estimated_fee_close).max(0.0);
                 let tpnl = ret - position.size_usdc;
                 let pc = Self::is_prediction_correct(position.direction, &actual_price_direction);
-                (ret, tpnl, estimated_fee_close, "early_exit".to_string(), tpnl, tpnl > 0.0, pc)
+                (
+                    ret,
+                    tpnl,
+                    estimated_fee_close,
+                    "early_exit".to_string(),
+                    tpnl,
+                    tpnl > 0.0,
+                    pc,
+                )
             }
         };
 
         // Determine result string based on prediction correctness (for ML)
         let is_win = prediction_correct;
-        let result_str = if prediction_correct { "PREDICTION_CORRECT" } else { "PREDICTION_INCORRECT" };
+        let result_str = if prediction_correct {
+            "PREDICTION_CORRECT"
+        } else {
+            "PREDICTION_INCORRECT"
+        };
         let pnl_pct = if position.size_usdc > 0.0 {
             (pnl / position.size_usdc) * 100.0
         } else {
@@ -2363,7 +2386,11 @@ impl PaperTradingEngine {
         }
 
         let emoji = if prediction_correct { "OK" } else { "X" };
-        let pred_emoji = if prediction_correct { "PRED_OK" } else { "PRED_X" };
+        let pred_emoji = if prediction_correct {
+            "PRED_OK"
+        } else {
+            "PRED_X"
+        };
         let stats = self.stats.read().unwrap();
         let wr = if stats.total_trades > 0 {
             (stats.predictions_correct as f64 / stats.total_trades as f64) * 100.0
@@ -3087,6 +3114,7 @@ mod tests {
             timeframe: Timeframe::Min15,
             direction,
             confidence: 0.62,
+            model_prob_up: if direction == Direction::Up { 0.62 } else { 0.38 },
             features: sample_features(Asset::BTC, Timeframe::Min15, ts),
             strategy_id: "test".to_string(),
             market_slug: "btc-15m".to_string(),

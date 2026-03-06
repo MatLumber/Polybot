@@ -6,14 +6,13 @@
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
-use ethers::types::Address;
 use ethers::signers::{LocalWallet, Signer};
-use ethers::utils::to_checksum;
+use ethers::types::{Address, H256, U256};
+use ethers::utils::{keccak256, to_checksum};
 use hmac::{Hmac, Mac};
 use reqwest::{
     header::{HeaderMap, HeaderValue, CONTENT_TYPE},
-    Client,
-    StatusCode,
+    Client, StatusCode,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -21,7 +20,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use super::signing::order_amounts;
-use super::types::{BookLevel, EventResponse, MarketResponse, Order, OrderBook, Side};
+use super::types::{BookLevel, EventResponse, MarketResponse, Order, OrderBook, OrderStatus, Side};
 
 fn parse_book_level(price: &str, size: &str) -> Option<BookLevel> {
     let price = price.parse::<f64>().ok()?;
@@ -52,6 +51,112 @@ fn build_normalized_order_book(
     };
     book.normalize_levels();
     book
+}
+
+#[derive(Debug, Deserialize)]
+struct RemoteOpenOrder {
+    id: String,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    market: String,
+    #[serde(default, alias = "asset_id")]
+    asset_id: String,
+    #[serde(default)]
+    side: String,
+    #[serde(default, alias = "original_size")]
+    original_size: String,
+    #[serde(default, alias = "size_matched")]
+    size_matched: String,
+    #[serde(default)]
+    price: String,
+    #[serde(default)]
+    outcome: Option<String>,
+    #[serde(default)]
+    expiration: Option<serde_json::Value>,
+    #[serde(default)]
+    created_at: Option<serde_json::Value>,
+}
+
+fn parse_polymarket_side(raw: &str) -> Side {
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "SELL" => Side::Sell,
+        _ => Side::Buy,
+    }
+}
+
+fn parse_polymarket_order_status(raw: &str) -> OrderStatus {
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "PENDING" => OrderStatus::Pending,
+        "PARTIALLY_FILLED" | "PARTIALLYFILLED" => OrderStatus::PartiallyFilled,
+        "FILLED" | "MATCHED" => OrderStatus::Filled,
+        "CANCELED" | "CANCELLED" => OrderStatus::Cancelled,
+        "EXPIRED" => OrderStatus::Expired,
+        "OPEN" | "LIVE" => OrderStatus::Open,
+        _ => OrderStatus::Open,
+    }
+}
+
+fn parse_stringified_f64(raw: &str) -> f64 {
+    raw.trim().parse::<f64>().unwrap_or(0.0)
+}
+
+fn parse_value_i64(raw: &Option<serde_json::Value>) -> i64 {
+    match raw {
+        Some(serde_json::Value::String(value)) => value.parse::<i64>().unwrap_or(0),
+        Some(serde_json::Value::Number(value)) => value.as_i64().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn parse_value_u64(raw: &Option<serde_json::Value>) -> u64 {
+    match raw {
+        Some(serde_json::Value::String(value)) => value.parse::<u64>().unwrap_or(0),
+        Some(serde_json::Value::Number(value)) => value.as_u64().unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn parse_order_id(raw: &str) -> H256 {
+    let normalized = raw.trim().trim_start_matches("0x");
+    let bytes = hex::decode(normalized).unwrap_or_default();
+    if bytes.len() == 32 {
+        H256::from_slice(&bytes)
+    } else {
+        H256::from_slice(&keccak256(raw.as_bytes()))
+    }
+}
+
+fn remote_open_order_to_order(remote: RemoteOpenOrder) -> Order {
+    let created_at = parse_value_i64(&remote.created_at);
+    let expiration = parse_value_u64(&remote.expiration);
+    Order {
+        id: parse_order_id(&remote.id),
+        token_id: remote.asset_id,
+        side: parse_polymarket_side(&remote.side),
+        price: parse_stringified_f64(&remote.price),
+        size: parse_stringified_f64(&remote.original_size),
+        status: parse_polymarket_order_status(&remote.status),
+        filled_size: parse_stringified_f64(&remote.size_matched),
+        avg_fill_price: 0.0,
+        created_at,
+        expires_at: expiration.saturating_mul(1000) as i64,
+        signature_type: 0,
+        signature: None,
+        maker: None,
+        signer: None,
+        salt: U256::zero(),
+        nonce: super::signing::DEFAULT_CLOB_NONCE,
+        expiration,
+        fee_rate_bps: None,
+        tick_size: None,
+        condition_id: if remote.market.is_empty() {
+            None
+        } else {
+            Some(remote.market)
+        },
+        neg_risk: None,
+    }
 }
 
 /// REST API client for Polymarket CLOB
@@ -167,7 +272,12 @@ impl RestClient {
     }
 
     fn parse_tick_size(raw: &serde_json::Value) -> Option<String> {
-        for candidate in ["minimum_tick_size", "minimumTickSize", "tick_size", "tickSize"] {
+        for candidate in [
+            "minimum_tick_size",
+            "minimumTickSize",
+            "tick_size",
+            "tickSize",
+        ] {
             if let Some(value) = raw.get(candidate) {
                 if let Some(parsed) = value.as_str() {
                     let tick = parsed.trim();
@@ -473,7 +583,10 @@ impl RestClient {
             .context("Failed to fetch events with date filter")?;
 
         if !response.status().is_success() {
-            bail!("Failed to get events with date filter: {}", response.status());
+            bail!(
+                "Failed to get events with date filter: {}",
+                response.status()
+            );
         }
 
         let events: Vec<EventResponse> = response
@@ -723,8 +836,8 @@ impl RestClient {
             let payload = serde_json::json!({
                 "heartbeat_id": current_heartbeat_id.as_deref(),
             });
-            let body = serde_json::to_string(&payload)
-                .context("Failed to serialize heartbeat payload")?;
+            let body =
+                serde_json::to_string(&payload).context("Failed to serialize heartbeat payload")?;
             let headers = self.build_l2_headers("POST", request_path, &body)?;
 
             let response = self
@@ -738,7 +851,8 @@ impl RestClient {
 
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            let raw: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+            let raw: serde_json::Value =
+                serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
 
             if status.is_success() {
                 if let Some(next_heartbeat_id) = Self::parse_heartbeat_id(&raw) {
@@ -828,12 +942,12 @@ impl RestClient {
             bail!("Failed to get order: {}", response.status());
         }
 
-        let order: Order = response
+        let raw_order: RemoteOpenOrder = response
             .json()
             .await
             .context("Failed to parse order response")?;
 
-        Ok(order)
+        Ok(remote_open_order_to_order(raw_order))
     }
 
     /// Get all open orders
@@ -854,12 +968,25 @@ impl RestClient {
             bail!("Failed to get open orders: {}", response.status());
         }
 
-        let orders: Vec<Order> = response
+        let raw: serde_json::Value = response
             .json()
             .await
             .context("Failed to parse open orders response")?;
 
-        Ok(orders)
+        let raw_orders = if raw.is_array() {
+            serde_json::from_value::<Vec<RemoteOpenOrder>>(raw)
+                .context("Failed to decode open orders array response")?
+        } else if let Some(data) = raw.get("data") {
+            serde_json::from_value::<Vec<RemoteOpenOrder>>(data.clone())
+                .context("Failed to decode paginated open orders response")?
+        } else {
+            bail!("Unexpected open orders response shape");
+        };
+
+        Ok(raw_orders
+            .into_iter()
+            .map(remote_open_order_to_order)
+            .collect())
     }
 
     /// Get current positions
@@ -922,7 +1049,9 @@ impl RestClient {
             .context("balance field missing in balance-allowance response")?;
 
         // USDC on Polygon has 6 decimals — convert from wei units to USDC
-        let raw_units: f64 = balance_str.parse().context("Failed to parse balance value")?;
+        let raw_units: f64 = balance_str
+            .parse()
+            .context("Failed to parse balance value")?;
         Ok(raw_units / 1_000_000.0)
     }
 
@@ -947,8 +1076,12 @@ impl RestClient {
             .await
             .context("Failed to parse fee rate response")?;
 
-        Self::parse_fee_rate_bps(&raw)
-            .with_context(|| format!("fee rate missing in response for token {}: {}", token_id, raw))
+        Self::parse_fee_rate_bps(&raw).with_context(|| {
+            format!(
+                "fee rate missing in response for token {}: {}",
+                token_id, raw
+            )
+        })
     }
 
     pub async fn get_tick_size(&self, token_id: &str) -> Result<String> {
@@ -971,8 +1104,12 @@ impl RestClient {
             .await
             .context("Failed to parse tick size response")?;
 
-        Self::parse_tick_size(&raw)
-            .with_context(|| format!("tick size missing in response for token {}: {}", token_id, raw))
+        Self::parse_tick_size(&raw).with_context(|| {
+            format!(
+                "tick size missing in response for token {}: {}",
+                token_id, raw
+            )
+        })
     }
 
     /// Get midpoint price for a token

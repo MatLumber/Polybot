@@ -97,7 +97,27 @@ function normalizeTimeframeLabel(raw: string): string {
   return raw.trim().toUpperCase()
 }
 
-function formatMarketLabel(asset: string, timeframe: string): string {
+function inferTicker(value?: string): string | null {
+  const normalized = value?.trim().toLowerCase() ?? ''
+  if (!normalized) return null
+  if (normalized.includes('bitcoin') || normalized.includes('btc')) return 'BTC'
+  if (normalized.includes('ethereum') || normalized.includes('eth')) return 'ETH'
+  if (normalized.includes('solana') || normalized.includes('sol')) return 'SOL'
+  if (normalized.includes('ripple') || normalized.includes('xrp')) return 'XRP'
+  if (/^[a-z]{2,5}$/i.test(normalized)) return normalized.toUpperCase()
+  return null
+}
+
+function formatMarketLabel(asset: string, timeframe: string, marketSlug?: string): string {
+  const ticker = inferTicker(asset) ?? inferTicker(marketSlug)
+  if (ticker) {
+    return `${ticker}_${normalizeTimeframeLabel(timeframe)}`
+  }
+
+  if (marketSlug?.trim()) {
+    return marketSlug.trim().replaceAll('-', ' ').toUpperCase()
+  }
+
   return `${asset.trim().toUpperCase()}_${normalizeTimeframeLabel(timeframe)}`
 }
 
@@ -187,7 +207,9 @@ function PositionTable({ positions, now }: { positions: Position[]; now: number 
             const tokDown = position.currentSharePrice < position.entrySharePrice
             return (
               <tr key={position.id}>
-                <td>{formatMarketLabel(position.asset, position.timeframe)}</td>
+                <td title={position.marketSlug}>
+                  {formatMarketLabel(position.asset, position.timeframe, position.marketSlug)}
+                </td>
                 <td className={positionDirectionClass(position.direction)}>{position.direction.toUpperCase()}</td>
                 <td>{entryTok}</td>
                 <td className={tokUp ? 'text-positive' : tokDown ? 'text-negative' : ''}>{nowTok}</td>

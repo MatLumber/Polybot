@@ -71,7 +71,10 @@ pub fn create_router(
         .route("/api/ml/features", get(get_ml_features))
         .route("/api/ml/training", get(get_ml_training_status))
         // Trading mode toggle (paper ↔ live without restart)
-        .route("/api/trading-mode", get(get_trading_mode).post(set_trading_mode))
+        .route(
+            "/api/trading-mode",
+            get(get_trading_mode).post(set_trading_mode),
+        )
         // WebSocket
         .route("/ws", axum::routing::get(websocket_handler))
         // State
@@ -703,10 +706,16 @@ struct TradingModeResponse {
 
 /// GET /api/trading-mode - Returns current trading mode
 async fn get_trading_mode(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
-    let is_paper = memory.trading_mode.load(std::sync::atomic::Ordering::Relaxed);
+    let is_paper = memory
+        .trading_mode
+        .load(std::sync::atomic::Ordering::Relaxed);
     let live_ready = memory.live_ready.load(std::sync::atomic::Ordering::Relaxed);
     Json(ApiResponse::success(TradingModeResponse {
-        mode: if is_paper { "paper".into() } else { "live".into() },
+        mode: if is_paper {
+            "paper".into()
+        } else {
+            "live".into()
+        },
         is_paper,
         live_ready,
     }))

@@ -203,10 +203,10 @@ impl DashboardMemory {
 
                 // Use prediction_correct for win/loss counting (not pnl)
                 // This correctly reflects whether the prediction was right
-                let is_prediction_correct = trade.prediction_correct || 
-                    trade.result == "PREDICTION_CORRECT" || 
-                    trade.result == "WIN";
-                
+                let is_prediction_correct = trade.prediction_correct
+                    || trade.result == "PREDICTION_CORRECT"
+                    || trade.result == "WIN";
+
                 if is_prediction_correct {
                     wins += 1;
                     sum_win_pnl += pnl;
@@ -475,7 +475,11 @@ impl DashboardMemory {
             stats.total_fees = 0.0;
             stats.largest_win = largest_win;
             stats.largest_loss = largest_loss;
-            stats.avg_win = if wins > 0 { sum_win_pnl / wins as f64 } else { 0.0 };
+            stats.avg_win = if wins > 0 {
+                sum_win_pnl / wins as f64
+            } else {
+                0.0
+            };
             stats.avg_loss = if losses > 0 {
                 -(sum_loss_pnl / losses as f64)
             } else {
@@ -495,7 +499,10 @@ impl DashboardMemory {
             stats.exits_take_profit = exits_take_profit;
             stats.exits_market_expiry = exits_market_expiry;
             stats.exits_time_expiry = exits_time_expiry;
-            stats.predictions_correct = trades.iter().filter(|trade| trade.prediction_correct).count() as u32;
+            stats.predictions_correct = trades
+                .iter()
+                .filter(|trade| trade.prediction_correct)
+                .count() as u32;
             stats.predictions_incorrect = trades.len() as u32 - stats.predictions_correct;
             stats.prediction_win_rate = if stats.total_trades > 0 {
                 (stats.predictions_correct as f64 / stats.total_trades as f64) * 100.0
@@ -586,9 +593,7 @@ impl DashboardMemory {
             daily_pnl: *self.live_daily_pnl.read().await,
             daily_trades: *self.live_daily_trades.read().await,
             kill_switch_active: *self.live_kill_switch.read().await,
-            ready: self
-                .live_ready
-                .load(std::sync::atomic::Ordering::Relaxed),
+            ready: self.live_ready.load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 
@@ -1168,14 +1173,18 @@ impl DashboardMemory {
         let metrics = self.ml_metrics.read().await;
 
         if let Some(ref m) = *metrics {
-            let ensemble_weights: Vec<_> = m.model_info.iter().map(|(name, weight, accuracy)| {
-                serde_json::json!({
-                    "name": name,
-                    "weight": weight,
-                    "accuracy": accuracy,
-                    "status": "active"
+            let ensemble_weights: Vec<_> = m
+                .model_info
+                .iter()
+                .map(|(name, weight, accuracy)| {
+                    serde_json::json!({
+                        "name": name,
+                        "weight": weight,
+                        "accuracy": accuracy,
+                        "status": "active"
+                    })
                 })
-            }).collect();
+                .collect();
 
             serde_json::json!({
                 "model_type": m.model_type,

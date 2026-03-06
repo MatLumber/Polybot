@@ -286,9 +286,7 @@ impl MLModel for GradientBoostingModel {
             let x = DenseMatrix::from_2d_array(&[&feature_vec]).ok()?;
 
             match regressor.predict(&x) {
-                Ok(pred) if !pred.is_empty() => {
-                    Some(pred[0].clamp(0.01, 0.99))
-                }
+                Ok(pred) if !pred.is_empty() => Some(pred[0].clamp(0.01, 0.99)),
                 _ => None,
             }
         } else {
@@ -361,12 +359,17 @@ impl MLPredictor {
 
         tracing::info!(
             "📊 Train/test split: {} train samples ({:.0}%), {} test samples ({:.0}%)",
-            train_samples.len(), 100.0 * train_samples.len() as f64 / total as f64,
-            test_samples.len(), 100.0 * test_samples.len() as f64 / total as f64,
+            train_samples.len(),
+            100.0 * train_samples.len() as f64 / total as f64,
+            test_samples.len(),
+            100.0 * test_samples.len() as f64 / total as f64,
         );
 
         // Build a training-only dataset for matrix construction
-        let train_dataset = Dataset { samples: train_samples.to_vec(), trade_samples: Vec::new() };
+        let train_dataset = Dataset {
+            samples: train_samples.to_vec(),
+            trade_samples: Vec::new(),
+        };
 
         // === Step 1: Build recency-weighted training matrix ===
         let (x, y) = self.dataset_to_dense_matrix(&train_dataset);
@@ -391,9 +394,7 @@ impl MLPredictor {
                 let feat_vec = sample.features.to_vec();
                 let target = sample.target;
                 let pred = rf.predict(&sample.features);
-                let is_correct = pred
-                    .map(|p| (p > 0.5) == (target > 0.5))
-                    .unwrap_or(false);
+                let is_correct = pred.map(|p| (p > 0.5) == (target > 0.5)).unwrap_or(false);
 
                 // Every sample appears at least once.
                 focused_2d.push(feat_vec.clone());
@@ -497,7 +498,13 @@ impl MLPredictor {
 
         for sample in &dataset.samples {
             let age_days = (now_ms - sample.timestamp).max(0) as f64 / 86_400_000.0;
-            let copies: usize = if age_days < 7.0 { 3 } else if age_days < 21.0 { 2 } else { 1 };
+            let copies: usize = if age_days < 7.0 {
+                3
+            } else if age_days < 21.0 {
+                2
+            } else {
+                1
+            };
 
             let feature_vec = sample.features.to_vec();
             let target = sample.target; // Use f64 directly (0.0 or 1.0) for regressor
@@ -508,10 +515,8 @@ impl MLPredictor {
             }
         }
 
-        let x = DenseMatrix::from_2d_array(
-            &x_2d.iter().map(|v| v.as_slice()).collect::<Vec<_>>(),
-        )
-        .unwrap();
+        let x = DenseMatrix::from_2d_array(&x_2d.iter().map(|v| v.as_slice()).collect::<Vec<_>>())
+            .unwrap();
         (x, y_data)
     }
 
@@ -581,7 +586,11 @@ impl MLPredictor {
 
         // Only lightly penalize signals that are very close to 50% (< 5% edge).
         // The min_edge gate already filters out true noise; this catches extreme ambiguity.
-        let neutral_penalty = if (ensemble_prob - 0.5).abs() < 0.05 { 0.7 } else { 1.0 };
+        let neutral_penalty = if (ensemble_prob - 0.5).abs() < 0.05 {
+            0.7
+        } else {
+            1.0
+        };
 
         ((confidence * 0.7 + extreme_boost * 0.3) * neutral_penalty).clamp(0.0, 1.0)
     }
@@ -609,8 +618,7 @@ impl MLPredictor {
             if self.drift_baseline_accuracy < 1e-9 {
                 self.drift_baseline_accuracy = current;
             } else {
-                self.drift_baseline_accuracy =
-                    self.drift_baseline_accuracy * 0.95 + current * 0.05;
+                self.drift_baseline_accuracy = self.drift_baseline_accuracy * 0.95 + current * 0.05;
             }
         }
     }
@@ -747,12 +755,21 @@ impl MLPredictor {
         let down_count = predictions.iter().filter(|(_, p)| *p <= 0.5).count();
 
         let agreeing_models = up_count.max(down_count);
-        let direction = if up_count > down_count { 1.0 } else if down_count > up_count { 0.0 } else { 0.5 };
+        let direction = if up_count > down_count {
+            1.0
+        } else if down_count > up_count {
+            0.0
+        } else {
+            0.5
+        };
 
         ModelAgreement {
             agreeing_models,
             direction,
-            predictions: predictions.iter().map(|(n, p)| format!("{}:{:.3}", n, p)).collect(),
+            predictions: predictions
+                .iter()
+                .map(|(n, p)| format!("{}:{:.3}", n, p))
+                .collect(),
         }
     }
 }

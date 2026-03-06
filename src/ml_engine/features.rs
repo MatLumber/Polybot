@@ -437,7 +437,8 @@ impl FeatureEngine {
 
         // ============ Polymarket ============
         ml_features.polymarket_price = features.polymarket_price.unwrap_or(0.5);
-        ml_features.polymarket_price_momentum = self.calculate_polymarket_momentum(ml_features.polymarket_price);
+        ml_features.polymarket_price_momentum =
+            self.calculate_polymarket_momentum(ml_features.polymarket_price);
         ml_features.polymarket_volume_24hr = features.polymarket_volume_24hr.unwrap_or(0.0);
         ml_features.polymarket_liquidity = features.polymarket_liquidity.unwrap_or(0.0);
 
