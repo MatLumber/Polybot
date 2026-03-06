@@ -127,7 +127,7 @@ impl Order {
             maker: None,
             signer: None,
             salt: U256::from(rand::random::<u64>()),
-            nonce: super::signing::random_i64_compatible_nonce(),
+            nonce: super::signing::DEFAULT_CLOB_NONCE,
             expiration: 0,
             fee_rate_bps: None,
             tick_size: None,

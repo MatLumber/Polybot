@@ -308,7 +308,7 @@ impl RestClient {
         address: Address,
     ) -> Result<(String, String, String)> {
         let timestamp = Utc::now().timestamp();
-        let nonce = super::signing::random_i64_compatible_nonce();
+        let nonce = super::signing::DEFAULT_CLOB_NONCE;
         let signature =
             super::signing::create_l1_signature(private_key, chain_id, timestamp, nonce).await?;
         let headers = Self::build_l1_headers(address, &signature, timestamp, nonce)?;
