@@ -372,6 +372,13 @@ pub struct MarketResponse {
     pub best_bid: Option<f64>,
     #[serde(default)]
     pub best_ask: Option<f64>,
+    #[serde(
+        default,
+        alias = "minimum_order_size",
+        alias = "minimumOrderSize",
+        alias = "min_order_size"
+    )]
+    pub order_min_size: Option<f64>,
 }
 
 /// Helper to deserialize JSON string arrays
@@ -425,6 +432,7 @@ impl From<MarketResponse> for super::MarketInfo {
             neg_risk: m.neg_risk.unwrap_or(false),
             min_tick: 0.01,
             max_tick: 0.99,
+            order_min_size: m.order_min_size.unwrap_or(0.0),
             slug: m.slug,
             end_date: m.end_date,
             end_date_iso: m.end_date_iso,

@@ -223,6 +223,8 @@ pub struct MarketInfo {
     pub neg_risk: bool,
     pub min_tick: f64,
     pub max_tick: f64,
+    /// Minimum order size allowed by the market, in shares.
+    pub order_min_size: f64,
     /// Market slug (e.g., "btc-15m")
     pub slug: Option<String>,
     /// Market expiry time in ISO 8601 format with time (preferred).
@@ -1856,6 +1858,7 @@ mod tests {
             neg_risk: false,
             min_tick: 0.01,
             max_tick: 0.99,
+            order_min_size: 5.0,
             slug: Some("btc-15m".to_string()),
             end_date: Some("2030-01-01T00:00:00Z".to_string()),
             end_date_iso: Some("2030-01-01T00:00:00Z".to_string()),

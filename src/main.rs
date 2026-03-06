@@ -2792,7 +2792,7 @@ async fn main() -> Result<()> {
                             };
 
                             let live_available_usdc = position_risk.get_balance().max(0.0);
-                            let effective_size_usdc = if live_available_usdc > 0.0 {
+                            let mut effective_size_usdc = if live_available_usdc > 0.0 {
                                 position_risk
                                     .calculate_position_size(&signal)
                                     .min(live_available_usdc)
@@ -2810,7 +2810,7 @@ async fn main() -> Result<()> {
                                 continue;
                             }
 
-                            let shares_size = if exec_plan.entry_price > 0.0 {
+                            let mut shares_size = if exec_plan.entry_price > 0.0 {
                                 (effective_size_usdc / exec_plan.entry_price).max(0.0)
                             } else {
                                 0.0
@@ -2818,6 +2818,49 @@ async fn main() -> Result<()> {
                             if shares_size <= 0.0 {
                                 warn!(signal_id = %signal_id, notional_usdc = effective_size_usdc, entry_price = exec_plan.entry_price, "Skipping order due to non-positive share size");
                                 continue;
+                            }
+
+                            if let Some(market) = clob_client.get_market(&signal.condition_id).await {
+                                let min_order_size = market.order_min_size.max(0.0);
+                                if min_order_size > 0.0 && shares_size + f64::EPSILON < min_order_size {
+                                    let required_size_usdc = min_order_size * exec_plan.entry_price;
+                                    let can_raise_with_balance = live_available_usdc > 0.0
+                                        && required_size_usdc <= live_available_usdc + f64::EPSILON;
+                                    let can_raise_without_balance = live_available_usdc <= 0.0
+                                        && required_size_usdc <= effective_size_usdc + f64::EPSILON;
+
+                                    if can_raise_with_balance || can_raise_without_balance {
+                                        info!(
+                                            signal_id = %signal_id,
+                                            old_shares_size = shares_size,
+                                            new_shares_size = min_order_size,
+                                            old_size_usdc = effective_size_usdc,
+                                            new_size_usdc = required_size_usdc,
+                                            condition_id = %signal.condition_id,
+                                            "Raised LIVE order to market minimum size"
+                                        );
+                                        shares_size = min_order_size;
+                                        effective_size_usdc = required_size_usdc;
+                                    } else {
+                                        warn!(
+                                            signal_id = %signal_id,
+                                            shares_size,
+                                            min_order_size,
+                                            effective_size_usdc,
+                                            required_size_usdc,
+                                            live_available_usdc,
+                                            condition_id = %signal.condition_id,
+                                            "Skipping LIVE order below market minimum size"
+                                        );
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                warn!(
+                                    signal_id = %signal_id,
+                                    condition_id = %signal.condition_id,
+                                    "LIVE order proceeding without cached market minimum size metadata"
+                                );
                             }
 
                             let mut order = Order::new(
