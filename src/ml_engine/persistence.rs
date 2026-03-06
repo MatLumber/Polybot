@@ -129,6 +129,10 @@ impl MLPersistenceManager {
         }
     }
 
+    pub fn dataset_file(&self) -> &str {
+        &self.dataset_file
+    }
+
     /// Guardar estado completo del ML
     pub fn save_ml_state(
         &mut self,

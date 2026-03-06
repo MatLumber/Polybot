@@ -145,7 +145,11 @@ async fn main() -> Result<()> {
             "🧠 ML Engine configuration loaded"
         );
 
-        let v3_strategy = crate::strategy::V3Strategy::new(ml_config, StrategyConfig::default());
+        let v3_strategy = crate::strategy::V3Strategy::new_with_data_dir(
+            ml_config,
+            StrategyConfig::default(),
+            &config.persistence.data_dir,
+        );
 
         // Load persisted ML state if exists
         let persistence =
@@ -3037,17 +3041,13 @@ fn parse_runtime_args() -> Result<RuntimeArgs> {
     Ok(args)
 }
 fn maybe_run_startup_reset(config: &AppConfig, runtime_args: &RuntimeArgs) -> Result<bool> {
-    let requested_mode = runtime_args
-        .reset_mode
-        .as_ref()
-        .map(|s| s.as_str())
-        .or_else(|| {
-            if config.reset.enabled_on_start {
-                Some(config.reset.mode.as_str())
-            } else {
-                None
-            }
-        });
+    let requested_mode = runtime_args.reset_mode.as_ref().map(|s| s.as_str());
+    if requested_mode.is_none() && config.reset.enabled_on_start {
+        warn!(
+            configured_mode = %config.reset.mode,
+            "Ignoring deprecated startup reset configuration; use --reset hard_all_history for one-time wipes"
+        );
+    }
     let Some(mode) = requested_mode else {
         return Ok(false);
     };

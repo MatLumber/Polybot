@@ -78,10 +78,18 @@ pub struct V3Strategy {
 
 impl V3Strategy {
     pub fn new(ml_config: MLEngineConfig, _base_config: crate::strategy::StrategyConfig) -> Self {
+        Self::new_with_data_dir(ml_config, _base_config, "./data")
+    }
+
+    pub fn new_with_data_dir(
+        ml_config: MLEngineConfig,
+        _base_config: crate::strategy::StrategyConfig,
+        data_dir: &str,
+    ) -> Self {
         let calibrator = IndicatorCalibrator::with_min_samples(30);
 
         // Initialize persistence manager
-        let persistence = MLPersistenceManager::new("./data");
+        let persistence = MLPersistenceManager::new(data_dir);
 
         // Try to load previous state
         let (mut predictor, mut dataset, mut state) = match persistence.load_ml_state() {
@@ -291,7 +299,7 @@ impl V3Strategy {
                 );
                 // Auto-save every 10 new observations (reuses trade-save interval logic)
                 if self.dataset.len() % 10 == 0 {
-                    if let Err(e) = self.dataset.save(&format!("{}/ml_engine/dataset.json", "./data")) {
+                    if let Err(e) = self.dataset.save(self.persistence.dataset_file()) {
                         warn!("Failed to auto-save dataset after window observation: {}", e);
                     }
                 }
@@ -1225,10 +1233,7 @@ impl V3Strategy {
 
         // Guardar dataset cada 10 trades nuevos
         if self.dataset.len() % 10 == 0 {
-            if let Err(e) = self
-                .dataset
-                .save(&format!("{}/ml_engine/dataset.json", "./data"))
-            {
+            if let Err(e) = self.dataset.save(self.persistence.dataset_file()) {
                 warn!("Failed to auto-save dataset: {}", e);
             } else {
                 info!("ðŸ’¾ Dataset auto-saved: {} samples", self.dataset.len());
