@@ -18,6 +18,12 @@ import {
 import { ChartErrorBoundary } from './charts/ChartErrorBoundary'
 import { PriceStreamChart } from './charts/PriceStreamChart'
 import { useDashboardStream } from '../hooks/useDashboardStream'
+import {
+  buildApiCandidates,
+  DEFAULT_API_BASE,
+  fetchApiFromCandidates,
+  normalizeBaseUrl,
+} from '../lib/runtimeEndpoints'
 import { MLPanel } from './MLPanel'
 import type { AssetPrice, AssetStats, Position, Trade } from '../types/ui'
 
@@ -378,7 +384,8 @@ function RejectionDiagnosticsPanel({
   )
 }
 
-const API_BASE = (import.meta.env.VITE_API_BASE ?? 'http://localhost:3000').replace(/\/$/, '')
+const API_BASE = normalizeBaseUrl(import.meta.env.VITE_API_BASE ?? DEFAULT_API_BASE)
+const API_CANDIDATES = buildApiCandidates(API_BASE)
 
 export function Dashboard() {
   const stream = useDashboardStream()
@@ -392,13 +399,10 @@ export function Dashboard() {
 
   // Sync backend mode on connect
   useEffect(() => {
-    fetch(`${API_BASE}/api/trading-mode`, {
-      headers: { 'ngrok-skip-browser-warning': 'true' },
-    })
-      .then((r) => r.json())
-      .then((payload: { success: boolean; data?: { is_paper: boolean } }) => {
-        if (payload.success && payload.data) {
-          const isPaper = payload.data.is_paper
+    fetchApiFromCandidates<{ is_paper: boolean }>('/api/trading-mode', API_CANDIDATES)
+      .then(({ data }) => {
+        if (data) {
+          const isPaper = data.is_paper
           setBackendIsLive(!isPaper)
           setMode(isPaper ? 'paper' : 'live')
         }
@@ -416,24 +420,21 @@ export function Dashboard() {
     }
     setMode(newMode)
     try {
-      const res = await fetch(`${API_BASE}/api/trading-mode`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'ngrok-skip-browser-warning': 'true',
+      const { data } = await fetchApiFromCandidates<{ is_paper: boolean }>(
+        '/api/trading-mode',
+        API_CANDIDATES,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ mode: newMode }),
         },
-        body: JSON.stringify({ mode: newMode }),
-      })
-      const payload = await res.json() as { success: boolean; data?: { is_paper: boolean }; error?: string }
-      if (payload.success && payload.data) {
-        setBackendIsLive(!payload.data.is_paper)
-      } else {
-        alert(`Error al cambiar modo: ${payload.error ?? 'desconocido'}`)
-        // Revert display
-        setMode(backendIsLive ? 'live' : 'paper')
-      }
+      )
+      setBackendIsLive(!data.is_paper)
     } catch (e) {
-      alert(`Error de red: ${e}`)
+      const message = e instanceof Error ? e.message : String(e)
+      alert(`Error al cambiar modo: ${message}`)
       setMode(backendIsLive ? 'live' : 'paper')
     }
   }, [backendIsLive])
@@ -487,19 +488,23 @@ export function Dashboard() {
   const liveUnrealized = positions.reduce((s, p) => s + p.pnl, 0)
   const liveLocked = positions.reduce((s, p) => s + p.sizeUsdc, 0)
   const liveTotalEquity = modeState.balance + liveLocked + liveUnrealized
-  const trades = dashboard.paper.recentTrades
+  const trades = modeState.recentTrades
     .filter((trade) => toMsTimestamp(trade.timestamp) >= heartbeatNow - RECENT_TRADES_WINDOW_MS)
     .sort((a, b) => toMsTimestamp(b.timestamp) - toMsTimestamp(a.timestamp))
     .slice(0, 200)
-  const stats = dashboard.paper.stats
+  const stats = modeState.stats
   const priceMap = dashboard.prices.prices
   const execution = dashboard.execution
   const selectedChartPrice = priceMap[chartAsset]
   const chartWindowSeconds = chartStyle === 'polymarket' ? 86_400 : 3600
   const chartPeriodLabel = chartStyle === 'polymarket' ? '15m · 24h' : '1h'
-  const assetStats = buildMarketStatsFromTrades(trades)
-    .sort((a, b) => b.totalPnl - a.totalPnl)
-    .slice(0, 8)
+  const assetStats = Object.values(modeState.assetStats).length > 0
+    ? Object.values(modeState.assetStats)
+      .sort((a, b) => b.totalPnl - a.totalPnl)
+      .slice(0, 8)
+    : buildMarketStatsFromTrades(trades)
+      .sort((a, b) => b.totalPnl - a.totalPnl)
+      .slice(0, 8)
 
   return (
     <div className="dashboard-shell">

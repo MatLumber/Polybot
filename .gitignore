@@ -20,6 +20,10 @@ Thumbs.db
 *.log
 logs/
 
+# Runtime data artifacts
+/data/
+/dashboard/data/
+
 # Temp files
 .tmp/
 tmp_*/

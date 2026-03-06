@@ -43,6 +43,14 @@ pub struct RiskConfig {
     pub max_hold_duration_ms: i64,
     /// Whether the kill switch is enabled
     pub kill_switch_enabled: bool,
+    /// ROI that arms checkpoint profit protection
+    pub checkpoint_arm_roi: f64,
+    /// Initial ROI floor locked once checkpoint arms
+    pub checkpoint_initial_floor_roi: f64,
+    /// Minimum gap between the peak ROI and the protected floor
+    pub checkpoint_trail_gap_roi: f64,
+    /// Hard stop expressed as ROI (negative value)
+    pub hard_stop_roi: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +86,10 @@ impl Default for RiskConfig {
             take_profit_pct: 0.05,           // 5% take-profit
             max_hold_duration_ms: 7_200_000, // 2 hours
             kill_switch_enabled: true,
+            checkpoint_arm_roi: 0.05,
+            checkpoint_initial_floor_roi: 0.022,
+            checkpoint_trail_gap_roi: 0.012,
+            hard_stop_roi: -0.07,
         }
     }
 }
@@ -87,6 +99,8 @@ impl Default for RiskConfig {
 pub enum ExitReason {
     TrailingStop,
     TakeProfit,
+    CheckpointTakeProfit,
+    HardStop,
     TimeExpiry,
     MarketExpiry,
     Manual,
@@ -98,6 +112,8 @@ impl std::fmt::Display for ExitReason {
         match self {
             ExitReason::TrailingStop => write!(f, "TRAILING_STOP"),
             ExitReason::TakeProfit => write!(f, "TAKE_PROFIT"),
+            ExitReason::CheckpointTakeProfit => write!(f, "CHECKPOINT_TAKE_PROFIT"),
+            ExitReason::HardStop => write!(f, "HARD_STOP"),
             ExitReason::TimeExpiry => write!(f, "TIME_EXPIRY"),
             ExitReason::MarketExpiry => write!(f, "MARKET_EXPIRY"),
             ExitReason::Manual => write!(f, "MANUAL"),
@@ -129,6 +145,13 @@ pub struct Position {
     pub stop_price: f64,
     /// Take-profit target price
     pub take_profit_price: f64,
+    /// Checkpoint profit state
+    pub checkpoint_armed: bool,
+    pub checkpoint_peak_roi: f64,
+    pub checkpoint_floor_roi: f64,
+    pub checkpoint_breach_ticks: u32,
+    pub hard_stop_breach_ticks: u32,
+    pub dynamic_hard_stop_roi: f64,
 }
 
 impl Default for Position {
@@ -148,6 +171,12 @@ impl Default for Position {
             peak_price: 0.0,
             stop_price: 0.0,
             take_profit_price: 0.0,
+            checkpoint_armed: false,
+            checkpoint_peak_roi: 0.0,
+            checkpoint_floor_roi: 0.0,
+            checkpoint_breach_ticks: 0,
+            hard_stop_breach_ticks: 0,
+            dynamic_hard_stop_roi: -0.07,
         }
     }
 }
@@ -363,6 +392,12 @@ impl RiskManager {
             peak_price,
             stop_price,
             take_profit_price,
+            checkpoint_armed: false,
+            checkpoint_peak_roi: 0.0,
+            checkpoint_floor_roi: 0.0,
+            checkpoint_breach_ticks: 0,
+            hard_stop_breach_ticks: 0,
+            dynamic_hard_stop_roi: self.config.hard_stop_roi,
         };
 
         if let Ok(mut positions) = self.positions.write() {
@@ -397,6 +432,47 @@ impl RiskManager {
         };
         position.pnl = (price_diff / position.entry_price) * position.size;
         position.pnl_pct = price_diff / position.entry_price;
+        position.dynamic_hard_stop_roi = self.config.hard_stop_roi;
+
+        if !position.checkpoint_armed && position.pnl_pct >= self.config.checkpoint_arm_roi {
+            position.checkpoint_armed = true;
+            position.checkpoint_peak_roi = position.pnl_pct;
+            position.checkpoint_floor_roi = self.config.checkpoint_initial_floor_roi.max(0.0);
+            position.checkpoint_breach_ticks = 0;
+        }
+
+        if position.checkpoint_armed {
+            if position.pnl_pct > position.checkpoint_peak_roi {
+                position.checkpoint_peak_roi = position.pnl_pct;
+                let dynamic_gap =
+                    (position.checkpoint_peak_roi * 0.25_f64).max(self.config.checkpoint_trail_gap_roi);
+                let dynamic_floor =
+                    (position.checkpoint_peak_roi - dynamic_gap).max(self.config.checkpoint_initial_floor_roi);
+                if dynamic_floor > position.checkpoint_floor_roi {
+                    position.checkpoint_floor_roi = dynamic_floor;
+                }
+            }
+
+            if position.pnl_pct <= position.checkpoint_floor_roi {
+                position.checkpoint_breach_ticks = position.checkpoint_breach_ticks.saturating_add(1);
+            } else {
+                position.checkpoint_breach_ticks = 0;
+            }
+
+            if position.checkpoint_breach_ticks >= 2 {
+                return Some(ExitReason::CheckpointTakeProfit);
+            }
+        }
+
+        if position.pnl_pct <= position.dynamic_hard_stop_roi {
+            position.hard_stop_breach_ticks = position.hard_stop_breach_ticks.saturating_add(1);
+        } else {
+            position.hard_stop_breach_ticks = 0;
+        }
+
+        if position.hard_stop_breach_ticks >= 2 {
+            return Some(ExitReason::HardStop);
+        }
 
         // Update peak price and trailing stop
         match position.direction {
@@ -409,10 +485,6 @@ impl RiskManager {
                 if current_price <= position.stop_price {
                     return Some(ExitReason::TrailingStop);
                 }
-                // Check take-profit
-                if current_price >= position.take_profit_price {
-                    return Some(ExitReason::TakeProfit);
-                }
             }
             Direction::Down => {
                 if current_price < position.peak_price {
@@ -422,10 +494,6 @@ impl RiskManager {
                 // Check trailing stop (price rose above stop)
                 if current_price >= position.stop_price {
                     return Some(ExitReason::TrailingStop);
-                }
-                // Check take-profit
-                if current_price <= position.take_profit_price {
-                    return Some(ExitReason::TakeProfit);
                 }
             }
         }

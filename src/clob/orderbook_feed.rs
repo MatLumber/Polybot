@@ -112,7 +112,7 @@ pub struct OrderbookFeed {
 
 impl OrderbookFeed {
     pub fn new(config: OrderbookFeedConfig) -> Self {
-        let rest_client = RestClient::new(&config.rest_url, None, None, None, None);
+        let rest_client = RestClient::new(&config.rest_url, None, None, None, None, 0);
 
         Self {
             config,

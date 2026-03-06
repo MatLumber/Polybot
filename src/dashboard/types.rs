@@ -39,10 +39,14 @@ pub struct LiveDashboard {
     pub locked: f64,
     pub total_equity: f64,
     pub unrealized_pnl: f64,
+    pub stats: PaperStatsResponse,
     pub open_positions: Vec<PositionResponse>,
+    pub recent_trades: Vec<TradeResponse>,
+    pub asset_stats: HashMap<String, AssetStatsResponse>,
     pub daily_pnl: f64,
     pub daily_trades: u32,
     pub kill_switch_active: bool,
+    pub ready: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

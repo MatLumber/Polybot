@@ -354,9 +354,11 @@ impl WsClient {
             signature_type: 0,
             signature: None,
             maker: None,
+            signer: None,
             salt: ethers::types::U256::zero(),
             nonce: 0,
             expiration: 0,
+            fee_rate_bps: None,
         };
 
         let _ = self.event_tx.send(WsEvent::OrderUpdate(order)).await;

@@ -98,7 +98,18 @@ async fn get_stats(State((memory, _, _)): State<AppState>) -> impl IntoResponse 
 /// GET /api/trades - Recent trades
 async fn get_trades(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let paper = memory.get_paper_state().await;
-    Json(ApiResponse::success(paper.recent_trades))
+    let live = memory.get_live_state().await;
+
+    #[derive(serde::Serialize)]
+    struct TradesResponse {
+        paper: Vec<TradeResponse>,
+        live: Vec<TradeResponse>,
+    }
+
+    Json(ApiResponse::success(TradesResponse {
+        paper: paper.recent_trades,
+        live: live.recent_trades,
+    }))
 }
 
 /// GET /api/signals - Recent signals
@@ -189,7 +200,18 @@ async fn get_positions(State((memory, _, _)): State<AppState>) -> impl IntoRespo
 /// GET /api/analytics - Per-asset analytics
 async fn get_analytics(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let paper = memory.get_paper_state().await;
-    Json(ApiResponse::success(paper.asset_stats))
+    let live = memory.get_live_state().await;
+
+    #[derive(serde::Serialize)]
+    struct AnalyticsResponse {
+        paper: std::collections::HashMap<String, AssetStatsResponse>,
+        live: std::collections::HashMap<String, AssetStatsResponse>,
+    }
+
+    Json(ApiResponse::success(AnalyticsResponse {
+        paper: paper.asset_stats,
+        live: live.asset_stats,
+    }))
 }
 
 /// GET /api/indicator-stats - Indicator calibration statistics
@@ -546,45 +568,91 @@ async fn list_data_files(State((_, _, data_dir)): State<AppState>) -> impl IntoR
 
 /// GET /api/data/temporal-patterns - Returns time-of-day performance stats
 async fn get_temporal_patterns(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
-    // TODO: Connect to actual temporal analyzer
-    // For now, return placeholder
-    let placeholder = serde_json::json!({
-        "message": "Temporal patterns endpoint - connect to TemporalPatternAnalyzer",
-        "best_hours": [
-            {"hour": 2, "win_rate": 0.65},
-            {"hour": 3, "win_rate": 0.62},
-            {"hour": 1, "win_rate": 0.58}
-        ],
-        "worst_hours": [
-            {"hour": 16, "win_rate": 0.42},
-            {"hour": 17, "win_rate": 0.44}
-        ]
+    let state = memory.get_state().await;
+    let mut by_hour: std::collections::HashMap<u32, (u32, u32)> = std::collections::HashMap::new();
+
+    for trade in state
+        .paper
+        .recent_trades
+        .iter()
+        .chain(state.live.recent_trades.iter())
+    {
+        let hour = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(trade.timestamp)
+            .map(|ts| chrono::Timelike::hour(&ts))
+            .unwrap_or(0);
+        let entry = by_hour.entry(hour).or_insert((0, 0));
+        entry.0 += 1;
+        if trade.pnl >= 0.0 {
+            entry.1 += 1;
+        }
+    }
+
+    let mut hours: Vec<serde_json::Value> = by_hour
+        .into_iter()
+        .map(|(hour, (trades, wins))| {
+            serde_json::json!({
+                "hour": hour,
+                "trades": trades,
+                "win_rate": if trades > 0 { wins as f64 / trades as f64 } else { 0.0 }
+            })
+        })
+        .collect();
+    hours.sort_by(|a, b| {
+        b["win_rate"]
+            .as_f64()
+            .partial_cmp(&a["win_rate"].as_f64())
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
-    Json(ApiResponse::success(placeholder))
+
+    Json(ApiResponse::success(serde_json::json!({
+        "hours": hours,
+        "sample_count": state.paper.recent_trades.len() + state.live.recent_trades.len(),
+        "updated_at": chrono::Utc::now().to_rfc3339(),
+    })))
 }
 
 /// GET /api/data/settlement-metrics - Returns settlement prediction metrics
 async fn get_settlement_metrics(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
-    // TODO: Connect to actual settlement predictor
-    let placeholder = serde_json::json!({
-        "message": "Settlement metrics endpoint - connect to SettlementPricePredictor",
-        "total_settlements_recorded": 0,
-        "avg_settlement_volatility": 0.0,
-        "historical_accuracy": 0.0
-    });
-    Json(ApiResponse::success(placeholder))
+    let state = memory.get_state().await;
+    let settlement_trades: Vec<_> = state
+        .paper
+        .recent_trades
+        .iter()
+        .chain(state.live.recent_trades.iter())
+        .filter(|trade| matches!(trade.exit_reason.as_str(), "MARKET_EXPIRY" | "TIME_EXPIRY"))
+        .collect();
+    let correct = settlement_trades
+        .iter()
+        .filter(|trade| trade.prediction_correct)
+        .count();
+
+    Json(ApiResponse::success(serde_json::json!({
+        "total_settlements_recorded": settlement_trades.len(),
+        "historical_accuracy": if settlement_trades.is_empty() { 0.0 } else { correct as f64 / settlement_trades.len() as f64 },
+        "avg_settlement_pnl": if settlement_trades.is_empty() { 0.0 } else { settlement_trades.iter().map(|trade| trade.pnl).sum::<f64>() / settlement_trades.len() as f64 },
+        "updated_at": chrono::Utc::now().to_rfc3339(),
+    })))
 }
 
 /// GET /api/data/cross-asset-correlations - Returns BTC/ETH correlation data
 async fn get_cross_asset_correlations(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
-    // TODO: Connect to actual cross-asset analyzer
-    let placeholder = serde_json::json!({
-        "message": "Cross-asset correlations endpoint - connect to CrossAssetAnalyzer",
-        "btc_eth_15m_correlation": 0.0,
-        "btc_eth_1h_correlation": 0.0,
+    let prices = memory.get_prices().await;
+    let btc = prices.prices.get("BTC").map(|value| value.price);
+    let eth = prices.prices.get("ETH").map(|value| value.price);
+
+    Json(ApiResponse::success(serde_json::json!({
+        "pairs": [
+            {
+                "pair": "BTC_ETH",
+                "spot_ratio": match (btc, eth) {
+                    (Some(btc_price), Some(eth_price)) if eth_price > 0.0 => Some(btc_price / eth_price),
+                    _ => None,
+                },
+                "sample_count": if btc.is_some() && eth.is_some() { 1 } else { 0 }
+            }
+        ],
         "last_update": chrono::Utc::now().to_rfc3339()
-    });
-    Json(ApiResponse::success(placeholder))
+    })))
 }
 
 /// GET /api/ml/state - Returns ML Engine state and configuration
@@ -630,14 +698,17 @@ struct TradingModeRequest {
 struct TradingModeResponse {
     mode: String,
     is_paper: bool,
+    live_ready: bool,
 }
 
 /// GET /api/trading-mode - Returns current trading mode
 async fn get_trading_mode(State((memory, _, _)): State<AppState>) -> impl IntoResponse {
     let is_paper = memory.trading_mode.load(std::sync::atomic::Ordering::Relaxed);
+    let live_ready = memory.live_ready.load(std::sync::atomic::Ordering::Relaxed);
     Json(ApiResponse::success(TradingModeResponse {
         mode: if is_paper { "paper".into() } else { "live".into() },
         is_paper,
+        live_ready,
     }))
 }
 
@@ -659,6 +730,16 @@ async fn set_trading_mode(
                 .into_response();
         }
     };
+    let live_ready = memory.live_ready.load(std::sync::atomic::Ordering::Relaxed);
+    if !is_paper && !live_ready {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiResponse::<TradingModeResponse>::error(
+                "LIVE trading is not ready on this process",
+            )),
+        )
+            .into_response();
+    }
 
     memory
         .trading_mode
@@ -668,11 +749,24 @@ async fn set_trading_mode(
     broadcaster.broadcast(&super::types::WsMessage::TradingModeChanged(is_paper));
 
     let mode_str = if is_paper { "paper" } else { "live" };
-    tracing::info!(mode = mode_str, "🔀 Trading mode switched");
+    if is_paper {
+        tracing::info!(
+            mode = mode_str,
+            live_ready = live_ready,
+            "🟦 Runtime execution switched to PAPER - no real Polymarket orders will be sent"
+        );
+    } else {
+        tracing::warn!(
+            mode = mode_str,
+            live_ready = live_ready,
+            "🟥 Runtime execution switched to LIVE - approved signals can submit REAL Polymarket orders"
+        );
+    }
 
     Json(ApiResponse::success(TradingModeResponse {
         mode: mode_str.into(),
         is_paper,
+        live_ready,
     }))
     .into_response()
 }

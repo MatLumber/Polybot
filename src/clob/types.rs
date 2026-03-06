@@ -82,6 +82,9 @@ pub struct Order {
     /// Maker address
     #[serde(default)]
     pub maker: Option<Address>,
+    /// Signer address
+    #[serde(default)]
+    pub signer: Option<Address>,
     /// Salt for uniqueness
     #[serde(default)]
     pub salt: U256,
@@ -91,6 +94,9 @@ pub struct Order {
     /// Expiration in seconds
     #[serde(default)]
     pub expiration: u64,
+    /// Polymarket fee rate in basis points, fetched per token before signing
+    #[serde(default)]
+    pub fee_rate_bps: Option<u64>,
 }
 
 impl Order {
@@ -110,10 +116,20 @@ impl Order {
             signature_type: 0, // EOA
             signature: None,
             maker: None,
+            signer: None,
             salt: U256::from(rand::random::<u64>()),
             nonce: rand::random::<u64>(),
             expiration: 0,
+            fee_rate_bps: None,
         }
+    }
+
+    /// Attach signer/funder configuration required by live accounts.
+    pub fn with_auth(mut self, signature_type: u8, maker: Option<Address>, signer: Option<Address>) -> Self {
+        self.signature_type = signature_type;
+        self.maker = maker;
+        self.signer = signer;
+        self
     }
 
     /// Calculate total order value

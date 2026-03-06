@@ -224,6 +224,30 @@ pub struct PaperAnalyticsRecord {
     pub profit_factor: f64,
 }
 
+/// Closed live trade record with dashboard-ready fields.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveTradeRecord {
+    pub timestamp: i64,
+    pub trade_id: String,
+    pub asset: String,
+    pub timeframe: String,
+    pub direction: String,
+    pub confidence: f64,
+    pub entry_price: f64,
+    pub exit_price: f64,
+    pub size_usdc: f64,
+    pub pnl: f64,
+    pub pnl_pct: f64,
+    pub result: String,
+    pub prediction_correct: bool,
+    pub exit_reason: String,
+    pub hold_duration_secs: i64,
+    pub balance_after: f64,
+    pub entry_share_price: f64,
+    pub exit_share_price: f64,
+    pub trading_win: bool,
+}
+
 /// Options for destructive data reset.
 #[derive(Debug, Clone, Copy)]
 pub struct HardResetOptions {
@@ -253,6 +277,9 @@ pub struct CsvPersistence {
     performance_writer: Arc<AsyncRwLock<csv::Writer<std::fs::File>>>,
     balance_writer: Arc<AsyncRwLock<csv::Writer<std::fs::File>>>,
     winloss_writer: Arc<AsyncRwLock<csv::Writer<std::fs::File>>>,
+    live_trade_writer: Arc<AsyncRwLock<csv::Writer<std::fs::File>>>,
+    live_balance_writer: Arc<AsyncRwLock<csv::Writer<std::fs::File>>>,
+    live_winloss_writer: Arc<AsyncRwLock<csv::Writer<std::fs::File>>>,
     pnl_summary_writer: Arc<AsyncRwLock<csv::Writer<std::fs::File>>>,
     paper_analytics_writer: Arc<AsyncRwLock<csv::Writer<std::fs::File>>>,
     rejection_writer: Arc<AsyncRwLock<csv::Writer<std::fs::File>>>,
@@ -318,6 +345,9 @@ impl CsvPersistence {
                 ("trades", options.delete_paper_state),
                 ("winloss", options.delete_paper_state),
                 ("paper_analytics", options.delete_paper_state),
+                ("live_trades", options.delete_paper_state),
+                ("live_balance", options.delete_paper_state),
+                ("live_winloss", options.delete_paper_state),
                 ("performance", options.delete_paper_state),
                 ("balance", options.delete_paper_state),
                 ("pnl_summary", options.delete_paper_state),
@@ -396,6 +426,9 @@ impl CsvPersistence {
             ("trades", options.delete_paper_state),
             ("winloss", options.delete_paper_state),
             ("paper_analytics", options.delete_paper_state),
+            ("live_trades", options.delete_paper_state),
+            ("live_balance", options.delete_paper_state),
+            ("live_winloss", options.delete_paper_state),
             ("performance", options.delete_paper_state),
             ("balance", options.delete_paper_state),
             ("pnl_summary", options.delete_paper_state),
@@ -442,6 +475,9 @@ impl CsvPersistence {
             "winloss",
             "pnl_summary",
             "paper_analytics",
+            "live_trades",
+            "live_balance",
+            "live_winloss",
             "rejections",
         ] {
             fs::create_dir_all(base.join(folder))
@@ -479,6 +515,9 @@ impl CsvPersistence {
         fs::create_dir_all(data_dir.join("winloss"))?;
         fs::create_dir_all(data_dir.join("pnl_summary"))?;
         fs::create_dir_all(data_dir.join("paper_analytics"))?;
+        fs::create_dir_all(data_dir.join("live_trades"))?;
+        fs::create_dir_all(data_dir.join("live_balance"))?;
+        fs::create_dir_all(data_dir.join("live_winloss"))?;
         fs::create_dir_all(data_dir.join("rejections"))?;
 
         // Get current date for filenames
@@ -507,6 +546,18 @@ impl CsvPersistence {
             &data_dir.join("paper_analytics"),
             &format!("paper_analytics_{}.csv", today),
         )?;
+        let live_trade_writer = Self::create_writer(
+            &data_dir.join("live_trades"),
+            &format!("live_trades_{}.csv", today),
+        )?;
+        let live_balance_writer = Self::create_writer(
+            &data_dir.join("live_balance"),
+            &format!("live_balance_{}.csv", today),
+        )?;
+        let live_winloss_writer = Self::create_writer(
+            &data_dir.join("live_winloss"),
+            &format!("live_winloss_{}.csv", today),
+        )?;
         let rejection_writer = Self::create_writer(
             &data_dir.join("rejections"),
             &format!("rejections_{}.csv", today),
@@ -520,6 +571,9 @@ impl CsvPersistence {
             performance_writer: Arc::new(AsyncRwLock::new(performance_writer)),
             balance_writer: Arc::new(AsyncRwLock::new(balance_writer)),
             winloss_writer: Arc::new(AsyncRwLock::new(winloss_writer)),
+            live_trade_writer: Arc::new(AsyncRwLock::new(live_trade_writer)),
+            live_balance_writer: Arc::new(AsyncRwLock::new(live_balance_writer)),
+            live_winloss_writer: Arc::new(AsyncRwLock::new(live_winloss_writer)),
             pnl_summary_writer: Arc::new(AsyncRwLock::new(pnl_summary_writer)),
             paper_analytics_writer: Arc::new(AsyncRwLock::new(paper_analytics_writer)),
             rejection_writer: Arc::new(AsyncRwLock::new(rejection_writer)),
@@ -614,6 +668,39 @@ impl CsvPersistence {
             .serialize(&record)
             .context("Failed to write winloss record")?;
         writer.flush().context("Failed to flush winloss writer")?;
+        Ok(())
+    }
+
+    pub async fn save_live_trade(&self, record: LiveTradeRecord) -> Result<()> {
+        let mut writer = self.live_trade_writer.write().await;
+        writer
+            .serialize(&record)
+            .context("Failed to write live_trade record")?;
+        writer
+            .flush()
+            .context("Failed to flush live_trade writer")?;
+        Ok(())
+    }
+
+    pub async fn save_live_balance(&self, record: BalanceRecord) -> Result<()> {
+        let mut writer = self.live_balance_writer.write().await;
+        writer
+            .serialize(&record)
+            .context("Failed to write live_balance record")?;
+        writer
+            .flush()
+            .context("Failed to flush live_balance writer")?;
+        Ok(())
+    }
+
+    pub async fn save_live_winloss(&self, record: WinLossRecord) -> Result<()> {
+        let mut writer = self.live_winloss_writer.write().await;
+        writer
+            .serialize(&record)
+            .context("Failed to write live_winloss record")?;
+        writer
+            .flush()
+            .context("Failed to flush live_winloss writer")?;
         Ok(())
     }
 
@@ -854,6 +941,67 @@ impl CsvPersistence {
 
         info!(
             "Loaded {} recent paper trades for dashboard session",
+            trades.len()
+        );
+        Ok(trades)
+    }
+
+    #[cfg(feature = "dashboard")]
+    pub fn load_recent_live_trades(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<crate::dashboard::TradeResponse>> {
+        use crate::dashboard::TradeResponse;
+
+        let mut trades = Vec::new();
+        for path in self.collect_dashboard_csv_files("live_trades", "live_trades_") {
+            let file = std::fs::File::open(&path)
+                .with_context(|| format!("Failed to open {}", path.display()))?;
+            let mut reader = ReaderBuilder::new().has_headers(false).from_reader(file);
+
+            for result in reader.deserialize() {
+                match result {
+                    Ok(record) => {
+                        let trade: LiveTradeRecord = record;
+                        trades.push(TradeResponse {
+                            timestamp: trade.timestamp,
+                            trade_id: trade.trade_id,
+                            asset: trade.asset,
+                            timeframe: trade.timeframe,
+                            direction: trade.direction,
+                            confidence: trade.confidence,
+                            entry_price: trade.entry_price,
+                            exit_price: trade.exit_price,
+                            size_usdc: trade.size_usdc,
+                            pnl: trade.pnl,
+                            pnl_pct: trade.pnl_pct,
+                            result: trade.result,
+                            prediction_correct: trade.prediction_correct,
+                            exit_reason: trade.exit_reason,
+                            hold_duration_secs: trade.hold_duration_secs,
+                            balance_after: trade.balance_after,
+                            entry_share_price: trade.entry_share_price,
+                            exit_share_price: trade.exit_share_price,
+                            trading_win: trade.trading_win,
+                            rsi_at_entry: None,
+                            macd_hist_at_entry: None,
+                            bb_position_at_entry: None,
+                            adx_at_entry: None,
+                            volatility_at_entry: None,
+                        });
+                    }
+                    Err(e) => warn!("Failed to deserialize live_trade record: {}", e),
+                }
+            }
+        }
+
+        trades.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        let mut seen = std::collections::HashSet::new();
+        trades.retain(|trade| seen.insert(trade.trade_id.clone()));
+        trades.truncate(limit);
+
+        info!(
+            "Loaded {} recent live trades for dashboard session",
             trades.len()
         );
         Ok(trades)
@@ -1363,6 +1511,18 @@ impl BalanceTracker {
         if let Ok(mut locked) = self.locked_balance.write() {
             *locked = locked_amount;
         }
+    }
+
+    pub fn available_balance(&self) -> f64 {
+        self.current_balance.read().map(|value| *value).unwrap_or(0.0)
+    }
+
+    pub fn locked_balance(&self) -> f64 {
+        self.locked_balance.read().map(|value| *value).unwrap_or(0.0)
+    }
+
+    pub fn total_equity(&self) -> f64 {
+        self.available_balance() + self.locked_balance()
     }
 
     /// Record a balance snapshot

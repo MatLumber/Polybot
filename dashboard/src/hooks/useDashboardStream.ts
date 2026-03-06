@@ -12,9 +12,16 @@ import {
   mapPriceMap,
   mapTrade,
 } from '../lib/mappers'
+import {
+  buildApiCandidates,
+  buildWsCandidates,
+  DEFAULT_API_BASE,
+  DEFAULT_WS_URL,
+  fetchApiFromCandidates,
+  normalizeBaseUrl,
+} from '../lib/runtimeEndpoints'
 import type { DashboardStreamState, Trade } from '../types/ui'
 import type {
-  ApiResponseWire,
   DashboardStateWire,
   MarketLearningProgressWire,
   MLMetricsWire,
@@ -23,8 +30,6 @@ import type {
   WsMessageWire,
 } from '../types/wire'
 
-const DEFAULT_API_BASE = 'http://localhost:3000'
-const DEFAULT_WS_URL = 'ws://localhost:3000/ws'
 const MAX_RECENT_TRADES = 100
 
 type StreamAction =
@@ -251,33 +256,12 @@ function reducer(state: DashboardStreamState, action: StreamAction): DashboardSt
   }
 }
 
-function normalizeBaseUrl(url: string): string {
-  return url.endsWith('/') ? url.slice(0, -1) : url
-}
-
-async function fetchApi<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
-    headers: {
-      'ngrok-skip-browser-warning': 'true',
-    },
-  })
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} while requesting ${url}`)
-  }
-
-  const payload = (await response.json()) as ApiResponseWire<T>
-  if (!payload.success || payload.data === undefined) {
-    throw new Error(payload.error ?? `Invalid API response from ${url}`)
-  }
-
-  return payload.data
-}
-
 export function useDashboardStream() {
   const [state, dispatch] = useReducer(reducer, initialState)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<number | null>(null)
   const reconnectAttemptRef = useRef(0)
+  const wsCandidateIndexRef = useRef(0)
   const mountedRef = useRef(false)
   const connectRef = useRef<() => void>(() => { })
 
@@ -285,17 +269,22 @@ export function useDashboardStream() {
     () => normalizeBaseUrl(import.meta.env.VITE_API_BASE ?? DEFAULT_API_BASE),
     [],
   )
-  const wsUrl = useMemo(() => import.meta.env.VITE_WS_URL ?? DEFAULT_WS_URL, [])
+  const apiCandidates = useMemo(() => buildApiCandidates(apiBase), [apiBase])
+  const wsCandidates = useMemo(
+    () => buildWsCandidates(import.meta.env.VITE_WS_URL, apiBase),
+    [apiBase],
+  )
 
   const bootstrap = useCallback(async () => {
     const [dashboard, history, marketLearning, mlState, mlMetrics] = await Promise.all([
-      fetchApi<DashboardStateWire>(`${apiBase}/api/stats`),
-      fetchApi<Record<string, PriceHistoryPointWire[]>>(
-        `${apiBase}/api/prices/history?assets=BTC,ETH&window_secs=86400&bucket_ms=1000`,
+      fetchApiFromCandidates<DashboardStateWire>('/api/stats', apiCandidates),
+      fetchApiFromCandidates<Record<string, PriceHistoryPointWire[]>>(
+        '/api/prices/history?assets=BTC,ETH&window_secs=86400&bucket_ms=1000',
+        apiCandidates,
       ),
-      fetchApi<MarketLearningProgressWire[]>(`${apiBase}/api/calibration/markets`),
-      fetchApi<MLStateWire>(`${apiBase}/api/ml/state`),
-      fetchApi<MLMetricsWire>(`${apiBase}/api/ml/metrics`),
+      fetchApiFromCandidates<MarketLearningProgressWire[]>('/api/calibration/markets', apiCandidates),
+      fetchApiFromCandidates<MLStateWire>('/api/ml/state', apiCandidates),
+      fetchApiFromCandidates<MLMetricsWire>('/api/ml/metrics', apiCandidates),
     ])
 
     if (!mountedRef.current) {
@@ -304,25 +293,26 @@ export function useDashboardStream() {
 
     dispatch({
       type: 'BOOTSTRAP_SUCCESS',
-      dashboard,
-      history,
-      marketLearning,
-      mlState,
-      mlMetrics
+      dashboard: dashboard.data,
+      history: history.data,
+      marketLearning: marketLearning.data,
+      mlState: mlState.data,
+      mlMetrics: mlMetrics.data,
     })
-  }, [apiBase])
+  }, [apiCandidates])
 
   const refreshMarketLearning = useCallback(async () => {
-    const marketLearning = await fetchApi<MarketLearningProgressWire[]>(
-      `${apiBase}/api/calibration/markets`,
+    const marketLearning = await fetchApiFromCandidates<MarketLearningProgressWire[]>(
+      '/api/calibration/markets',
+      apiCandidates,
     )
 
     if (!mountedRef.current) {
       return
     }
 
-    dispatch({ type: 'MARKET_LEARNING_UPDATE', marketLearning })
-  }, [apiBase])
+    dispatch({ type: 'MARKET_LEARNING_UPDATE', marketLearning: marketLearning.data })
+  }, [apiCandidates])
 
   const scheduleReconnect = useCallback(() => {
     if (!mountedRef.current || reconnectTimerRef.current !== null) {
@@ -330,6 +320,9 @@ export function useDashboardStream() {
     }
 
     reconnectAttemptRef.current += 1
+    if (wsCandidates.length > 1) {
+      wsCandidateIndexRef.current = (wsCandidateIndexRef.current + 1) % wsCandidates.length
+    }
     const expDelay = Math.min(10_000, 500 * 2 ** (reconnectAttemptRef.current - 1))
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null
@@ -338,12 +331,13 @@ export function useDashboardStream() {
       }
       connectRef.current()
     }, expDelay)
-  }, [])
+  }, [wsCandidates.length])
 
   const connect = useCallback(() => {
     if (!mountedRef.current) {
       return
     }
+    const wsUrl = wsCandidates[wsCandidateIndexRef.current] ?? DEFAULT_WS_URL
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       return
     }
@@ -372,7 +366,7 @@ export function useDashboardStream() {
     }
 
     ws.onerror = () => {
-      dispatch({ type: 'WS_ERROR', error: 'WebSocket connection error' })
+      dispatch({ type: 'WS_ERROR', error: `WebSocket connection error (${wsUrl})` })
       ws.close()
     }
 
@@ -380,7 +374,7 @@ export function useDashboardStream() {
       dispatch({ type: 'WS_DISCONNECTED' })
       scheduleReconnect()
     }
-  }, [bootstrap, scheduleReconnect, wsUrl])
+  }, [bootstrap, scheduleReconnect, wsCandidates])
 
   useEffect(() => {
     connectRef.current = connect

@@ -142,10 +142,14 @@ export interface LiveDashboardWire {
   locked: number
   total_equity: number
   unrealized_pnl: number
+  stats: PaperStatsWire
   open_positions: PositionWire[]
+  recent_trades: TradeWire[]
+  asset_stats: Record<string, AssetStatsWire>
   daily_pnl: number
   daily_trades: number
   kill_switch_active: boolean
+  ready: boolean
 }
 
 export interface PriceDashboardWire {

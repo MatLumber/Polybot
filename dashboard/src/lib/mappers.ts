@@ -25,29 +25,57 @@ import type {
 
 export const DEFAULT_HISTORY_WINDOW_SECS = 86_400
 
-export function mapPaperStats(stats: PaperStatsWire): PaperStats {
+const EMPTY_PAPER_STATS: PaperStats = {
+  totalTrades: 0,
+  wins: 0,
+  losses: 0,
+  winRate: 0,
+  totalPnl: 0,
+  totalFees: 0,
+  largestWin: 0,
+  largestLoss: 0,
+  avgWin: 0,
+  avgLoss: 0,
+  maxDrawdown: 0,
+  currentDrawdown: 0,
+  peakBalance: 0,
+  profitFactor: 0,
+  currentStreak: 0,
+  bestStreak: 0,
+  worstStreak: 0,
+  exitsTrailingStop: 0,
+  exitsTakeProfit: 0,
+  exitsMarketExpiry: 0,
+  exitsTimeExpiry: 0,
+}
+
+export function mapPaperStats(stats?: Partial<PaperStatsWire> | null): PaperStats {
+  if (!stats) {
+    return { ...EMPTY_PAPER_STATS }
+  }
+
   return {
-    totalTrades: stats.total_trades,
-    wins: stats.wins,
-    losses: stats.losses,
-    winRate: stats.win_rate,
-    totalPnl: stats.total_pnl,
-    totalFees: stats.total_fees,
-    largestWin: stats.largest_win,
-    largestLoss: stats.largest_loss,
-    avgWin: stats.avg_win,
-    avgLoss: stats.avg_loss,
-    maxDrawdown: stats.max_drawdown,
-    currentDrawdown: stats.current_drawdown,
-    peakBalance: stats.peak_balance,
-    profitFactor: stats.profit_factor,
-    currentStreak: stats.current_streak,
-    bestStreak: stats.best_streak,
-    worstStreak: stats.worst_streak,
-    exitsTrailingStop: stats.exits_trailing_stop,
-    exitsTakeProfit: stats.exits_take_profit,
-    exitsMarketExpiry: stats.exits_market_expiry,
-    exitsTimeExpiry: stats.exits_time_expiry,
+    totalTrades: stats.total_trades ?? 0,
+    wins: stats.wins ?? 0,
+    losses: stats.losses ?? 0,
+    winRate: stats.win_rate ?? 0,
+    totalPnl: stats.total_pnl ?? 0,
+    totalFees: stats.total_fees ?? 0,
+    largestWin: stats.largest_win ?? 0,
+    largestLoss: stats.largest_loss ?? 0,
+    avgWin: stats.avg_win ?? 0,
+    avgLoss: stats.avg_loss ?? 0,
+    maxDrawdown: stats.max_drawdown ?? 0,
+    currentDrawdown: stats.current_drawdown ?? 0,
+    peakBalance: stats.peak_balance ?? 0,
+    profitFactor: stats.profit_factor ?? 0,
+    currentStreak: stats.current_streak ?? 0,
+    bestStreak: stats.best_streak ?? 0,
+    worstStreak: stats.worst_streak ?? 0,
+    exitsTrailingStop: stats.exits_trailing_stop ?? 0,
+    exitsTakeProfit: stats.exits_take_profit ?? 0,
+    exitsMarketExpiry: stats.exits_market_expiry ?? 0,
+    exitsTimeExpiry: stats.exits_time_expiry ?? 0,
   }
 }
 
@@ -117,7 +145,10 @@ export function mapAssetStats(stats: AssetStatsWire): AssetStats {
   }
 }
 
-export function mapAssetStatsMap(statsMap: Record<string, AssetStatsWire>): Record<string, AssetStats> {
+export function mapAssetStatsMap(statsMap?: Record<string, AssetStatsWire> | null): Record<string, AssetStats> {
+  if (!statsMap) {
+    return {}
+  }
   return Object.fromEntries(
     Object.entries(statsMap).map(([key, value]) => [key, mapAssetStats(value)]),
   )
@@ -168,8 +199,8 @@ export function mapDashboardState(state: DashboardStateWire): DashboardState {
       totalEquity: state.paper.total_equity,
       unrealizedPnl: state.paper.unrealized_pnl,
       stats: mapPaperStats(state.paper.stats),
-      openPositions: state.paper.open_positions.map(mapPosition),
-      recentTrades: state.paper.recent_trades.map(mapTrade),
+      openPositions: (state.paper.open_positions ?? []).map(mapPosition),
+      recentTrades: (state.paper.recent_trades ?? []).map(mapTrade),
       assetStats: mapAssetStatsMap(state.paper.asset_stats),
     },
     live: {
@@ -178,10 +209,14 @@ export function mapDashboardState(state: DashboardStateWire): DashboardState {
       locked: state.live.locked,
       totalEquity: state.live.total_equity,
       unrealizedPnl: state.live.unrealized_pnl,
-      openPositions: state.live.open_positions.map(mapPosition),
-      dailyPnl: state.live.daily_pnl,
-      dailyTrades: state.live.daily_trades,
-      killSwitchActive: state.live.kill_switch_active,
+      stats: mapPaperStats(state.live.stats),
+      openPositions: (state.live.open_positions ?? []).map(mapPosition),
+      recentTrades: (state.live.recent_trades ?? []).map(mapTrade),
+      assetStats: mapAssetStatsMap(state.live.asset_stats),
+      dailyPnl: state.live.daily_pnl ?? 0,
+      dailyTrades: state.live.daily_trades ?? 0,
+      killSwitchActive: state.live.kill_switch_active ?? false,
+      ready: state.live.ready ?? false,
     },
     prices: {
       prices: mapPriceMap(state.prices.prices),

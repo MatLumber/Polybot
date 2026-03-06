@@ -132,10 +132,14 @@ export interface LiveDashboard {
   locked: number
   totalEquity: number
   unrealizedPnl: number
+  stats: PaperStats
   openPositions: Position[]
+  recentTrades: Trade[]
+  assetStats: Record<string, AssetStats>
   dailyPnl: number
   dailyTrades: number
   killSwitchActive: boolean
+  ready: boolean
 }
 
 export interface PriceDashboard {

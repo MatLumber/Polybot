@@ -7,10 +7,12 @@ use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use ethers::types::Address;
+use ethers::signers::{LocalWallet, Signer};
 use hmac::{Hmac, Mac};
 use reqwest::{
     header::{HeaderMap, HeaderValue, CONTENT_TYPE},
     Client,
+    StatusCode,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -58,6 +60,7 @@ pub struct RestClient {
     api_key: Option<String>,
     api_secret: Option<String>,
     api_passphrase: Option<String>,
+    signature_type: u8,
 }
 
 impl RestClient {
@@ -68,6 +71,7 @@ impl RestClient {
         api_key: Option<String>,
         api_secret: Option<String>,
         api_passphrase: Option<String>,
+        signature_type: u8,
     ) -> Self {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -85,6 +89,7 @@ impl RestClient {
             api_key,
             api_secret,
             api_passphrase,
+            signature_type,
         }
     }
 
@@ -99,10 +104,17 @@ impl RestClient {
         None
     }
 
+    fn derive_signer_address() -> Option<String> {
+        let private_key = Self::resolve_env(&["PRIVATE_KEY"])?;
+        let wallet = private_key.parse::<LocalWallet>().ok()?;
+        Some(format!("{:#x}", wallet.address()))
+    }
+
     fn auth_tuple(&self) -> Result<(String, String, String, String)> {
         let address = self
             .address
             .clone()
+            .or_else(Self::derive_signer_address)
             .or_else(|| Self::resolve_env(&["POLYMARKET_ADDRESS"]))
             .context("POLYMARKET_ADDRESS not configured for authenticated CLOB requests")?;
         let api_key = self
@@ -129,6 +141,32 @@ impl RestClient {
             })
             .context("POLY_API_PASSPHRASE not configured for authenticated CLOB requests")?;
         Ok((address, api_key, api_secret, api_passphrase))
+    }
+
+    fn parse_fee_rate_bps(raw: &serde_json::Value) -> Option<u64> {
+        for candidate in ["fee_rate_bps", "feeRateBps", "feeRate", "fee_rate"] {
+            if let Some(value) = raw.get(candidate) {
+                if let Some(parsed) = value.as_u64() {
+                    return Some(parsed);
+                }
+                if let Some(parsed) = value.as_str().and_then(|v| v.parse::<u64>().ok()) {
+                    return Some(parsed);
+                }
+            }
+        }
+        raw.get("data").and_then(Self::parse_fee_rate_bps)
+    }
+
+    fn parse_heartbeat_id(raw: &serde_json::Value) -> Option<String> {
+        for candidate in ["heartbeat_id", "heartbeatId"] {
+            if let Some(value) = raw.get(candidate).and_then(|v| v.as_str()) {
+                if !value.trim().is_empty() {
+                    return Some(value.to_string());
+                }
+            }
+        }
+
+        raw.get("data").and_then(Self::parse_heartbeat_id)
     }
 
     fn build_l2_headers(&self, method: &str, request_path: &str, body: &str) -> Result<HeaderMap> {
@@ -540,10 +578,18 @@ impl RestClient {
             .maker
             .map(|a| format!("{:#x}", a))
             .unwrap_or_else(|| address);
+        let signer = order
+            .signer
+            .map(|a| format!("{:#x}", a))
+            .or_else(|| self.address.clone())
+            .context("Signer address missing for CLOB POST /order")?;
         let signature = order
             .signature
             .clone()
             .context("Order signature missing for CLOB POST /order")?;
+        let fee_rate_bps = order
+            .fee_rate_bps
+            .context("feeRateBps missing for CLOB POST /order")?;
 
         let shares_scaled = (order.size.max(0.0) * 1_000_000.0).round() as u128;
         let usdc_scaled =
@@ -557,14 +603,14 @@ impl RestClient {
             "order": {
                 "salt": order.salt.to_string(),
                 "maker": maker,
-                "signer": maker,
+                "signer": signer,
                 "taker": "0x0000000000000000000000000000000000000000",
                 "tokenId": order.token_id,
                 "makerAmount": maker_amount.to_string(),
                 "takerAmount": taker_amount.to_string(),
                 "expiration": order.expiration.to_string(),
                 "nonce": order.nonce.to_string(),
-                "feeRateBps": "0",
+                "feeRateBps": fee_rate_bps.to_string(),
                 "side": match order.side { Side::Buy => "BUY", Side::Sell => "SELL" },
                 "signatureType": order.signature_type,
                 "signature": signature
@@ -626,6 +672,53 @@ impl RestClient {
             .context("Failed to cancel order")?;
 
         Ok(response.status().is_success())
+    }
+
+    /// Send an authenticated trading heartbeat so resting orders are not auto-cancelled.
+    pub async fn post_heartbeat(&self, heartbeat_id: Option<&str>) -> Result<String> {
+        let request_path = "/v1/heartbeats";
+        let url = format!("{}{}", self.base_url, request_path);
+        let mut current_heartbeat_id = heartbeat_id.map(ToOwned::to_owned);
+
+        for _attempt in 0..2 {
+            let payload = serde_json::json!({
+                "heartbeat_id": current_heartbeat_id.as_deref(),
+            });
+            let body = serde_json::to_string(&payload)
+                .context("Failed to serialize heartbeat payload")?;
+            let headers = self.build_l2_headers("POST", request_path, &body)?;
+
+            let response = self
+                .client
+                .post(&url)
+                .headers(headers)
+                .body(body)
+                .send()
+                .await
+                .context("Failed to send heartbeat")?;
+
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            let raw: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+
+            if status.is_success() {
+                if let Some(next_heartbeat_id) = Self::parse_heartbeat_id(&raw) {
+                    return Ok(next_heartbeat_id);
+                }
+                return Ok(current_heartbeat_id.unwrap_or_default());
+            }
+
+            if status == StatusCode::BAD_REQUEST {
+                if let Some(correct_heartbeat_id) = Self::parse_heartbeat_id(&raw) {
+                    current_heartbeat_id = Some(correct_heartbeat_id);
+                    continue;
+                }
+            }
+
+            bail!("Failed to send heartbeat: {} - {}", status, text);
+        }
+
+        bail!("Failed to send heartbeat: server rejected heartbeat chain")
     }
 
     /// Get order book for a token
@@ -758,9 +851,10 @@ impl RestClient {
 
     /// Get USDC balance for the authenticated wallet
     pub async fn get_balance(&self) -> Result<f64> {
-        // Use signature_type=1 (Gnosis/proxy) when a separate funder wallet is configured
-        let sig_type = if std::env::var("POLYMARKET_WALLET").ok().is_some() { 1 } else { 0 };
-        let request_path = format!("/balance-allowance?asset_type=COLLATERAL&signature_type={}", sig_type);
+        let request_path = format!(
+            "/balance-allowance?asset_type=COLLATERAL&signature_type={}",
+            self.signature_type
+        );
         let url = format!("{}{}", self.base_url, request_path);
         let headers = self.build_l2_headers("GET", &request_path, "")?;
 
@@ -782,15 +876,40 @@ impl RestClient {
             .context("Failed to parse balance response")?;
 
         let balance_str = raw
-            .get("balance")
+            .get("available")
             .and_then(|v| v.as_str())
-            .or_else(|| raw.get("available").and_then(|v| v.as_str()))
+            .or_else(|| raw.get("balance").and_then(|v| v.as_str()))
             .or_else(|| raw.get("amount").and_then(|v| v.as_str()))
             .context("balance field missing in balance-allowance response")?;
 
         // USDC on Polygon has 6 decimals — convert from wei units to USDC
         let raw_units: f64 = balance_str.parse().context("Failed to parse balance value")?;
         Ok(raw_units / 1_000_000.0)
+    }
+
+    /// Get fee rate in basis points for a token before signing/submitting an order.
+    pub async fn get_fee_rate_bps(&self, token_id: &str) -> Result<u64> {
+        let request_path = format!("/fee-rate?token_id={}", token_id);
+        let url = format!("{}{}", self.base_url, request_path);
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to fetch fee rate")?;
+
+        if !response.status().is_success() {
+            bail!("Failed to get fee rate: {}", response.status());
+        }
+
+        let raw: serde_json::Value = response
+            .json()
+            .await
+            .context("Failed to parse fee rate response")?;
+
+        Self::parse_fee_rate_bps(&raw)
+            .with_context(|| format!("fee rate missing in response for token {}: {}", token_id, raw))
     }
 
     /// Get midpoint price for a token

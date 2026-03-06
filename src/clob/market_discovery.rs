@@ -66,7 +66,7 @@ pub struct MarketDiscovery {
 impl MarketDiscovery {
     pub fn new(gamma_url: impl Into<String>) -> Self {
         Self {
-            rest_client: RestClient::new("https://clob.polymarket.com", None, None, None, None),
+            rest_client: RestClient::new("https://clob.polymarket.com", None, None, None, None, 0),
             gamma_url: gamma_url.into(),
             tracked_markets: HashMap::new(),
             last_update: None,

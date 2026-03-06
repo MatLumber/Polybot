@@ -474,6 +474,29 @@ impl AppConfig {
             bail!("PRIVATE_KEY must be a hex string with 0x prefix (66 chars total)");
         }
 
+        if self.execution.signature_type > 2 {
+            bail!("execution.signature_type must be 0, 1, or 2");
+        }
+
+        let live_requested = !self.bot.dry_run || !self.paper_trading.enabled;
+        if live_requested {
+            if std::env::var("POLYMARKET_ADDRESS").is_err()
+                && std::env::var("POLYMARKET_WALLET").is_err()
+            {
+                bail!(
+                    "POLYMARKET_ADDRESS (or legacy POLYMARKET_WALLET) is required for LIVE mode"
+                );
+            }
+            if self.execution.signature_type > 0
+                && std::env::var("POLYMARKET_FUNDER").is_err()
+                && std::env::var("POLYMARKET_WALLET").is_err()
+            {
+                bail!(
+                    "POLYMARKET_FUNDER (or legacy POLYMARKET_WALLET) is required when execution.signature_type is 1 or 2"
+                );
+            }
+        }
+
         Ok(())
     }
 }

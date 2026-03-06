@@ -40,6 +40,12 @@ use tokio::sync::RwLock;
 use crate::config::ExecutionConfig;
 use crate::types::{Asset, Direction, Timeframe};
 
+fn derive_signer_address(private_key: Option<&str>) -> Option<Address> {
+    private_key
+        .and_then(|key| key.parse::<LocalWallet>().ok())
+        .map(|wallet| wallet.address())
+}
+
 abigen!(
     ConditionalTokensContract,
     r#"[
@@ -84,6 +90,8 @@ pub struct ClobConfig {
     pub api_secret: Option<String>,
     /// API passphrase (Level-2 auth)
     pub api_passphrase: Option<String>,
+    /// Funder / maker address for proxy or safe accounts
+    pub funder: Option<Address>,
     /// Order timeout in seconds
     pub order_timeout: u64,
     /// Maximum retries
@@ -104,6 +112,7 @@ impl Default for ClobConfig {
             api_key: None,
             api_secret: None,
             api_passphrase: None,
+            funder: None,
             order_timeout: 30,
             max_retries: 3,
             signature_type: 0,
@@ -114,9 +123,11 @@ impl Default for ClobConfig {
 impl From<ExecutionConfig> for ClobConfig {
     fn from(exec: ExecutionConfig) -> Self {
         let private_key = std::env::var("PRIVATE_KEY").ok();
-        let address = std::env::var("POLYMARKET_ADDRESS")
-            .ok()
-            .and_then(|s| s.parse().ok());
+        let address = derive_signer_address(private_key.as_deref()).or_else(|| {
+            std::env::var("POLYMARKET_ADDRESS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+        });
         let api_key = std::env::var("POLY_API_KEY")
             .ok()
             .or_else(|| std::env::var("API_KEY").ok());
@@ -126,6 +137,10 @@ impl From<ExecutionConfig> for ClobConfig {
         let api_passphrase = std::env::var("POLY_API_PASSPHRASE")
             .ok()
             .or_else(|| std::env::var("API_PASSPHRASE").ok());
+        let funder = std::env::var("POLYMARKET_FUNDER")
+            .ok()
+            .or_else(|| std::env::var("POLYMARKET_WALLET").ok())
+            .and_then(|s| s.parse().ok());
 
         Self {
             chain_id: exec.chain_id,
@@ -137,6 +152,7 @@ impl From<ExecutionConfig> for ClobConfig {
             api_key,
             api_secret,
             api_passphrase,
+            funder,
             order_timeout: exec.order_timeout_ms / 1000,
             max_retries: exec.max_retries,
             signature_type: exec.signature_type,
@@ -147,9 +163,11 @@ impl From<ExecutionConfig> for ClobConfig {
 impl ClobConfig {
     pub fn from_env() -> Result<Self> {
         let private_key = std::env::var("PRIVATE_KEY").ok();
-        let address = std::env::var("POLYMARKET_ADDRESS")
-            .ok()
-            .and_then(|s| s.parse().ok());
+        let address = derive_signer_address(private_key.as_deref()).or_else(|| {
+            std::env::var("POLYMARKET_ADDRESS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+        });
         let api_key = std::env::var("POLY_API_KEY")
             .ok()
             .or_else(|| std::env::var("API_KEY").ok());
@@ -159,6 +177,10 @@ impl ClobConfig {
         let api_passphrase = std::env::var("POLY_API_PASSPHRASE")
             .ok()
             .or_else(|| std::env::var("API_PASSPHRASE").ok());
+        let funder = std::env::var("POLYMARKET_FUNDER")
+            .ok()
+            .or_else(|| std::env::var("POLYMARKET_WALLET").ok())
+            .and_then(|s| s.parse().ok());
 
         Ok(Self {
             private_key,
@@ -166,6 +188,7 @@ impl ClobConfig {
             api_key,
             api_secret,
             api_passphrase,
+            funder,
             ..Default::default()
         })
     }
@@ -181,6 +204,8 @@ pub struct ClobClient {
     token_map: RwLock<HashMap<String, String>>,
     /// Order tracking
     orders: RwLock<HashMap<H256, Order>>,
+    /// Latest heartbeat chain id returned by the trading API.
+    heartbeat_id: RwLock<Option<String>>,
     /// Dry run mode (no real orders)
     dry_run: bool,
     /// Data API URL for positions
@@ -251,6 +276,7 @@ impl ClobClient {
             config.api_key.clone(),
             config.api_secret.clone(),
             config.api_passphrase.clone(),
+            config.signature_type,
         );
         Self {
             config,
@@ -258,6 +284,7 @@ impl ClobClient {
             markets: RwLock::new(HashMap::new()),
             token_map: RwLock::new(HashMap::new()),
             orders: RwLock::new(HashMap::new()),
+            heartbeat_id: RwLock::new(None),
             dry_run,
             data_api_url: "https://data-api.polymarket.com".to_string(),
         }
@@ -319,6 +346,15 @@ impl ClobClient {
         }
 
         let mut to_submit = order.clone();
+        if to_submit.maker.is_none() {
+            to_submit.maker = self.config.funder.or(self.config.address);
+        }
+        if to_submit.signer.is_none() {
+            to_submit.signer = self.config.address;
+        }
+        if to_submit.fee_rate_bps.is_none() {
+            to_submit.fee_rate_bps = Some(self.rest.get_fee_rate_bps(&to_submit.token_id).await?);
+        }
         if to_submit.signature.is_none() {
             let private_key = self
                 .config
@@ -326,9 +362,6 @@ impl ClobClient {
                 .as_deref()
                 .context("PRIVATE_KEY is required to sign CLOB orders")?;
             sign_order(&mut to_submit, private_key, self.config.chain_id).await?;
-        }
-        if to_submit.maker.is_none() {
-            to_submit.maker = self.config.address;
         }
 
         let order_id = self.rest.create_order(&to_submit).await?;
@@ -398,6 +431,11 @@ impl ClobClient {
         self.submit_order(&taker_order).await
     }
 
+    /// Execute an order immediately and return the exchange order id.
+    pub async fn execute_order(&self, order: &Order) -> Result<String> {
+        self.execute_order_with_policy(order).await
+    }
+
     /// Initialize the client (derive API keys if needed)
     pub async fn initialize(&self) -> Result<()> {
         if !self.dry_run {
@@ -411,19 +449,21 @@ impl ClobClient {
                     .private_key
                     .clone()
                     .or_else(|| std::env::var("PRIVATE_KEY").ok());
-                let address = self.config.address.or_else(|| {
-                    std::env::var("POLYMARKET_ADDRESS")
-                        .ok()
-                        .and_then(|s| s.parse().ok())
-                });
+                let signer_address = derive_signer_address(private_key.as_deref())
+                    .or(self.config.address)
+                    .or_else(|| {
+                        std::env::var("POLYMARKET_ADDRESS")
+                            .ok()
+                            .and_then(|s| s.parse().ok())
+                    });
 
-                if let (Some(private_key), Some(address)) = (private_key, address) {
+                if let (Some(private_key), Some(signer_address)) = (private_key, signer_address) {
                     match self
                         .rest
                         .create_or_derive_api_credentials(
                             &private_key,
                             self.config.chain_id,
-                            address,
+                            signer_address,
                         )
                         .await
                     {
@@ -432,7 +472,7 @@ impl ClobClient {
                             std::env::set_var("POLY_API_SECRET", &api_secret);
                             std::env::set_var("POLY_API_PASSPHRASE", &api_passphrase);
                             tracing::info!(
-                                address = %format!("{:#x}", address),
+                                signer_address = %format!("{:#x}", signer_address),
                                 "Derived CLOB API credentials via /auth endpoints"
                             );
                         }
@@ -468,6 +508,65 @@ impl ClobClient {
         self.refresh_markets().await?;
 
         Ok(())
+    }
+
+    /// Start a background heartbeat loop for LIVE orders.
+    pub fn start_heartbeat_loop(self: Arc<Self>) {
+        if self.dry_run {
+            return;
+        }
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut heartbeat_active_logged = false;
+
+            loop {
+                interval.tick().await;
+
+                let active_orders = self.active_orders().await;
+                if active_orders.is_empty() {
+                    let mut heartbeat_id = self.heartbeat_id.write().await;
+                    if heartbeat_id.is_some() {
+                        *heartbeat_id = None;
+                    }
+                    if heartbeat_active_logged {
+                        tracing::info!(
+                            "LIVE trading heartbeat paused - no active resting orders to keep alive"
+                        );
+                        heartbeat_active_logged = false;
+                    }
+                    continue;
+                }
+
+                if !heartbeat_active_logged {
+                    tracing::info!(
+                        active_orders = active_orders.len(),
+                        "LIVE trading heartbeat active - resting Polymarket orders will be kept alive"
+                    );
+                    heartbeat_active_logged = true;
+                }
+
+                let last_heartbeat_id = self.heartbeat_id.read().await.clone();
+                match self.rest.post_heartbeat(last_heartbeat_id.as_deref()).await {
+                    Ok(next_heartbeat_id) => {
+                        *self.heartbeat_id.write().await = Some(next_heartbeat_id.clone());
+                        tracing::debug!(
+                            active_orders = active_orders.len(),
+                            heartbeat_id = %next_heartbeat_id,
+                            "Sent Polymarket trading heartbeat"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            active_orders = active_orders.len(),
+                            "Failed to send Polymarket trading heartbeat"
+                        );
+                    }
+                }
+            }
+        });
     }
 
     /// Refresh market cache

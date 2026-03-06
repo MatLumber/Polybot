@@ -54,7 +54,7 @@ fn order_amounts(order: &Order) -> (U256, U256) {
     }
 }
 
-fn order_typed_data(order: &Order, maker: Address, chain_id: u64) -> Result<TypedData> {
+fn order_typed_data(order: &Order, maker: Address, signer: Address, chain_id: u64) -> Result<TypedData> {
     let token_id = U256::from_dec_str(&order.token_id)
         .with_context(|| format!("Invalid token_id '{}' for order signing", order.token_id))?;
     let (maker_amount, taker_amount) = order_amounts(order);
@@ -125,7 +125,7 @@ fn order_typed_data(order: &Order, maker: Address, chain_id: u64) -> Result<Type
     let mut message = BTreeMap::<String, Value>::new();
     message.insert("salt".to_string(), Value::String(order.salt.to_string()));
     message.insert("maker".to_string(), Value::String(format!("{:#x}", maker)));
-    message.insert("signer".to_string(), Value::String(format!("{:#x}", maker)));
+    message.insert("signer".to_string(), Value::String(format!("{:#x}", signer)));
     message.insert("taker".to_string(), Value::String(ZERO_ADDRESS.to_string()));
     message.insert("tokenId".to_string(), Value::String(token_id.to_string()));
     message.insert(
@@ -141,7 +141,13 @@ fn order_typed_data(order: &Order, maker: Address, chain_id: u64) -> Result<Type
         Value::String(order.expiration.to_string()),
     );
     message.insert("nonce".to_string(), Value::String(order.nonce.to_string()));
-    message.insert("feeRateBps".to_string(), Value::String("0".to_string()));
+    let fee_rate_bps = order
+        .fee_rate_bps
+        .context("feeRateBps missing for EIP-712 order signing")?;
+    message.insert(
+        "feeRateBps".to_string(),
+        Value::String(fee_rate_bps.to_string()),
+    );
     message.insert(
         "side".to_string(),
         Value::from(match order.side {
@@ -167,8 +173,10 @@ pub async fn sign_order(order: &mut Order, private_key: &str, chain_id: u64) -> 
     let wallet: Wallet<_> = private_key
         .parse()
         .context("Invalid private key for EIP-712 order signing")?;
-    let maker = order.maker.unwrap_or_else(|| wallet.address());
+    let signer = order.signer.unwrap_or_else(|| wallet.address());
+    let maker = order.maker.unwrap_or(signer);
     order.maker = Some(maker);
+    order.signer = Some(signer);
 
     if order.nonce == 0 {
         order.nonce = rand::random::<u64>();
@@ -177,7 +185,7 @@ pub async fn sign_order(order: &mut Order, private_key: &str, chain_id: u64) -> 
         order.salt = U256::from(rand::random::<u64>());
     }
 
-    let typed = order_typed_data(order, maker, chain_id)?;
+    let typed = order_typed_data(order, maker, signer, chain_id)?;
     let signature = wallet
         .sign_typed_data(&typed)
         .await
@@ -403,6 +411,7 @@ mod tests {
     #[tokio::test]
     async fn sign_order_sets_hex_signature() {
         let mut order = Order::new("1".to_string(), Side::Buy, 0.50, 10.0);
+        order.fee_rate_bps = Some(0);
         let pk = "0x59c6995e998f97a5a0044966f0945387dc9f5a59e86cdc84e64546a1d8f76d59";
         sign_order(&mut order, pk, 137).await.unwrap();
         let sig = order.signature.unwrap();

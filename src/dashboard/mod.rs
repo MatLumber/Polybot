@@ -60,6 +60,11 @@ pub struct DashboardMemory {
     pub live_daily_trades: RwLock<u32>,
     pub live_kill_switch: RwLock<bool>,
     pub live_positions: RwLock<Vec<PositionResponse>>,
+    pub live_stats: RwLock<PaperStatsResponse>,
+    pub live_trades: RwLock<Vec<TradeResponse>>,
+    pub live_asset_stats: RwLock<std::collections::HashMap<String, AssetStatsResponse>>,
+    pub live_peak_balance: RwLock<f64>,
+    pub live_ready: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Indicator calibration statistics (V2 legacy - mantener para compatibilidad)
     pub indicator_stats: RwLock<Vec<crate::strategy::IndicatorStats>>,
     /// Market-aware calibrator snapshot (V2 legacy)
@@ -105,6 +110,11 @@ impl Default for DashboardMemory {
             live_daily_trades: RwLock::new(0),
             live_kill_switch: RwLock::new(false),
             live_positions: RwLock::new(Vec::new()),
+            live_stats: RwLock::new(PaperStatsResponse::default()),
+            live_trades: RwLock::new(Vec::new()),
+            live_asset_stats: RwLock::new(std::collections::HashMap::new()),
+            live_peak_balance: RwLock::new(0.0),
+            live_ready: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             indicator_stats: RwLock::new(Vec::new()),
             market_learning_stats: RwLock::new(HashMap::new()),
             calibration_quality_stats: RwLock::new(HashMap::new()),
@@ -139,6 +149,14 @@ impl DashboardMemory {
         } // Release write lock before calling recalculate_paper_stats to avoid deadlock
           // Recalculate stats after setting trades
         self.recalculate_paper_stats().await;
+    }
+
+    pub async fn set_live_trades(&self, trades: Vec<TradeResponse>) {
+        {
+            let mut current = self.live_trades.write().await;
+            *current = trades;
+        }
+        self.recalculate_live_stats().await;
     }
 
     /// Recalculate paper trading statistics based on current trades
@@ -352,6 +370,180 @@ impl DashboardMemory {
         }
     }
 
+    pub async fn recalculate_live_stats(&self) {
+        let trades = self.live_trades.read().await;
+        let current_balance = *self.live_balance.read().await;
+        let mut resolved_peak_balance = current_balance;
+        let mut resolved_latest_balance: Option<f64> = None;
+
+        let mut stats = self.live_stats.write().await;
+        let mut asset_stats_map = self.live_asset_stats.write().await;
+
+        *stats = PaperStatsResponse::default();
+        asset_stats_map.clear();
+
+        if trades.is_empty() {
+            stats.peak_balance = current_balance;
+        } else {
+            let mut total_pnl: f64 = 0.0;
+            let mut wins = 0;
+            let mut losses = 0;
+            let mut largest_win: f64 = 0.0;
+            let mut largest_loss: f64 = 0.0;
+            let mut sum_win_pnl: f64 = 0.0;
+            let mut sum_loss_pnl: f64 = 0.0;
+            let mut gross_profit: f64 = 0.0;
+            let mut gross_loss: f64 = 0.0;
+            let mut exits_trailing_stop = 0;
+            let mut exits_take_profit = 0;
+            let mut exits_market_expiry = 0;
+            let mut exits_time_expiry = 0;
+            let mut balance_points: Vec<(i64, f64)> = Vec::new();
+            let mut latest_trade_balance: Option<(i64, f64)> = None;
+            let mut asset_stats: HashMap<String, (u32, u32, f64, f64, f64)> = HashMap::new();
+
+            for trade in trades.iter() {
+                total_pnl += trade.pnl;
+                if trade.pnl > 0.0 {
+                    wins += 1;
+                    largest_win = largest_win.max(trade.pnl);
+                    sum_win_pnl += trade.pnl;
+                    gross_profit += trade.pnl;
+                } else {
+                    losses += 1;
+                    largest_loss = largest_loss.min(trade.pnl);
+                    sum_loss_pnl += trade.pnl.abs();
+                    gross_loss += trade.pnl.abs();
+                }
+
+                match trade.exit_reason.as_str() {
+                    "TRAILING_STOP" => exits_trailing_stop += 1,
+                    "TAKE_PROFIT" => exits_take_profit += 1,
+                    "MARKET_EXPIRY" => exits_market_expiry += 1,
+                    "TIME_EXPIRY" => exits_time_expiry += 1,
+                    _ => {}
+                }
+
+                balance_points.push((trade.timestamp, trade.balance_after));
+                if latest_trade_balance
+                    .map(|(ts, _)| trade.timestamp >= ts)
+                    .unwrap_or(true)
+                {
+                    latest_trade_balance = Some((trade.timestamp, trade.balance_after));
+                }
+
+                let key = format!("{}_{}", trade.asset, trade.timeframe);
+                let entry = asset_stats.entry(key).or_insert((0, 0, 0.0, 0.0, 0.0));
+                entry.0 += 1;
+                if trade.pnl > 0.0 {
+                    entry.1 += 1;
+                }
+                entry.2 += trade.pnl;
+                entry.3 += trade.confidence;
+                entry.4 += trade.pnl.abs();
+            }
+
+            balance_points.sort_by_key(|(ts, _)| *ts);
+            let mut peak_balance = balance_points
+                .first()
+                .map(|(_, balance)| *balance)
+                .unwrap_or(current_balance);
+            let mut max_drawdown: f64 = 0.0;
+            let mut current_drawdown: f64 = 0.0;
+            for (_, balance) in &balance_points {
+                if *balance > peak_balance {
+                    peak_balance = *balance;
+                }
+                if peak_balance > 0.0 {
+                    let drawdown = ((peak_balance - balance) / peak_balance) * 100.0;
+                    max_drawdown = max_drawdown.max(drawdown);
+                    current_drawdown = drawdown;
+                }
+            }
+            resolved_peak_balance = peak_balance.max(current_balance);
+            resolved_latest_balance = latest_trade_balance.map(|(_, balance)| balance);
+
+            stats.total_trades = trades.len() as u32;
+            stats.wins = wins;
+            stats.losses = losses;
+            stats.win_rate = if !trades.is_empty() {
+                (wins as f64 / trades.len() as f64) * 100.0
+            } else {
+                0.0
+            };
+            stats.total_pnl = total_pnl;
+            stats.total_fees = 0.0;
+            stats.largest_win = largest_win;
+            stats.largest_loss = largest_loss;
+            stats.avg_win = if wins > 0 { sum_win_pnl / wins as f64 } else { 0.0 };
+            stats.avg_loss = if losses > 0 {
+                -(sum_loss_pnl / losses as f64)
+            } else {
+                0.0
+            };
+            stats.max_drawdown = max_drawdown;
+            stats.current_drawdown = current_drawdown;
+            stats.peak_balance = resolved_peak_balance;
+            stats.profit_factor = if gross_loss > 0.0 {
+                gross_profit / gross_loss
+            } else if gross_profit > 0.0 {
+                f64::INFINITY
+            } else {
+                0.0
+            };
+            stats.exits_trailing_stop = exits_trailing_stop;
+            stats.exits_take_profit = exits_take_profit;
+            stats.exits_market_expiry = exits_market_expiry;
+            stats.exits_time_expiry = exits_time_expiry;
+            stats.predictions_correct = trades.iter().filter(|trade| trade.prediction_correct).count() as u32;
+            stats.predictions_incorrect = trades.len() as u32 - stats.predictions_correct;
+            stats.prediction_win_rate = if stats.total_trades > 0 {
+                (stats.predictions_correct as f64 / stats.total_trades as f64) * 100.0
+            } else {
+                0.0
+            };
+            stats.trading_wins = trades.iter().filter(|trade| trade.trading_win).count() as u32;
+            stats.trading_losses = stats.total_trades.saturating_sub(stats.trading_wins);
+            stats.trading_win_rate = if stats.total_trades > 0 {
+                (stats.trading_wins as f64 / stats.total_trades as f64) * 100.0
+            } else {
+                0.0
+            };
+
+            for (asset, (trade_count, asset_wins, asset_pnl, confidence_sum, _)) in asset_stats {
+                asset_stats_map.insert(
+                    asset.clone(),
+                    AssetStatsResponse {
+                        asset,
+                        trades: trade_count,
+                        wins: asset_wins,
+                        losses: trade_count.saturating_sub(asset_wins),
+                        win_rate: if trade_count > 0 {
+                            (asset_wins as f64 / trade_count as f64) * 100.0
+                        } else {
+                            0.0
+                        },
+                        pnl: asset_pnl,
+                        avg_confidence: if trade_count > 0 {
+                            confidence_sum / trade_count as f64
+                        } else {
+                            0.0
+                        },
+                    },
+                );
+            }
+        }
+
+        drop(asset_stats_map);
+        drop(stats);
+        *self.live_peak_balance.write().await = resolved_peak_balance;
+        if let Some(balance_from_trades) = resolved_latest_balance {
+            *self.live_balance.write().await = balance_from_trades;
+        }
+        *self.live_daily_pnl.write().await = self.live_stats.read().await.total_pnl;
+        *self.live_daily_trades.write().await = self.live_stats.read().await.total_trades;
+    }
+
     /// Get current paper trading state
     pub async fn get_paper_state(&self) -> PaperDashboard {
         let balance = *self.paper_balance.read().await;
@@ -387,10 +579,16 @@ impl DashboardMemory {
             locked,
             total_equity: balance + locked + unrealized,
             unrealized_pnl: unrealized,
+            stats: self.live_stats.read().await.clone(),
             open_positions: self.live_positions.read().await.clone(),
+            recent_trades: self.live_trades.read().await.clone(),
+            asset_stats: self.live_asset_stats.read().await.clone(),
             daily_pnl: *self.live_daily_pnl.read().await,
             daily_trades: *self.live_daily_trades.read().await,
             kill_switch_active: *self.live_kill_switch.read().await,
+            ready: self
+                .live_ready
+                .load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 
@@ -864,6 +1062,15 @@ impl DashboardMemory {
             trades.truncate(100);
         }
         self.recalculate_paper_stats().await;
+    }
+
+    pub async fn add_live_trade(&self, trade: TradeResponse) {
+        {
+            let mut trades = self.live_trades.write().await;
+            trades.insert(0, trade);
+            trades.truncate(100);
+        }
+        self.recalculate_live_stats().await;
     }
 }
 
