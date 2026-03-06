@@ -144,7 +144,14 @@ impl RestClient {
     }
 
     fn parse_fee_rate_bps(raw: &serde_json::Value) -> Option<u64> {
-        for candidate in ["fee_rate_bps", "feeRateBps", "feeRate", "fee_rate"] {
+        for candidate in [
+            "fee_rate_bps",
+            "feeRateBps",
+            "feeRate",
+            "fee_rate",
+            "base_fee",
+            "baseFee",
+        ] {
             if let Some(value) = raw.get(candidate) {
                 if let Some(parsed) = value.as_u64() {
                     return Some(parsed);
@@ -1190,7 +1197,8 @@ pub async fn fetch_crypto_markets(gamma_url: &str) -> Result<Vec<MarketResponse>
 
 #[cfg(test)]
 mod tests {
-    use super::build_normalized_order_book;
+    use super::{build_normalized_order_book, RestClient};
+    use serde_json::json;
 
     #[test]
     fn build_normalized_order_book_sorts_and_filters_levels() {
@@ -1215,5 +1223,17 @@ mod tests {
         assert_eq!(book.asks.len(), 2);
         assert_eq!(book.asks[0].price, 0.61);
         assert_eq!(book.asks[1].price, 0.70);
+    }
+
+    #[test]
+    fn parse_fee_rate_bps_accepts_base_fee_field() {
+        let payload = json!({ "base_fee": 1000 });
+        assert_eq!(RestClient::parse_fee_rate_bps(&payload), Some(1000));
+    }
+
+    #[test]
+    fn parse_fee_rate_bps_accepts_nested_base_fee_field() {
+        let payload = json!({ "data": { "baseFee": "250" } });
+        assert_eq!(RestClient::parse_fee_rate_bps(&payload), Some(250));
     }
 }
