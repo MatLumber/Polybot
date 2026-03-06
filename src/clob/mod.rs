@@ -1789,9 +1789,16 @@ pub struct WalletPosition {
     #[serde(
         default,
         alias = "currentPrice",
+        alias = "curPrice",
         deserialize_with = "de_opt_string_or_number"
     )]
     pub current_price: Option<String>,
+    #[serde(
+        default,
+        alias = "currentValue",
+        deserialize_with = "de_opt_string_or_number"
+    )]
+    pub current_value: Option<String>,
     #[serde(
         default,
         alias = "realizedPnl",
@@ -1804,6 +1811,10 @@ pub struct WalletPosition {
     pub token_id: Option<String>,
     #[serde(default)]
     pub outcome: Option<String>,
+    #[serde(default)]
+    pub slug: Option<String>,
+    #[serde(default, alias = "title")]
+    pub title: Option<String>,
 }
 
 fn de_string_or_number<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
@@ -1934,6 +1945,30 @@ mod tests {
         let text = "btc-updown-15m-1771387200 bitcoin up or down - february 17, 11:00pm-11:15pm et up down";
         assert!(text_matches_timeframe_hint(text, TimeframeHint::Min15));
         assert!(!text_matches_timeframe_hint(text, TimeframeHint::Hour1));
+    }
+
+    #[test]
+    fn wallet_position_deserializes_data_api_price_aliases() {
+        let raw = serde_json::json!({
+            "asset": "token-id",
+            "size": 5,
+            "avgPrice": 0,
+            "curPrice": 0.305,
+            "currentValue": 1.525,
+            "conditionId": "cond",
+            "outcome": "Down",
+            "slug": "eth-updown-15m-1772837100",
+            "title": "Ethereum Up or Down - March 6, 5:45PM-6:00PM ET"
+        });
+
+        let position: WalletPosition =
+            serde_json::from_value(raw).expect("wallet position should deserialize");
+
+        assert_eq!(position.size, "5");
+        assert_eq!(position.avg_price, "0");
+        assert_eq!(position.current_price.as_deref(), Some("0.305"));
+        assert_eq!(position.current_value.as_deref(), Some("1.525"));
+        assert_eq!(position.slug.as_deref(), Some("eth-updown-15m-1772837100"));
     }
 
     #[tokio::test]

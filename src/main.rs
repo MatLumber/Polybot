@@ -79,6 +79,46 @@ fn infer_direction_from_outcome(outcome: Option<&str>) -> Option<Direction> {
     None
 }
 
+fn parse_position_number(raw: Option<&str>) -> Option<f64> {
+    raw.and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|value| value.is_finite())
+}
+
+fn live_context_is_viable(context: &LivePositionContext) -> bool {
+    context.shares_size > 0.0
+        && context.entry_share_price > 0.0
+        && context.size_usdc > 0.0
+        && !context.market_slug.trim().is_empty()
+}
+
+fn load_persisted_prediction_counters(data_dir: &str) -> Option<(usize, usize, usize)> {
+    let path = std::path::PathBuf::from(data_dir).join("paper_trading_state.json");
+    let json = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&json).ok()?;
+    let stats = value.get("stats")?;
+
+    let total = stats
+        .get("total_trades")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    if total == 0 {
+        return None;
+    }
+
+    let correct = stats
+        .get("predictions_correct")
+        .and_then(serde_json::Value::as_u64)
+        .or_else(|| stats.get("wins").and_then(serde_json::Value::as_u64))
+        .unwrap_or(0) as usize;
+    let incorrect = stats
+        .get("predictions_incorrect")
+        .and_then(serde_json::Value::as_u64)
+        .or_else(|| stats.get("losses").and_then(serde_json::Value::as_u64))
+        .unwrap_or_else(|| total.saturating_sub(correct) as u64) as usize;
+
+    Some((total, correct.min(total), incorrect.min(total)))
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct LivePositionContext {
     signal_id: String,
@@ -212,6 +252,19 @@ async fn main() -> Result<()> {
         }
     } else {
         info!("No calibrator state file found, starting with fresh market learning");
+    }
+    if let Some((total, correct, incorrect)) =
+        load_persisted_prediction_counters(&config.persistence.data_dir)
+    {
+        let mut strategy_guard = strategy.lock().await;
+        strategy_guard.sync_prediction_counters(total, correct, incorrect);
+        strategy_guard.force_save_state();
+        info!(
+            total_predictions = total,
+            correct_predictions = correct,
+            incorrect_predictions = incorrect,
+            "Synchronized ML counters from persisted paper trading state"
+        );
     }
     let mut risk_cfg = risk::RiskConfig::default();
     risk_cfg.max_position_size = config.risk.max_position_usdc;
@@ -1591,11 +1644,17 @@ async fn main() -> Result<()> {
                             continue;
                         }
 
-                        let avg_price: f64 = pos.avg_price.parse().unwrap_or(0.0);
-                        let current_price: f64 = pos
-                            .current_price
-                            .as_ref()
-                            .and_then(|price| price.parse().ok())
+                        let avg_price = parse_position_number(Some(&pos.avg_price)).unwrap_or(0.0);
+                        let current_value =
+                            parse_position_number(pos.current_value.as_deref()).unwrap_or(0.0);
+                        let current_price = parse_position_number(pos.current_price.as_deref())
+                            .or_else(|| {
+                                if current_value > 0.0 && size > 0.0 {
+                                    Some(current_value / size)
+                                } else {
+                                    None
+                                }
+                            })
                             .unwrap_or(avg_price);
                         let token_id = pos.token_id.clone().unwrap_or_else(|| pos.asset.clone());
                         let mut live_context = {
@@ -1605,6 +1664,20 @@ async fn main() -> Result<()> {
                                 .get(&token_id)
                                 .cloned()
                         };
+                        if live_context
+                            .as_ref()
+                            .map(|ctx| !live_context_is_viable(ctx))
+                            .unwrap_or(false)
+                        {
+                            let mut contexts = live_contexts_for_monitor.lock().await;
+                            contexts.remove(&token_id);
+                            persist_live_position_contexts(
+                                &live_contexts_path_for_monitor,
+                                &contexts,
+                            );
+                            drop(contexts);
+                            live_context = None;
+                        }
                         if live_context.is_none()
                             && live_recently_closed_for_monitor
                                 .lock()
@@ -1623,16 +1696,36 @@ async fn main() -> Result<()> {
                         } else {
                             None
                         };
-                        let fallback_market_text = fallback_market
-                            .as_ref()
-                            .map(|market| {
-                                format!(
-                                    "{} {}",
-                                    market.slug.clone().unwrap_or_default(),
-                                    market.question
-                                )
-                            })
-                            .unwrap_or_default();
+                        let fallback_market_text = if let Some(market) = fallback_market.as_ref() {
+                            format!(
+                                "{} {}",
+                                market.slug.clone().unwrap_or_default(),
+                                market.question
+                            )
+                        } else {
+                            format!(
+                                "{} {} {}",
+                                pos.slug.clone().unwrap_or_default(),
+                                pos.title.clone().unwrap_or_default(),
+                                pos.asset
+                            )
+                        };
+                        let derived_entry_share_price = if avg_price > 0.0 {
+                            avg_price
+                        } else if current_price > 0.0 {
+                            current_price
+                        } else {
+                            0.0
+                        };
+                        let derived_size_usdc = if avg_price > 0.0 {
+                            size * avg_price
+                        } else if current_value > 0.0 {
+                            current_value
+                        } else if current_price > 0.0 {
+                            size * current_price
+                        } else {
+                            0.0
+                        };
 
                         if live_context.is_none() {
                             if let (Some(asset), Some(timeframe)) = (
@@ -1651,12 +1744,13 @@ async fn main() -> Result<()> {
                                     market_slug: fallback_market
                                         .as_ref()
                                         .and_then(|market| market.slug.clone())
+                                        .or_else(|| pos.slug.clone())
                                         .unwrap_or_else(|| pos.asset.clone()),
                                     token_id: token_id.clone(),
                                     condition_id: pos.condition_id.clone().unwrap_or_default(),
-                                    size_usdc: size * avg_price,
+                                    size_usdc: derived_size_usdc,
                                     shares_size: size,
-                                    entry_share_price: avg_price,
+                                    entry_share_price: derived_entry_share_price,
                                     opened_at_ms: chrono::Utc::now().timestamp_millis(),
                                     expires_at_ms: fallback_market
                                         .as_ref()
@@ -1703,11 +1797,13 @@ async fn main() -> Result<()> {
                         let size_usdc = live_context
                             .as_ref()
                             .map(|ctx| ctx.size_usdc)
-                            .unwrap_or_else(|| size * avg_price);
+                            .filter(|value| *value > 0.0)
+                            .unwrap_or(derived_size_usdc);
                         let entry_share_price = live_context
                             .as_ref()
                             .map(|ctx| ctx.entry_share_price)
-                            .unwrap_or(avg_price);
+                            .filter(|value| *value > 0.0)
+                            .unwrap_or(derived_entry_share_price);
                         let entry_cost = size * entry_share_price;
                         let open_fee =
                             entry_cost * crate::polymarket::fee_rate_from_price(entry_share_price);

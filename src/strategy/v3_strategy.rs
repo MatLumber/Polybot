@@ -1103,6 +1103,36 @@ impl V3Strategy {
         }
     }
 
+    pub fn sync_prediction_counters(&mut self, total: usize, correct: usize, incorrect: usize) {
+        if total == 0 {
+            return;
+        }
+
+        let incorrect = if correct + incorrect == total {
+            incorrect
+        } else {
+            total.saturating_sub(correct)
+        };
+
+        if self.state.total_predictions == total
+            && self.state.correct_predictions == correct
+            && self.state.incorrect_predictions == incorrect
+        {
+            return;
+        }
+
+        self.state.total_predictions = total;
+        self.state.correct_predictions = correct;
+        self.state.incorrect_predictions = incorrect;
+
+        tracing::info!(
+            total_predictions = total,
+            correct_predictions = correct,
+            incorrect_predictions = incorrect,
+            "Synchronized ML prediction counters from persisted trade history"
+        );
+    }
+
     /// Force save state to disk gracefully
     pub fn force_save_state(&mut self) {
         if let Some(ref predictor) = self.predictor {

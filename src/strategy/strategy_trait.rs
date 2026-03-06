@@ -91,6 +91,9 @@ pub trait Strategy: Send + Sync {
     /// Register closed trade result for continuous ML learning (V3 only, V2 no-op)
     fn register_closed_trade_result(&mut self, _record: &crate::paper_trading::PaperTradeRecord) {}
 
+    /// Sync persisted prediction counters from authoritative trade history.
+    fn sync_prediction_counters(&mut self, _total: usize, _correct: usize, _incorrect: usize) {}
+
     /// Force state save specifically for clean shutdowns
     fn force_save_state(&mut self) {}
 }
@@ -245,6 +248,10 @@ impl Strategy for crate::strategy::V3Strategy {
 
     fn register_closed_trade_result(&mut self, record: &crate::paper_trading::PaperTradeRecord) {
         crate::strategy::V3Strategy::register_closed_trade_result(self, record)
+    }
+
+    fn sync_prediction_counters(&mut self, total: usize, correct: usize, incorrect: usize) {
+        crate::strategy::V3Strategy::sync_prediction_counters(self, total, correct, incorrect)
     }
 
     fn force_save_state(&mut self) {
