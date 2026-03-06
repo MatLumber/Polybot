@@ -1657,6 +1657,17 @@ async fn main() -> Result<()> {
                             })
                             .unwrap_or(avg_price);
                         let token_id = pos.token_id.clone().unwrap_or_else(|| pos.asset.clone());
+                        if pos.redeemable {
+                            let mut contexts = live_contexts_for_monitor.lock().await;
+                            if contexts.remove(&token_id).is_some() {
+                                persist_live_position_contexts(
+                                    &live_contexts_path_for_monitor,
+                                    &contexts,
+                                );
+                            }
+                            drop(contexts);
+                            continue;
+                        }
                         let mut live_context = {
                             live_contexts_for_monitor
                                 .lock()
@@ -1820,7 +1831,10 @@ async fn main() -> Result<()> {
                             .or_else(|| infer_asset_from_market_text(&pos.asset));
 
                         if let (Some(asset), Some(ctx)) = (asset, live_context.as_ref()) {
-                            if position_risk_for_monitor.get_position(asset).is_none() {
+                            if position_risk_for_monitor
+                                .get_position_by_token_id(&token_id)
+                                .is_none()
+                            {
                                 position_risk_for_monitor.restore_position(
                                     asset,
                                     direction,
@@ -1838,9 +1852,13 @@ async fn main() -> Result<()> {
                         #[cfg(feature = "dashboard")]
                         {
                             total_live_unrealized += unrealized_pnl;
-                            let live_checkpoint_state = asset.and_then(|asset_value| {
-                                position_risk_for_monitor.get_position(asset_value)
-                            });
+                            let live_checkpoint_state = position_risk_for_monitor
+                                .get_position_by_token_id(&token_id)
+                                .or_else(|| {
+                                    asset.and_then(|asset_value| {
+                                        position_risk_for_monitor.get_position(asset_value)
+                                    })
+                                });
                             live_dashboard_positions.push(PositionResponse {
                                 id: token_id.clone(),
                                 asset: asset
@@ -1920,8 +1938,11 @@ async fn main() -> Result<()> {
                         }
 
                         if let Some(asset) = asset {
-                            if let Some(exit_reason) =
-                                position_risk_for_monitor.update_position(asset, current_price)
+                            if let Some(exit_reason) = position_risk_for_monitor
+                                .update_position_by_token_id(&token_id, current_price)
+                                .or_else(|| {
+                                    position_risk_for_monitor.update_position(asset, current_price)
+                                })
                             {
                                 let should_close = {
                                     let mut pending = live_pending_closes_for_monitor.lock().await;
@@ -2009,11 +2030,19 @@ async fn main() -> Result<()> {
                                     close_order.price
                                 };
 
-                                let _ = position_risk_for_monitor.close_position(
-                                    asset,
-                                    exit_share_price,
-                                    exit_reason,
-                                );
+                                let _ = position_risk_for_monitor
+                                    .close_position_by_token_id(
+                                        &token_id,
+                                        exit_share_price,
+                                        exit_reason,
+                                    )
+                                    .or_else(|| {
+                                        position_risk_for_monitor.close_position(
+                                            asset,
+                                            exit_share_price,
+                                            exit_reason,
+                                        )
+                                    });
                                 let pnl = (size * exit_share_price)
                                     - ((size * exit_share_price)
                                         * crate::polymarket::fee_rate_from_price(exit_share_price))
@@ -3338,7 +3367,9 @@ async fn main() -> Result<()> {
 
                                     #[cfg(feature = "dashboard")]
                                     {
-                                        let live_checkpoint_state = position_risk.get_position(signal.asset);
+                                        let live_checkpoint_state = position_risk
+                                            .get_position_by_token_id(&signal.token_id)
+                                            .or_else(|| position_risk.get_position(signal.asset));
                                         let position = PositionResponse {
                                             id: signal.token_id.clone(),
                                             asset: signal.asset.to_string(),

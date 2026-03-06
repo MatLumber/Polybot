@@ -195,8 +195,8 @@ pub struct DailyStats {
 /// Risk manager for position sizing and limits
 pub struct RiskManager {
     config: RiskConfig,
-    /// Current positions by asset
-    positions: RwLock<HashMap<Asset, Position>>,
+    /// Current positions keyed by token_id when available, otherwise by asset.
+    positions: RwLock<HashMap<String, Position>>,
     /// Daily stats (RwLock for interior mutability so evaluate() can check without &mut self)
     daily_stats: RwLock<HashMap<String, DailyStats>>,
     /// Current date key
@@ -206,6 +206,24 @@ pub struct RiskManager {
 }
 
 impl RiskManager {
+    fn position_key(asset: Asset, token_id: &str) -> String {
+        let token_id = token_id.trim();
+        if token_id.is_empty() {
+            format!("asset::{asset}")
+        } else {
+            format!("token::{token_id}")
+        }
+    }
+
+    fn position_key_for_token(token_id: &str) -> Option<String> {
+        let token_id = token_id.trim();
+        if token_id.is_empty() {
+            None
+        } else {
+            Some(format!("token::{token_id}"))
+        }
+    }
+
     pub fn new(config: RiskConfig) -> Self {
         let current_date = Self::get_date_key(Utc::now());
         Self {
@@ -230,8 +248,12 @@ impl RiskManager {
     }
 
     fn checkpoint_floor_from_peak(&self, peak_roi: f64) -> f64 {
-        let dynamic_gap = (peak_roi * 0.25_f64).max(self.config.checkpoint_trail_gap_roi.max(0.0));
-        (peak_roi - dynamic_gap).max(self.config.checkpoint_initial_floor_roi.max(0.0))
+        Self::checkpoint_floor_from_peak_inner(&self.config, peak_roi)
+    }
+
+    fn checkpoint_floor_from_peak_inner(config: &RiskConfig, peak_roi: f64) -> f64 {
+        let dynamic_gap = (peak_roi * 0.25_f64).max(config.checkpoint_trail_gap_roi.max(0.0));
+        (peak_roi - dynamic_gap).max(config.checkpoint_initial_floor_roi.max(0.0))
     }
 
     fn roi_from_stop_price(direction: Direction, entry_price: f64, stop_price: f64) -> f64 {
@@ -319,7 +341,7 @@ impl RiskManager {
         // Check if we already have a position in this asset
         {
             let positions = self.positions.read().map_err(|e| e.to_string())?;
-            if positions.contains_key(&signal.asset) {
+            if positions.values().any(|position| position.asset == signal.asset) {
                 return Ok(false);
             }
         }
@@ -417,7 +439,8 @@ impl RiskManager {
         };
 
         if let Ok(mut positions) = self.positions.write() {
-            positions.insert(signal.asset, position);
+            let key = Self::position_key(signal.asset, &signal.token_id);
+            positions.insert(key, position);
         }
 
         // Update daily stats
@@ -447,7 +470,11 @@ impl RiskManager {
         market_slug: String,
         token_id: String,
     ) {
-        if self.has_position(asset) || entry_price <= 0.0 || size <= 0.0 {
+        if entry_price <= 0.0 || size <= 0.0 {
+            return;
+        }
+
+        if self.has_position_token(&token_id) {
             return;
         }
 
@@ -463,6 +490,8 @@ impl RiskManager {
                 entry_price.min(current_price),
             ),
         };
+
+        let key = Self::position_key(asset, &token_id);
 
         let position = Position {
             asset,
@@ -488,14 +517,36 @@ impl RiskManager {
         };
 
         if let Ok(mut positions) = self.positions.write() {
-            positions.insert(asset, position);
+            positions.insert(key, position);
         }
     }
 
     /// Update position with current price and return exit reason if position should close
     pub fn update_position(&self, asset: Asset, current_price: f64) -> Option<ExitReason> {
         let mut positions = self.positions.write().ok()?;
-        let position = positions.get_mut(&asset)?;
+        let position = positions.values_mut().find(|position| position.asset == asset)?;
+
+        Self::update_position_inner(position, current_price, &self.config)
+    }
+
+    /// Update a specific live position with its token_id.
+    pub fn update_position_by_token_id(
+        &self,
+        token_id: &str,
+        current_price: f64,
+    ) -> Option<ExitReason> {
+        let mut positions = self.positions.write().ok()?;
+        let key = Self::position_key_for_token(token_id)?;
+        let position = positions.get_mut(&key)?;
+
+        Self::update_position_inner(position, current_price, &self.config)
+    }
+
+    fn update_position_inner(
+        position: &mut Position,
+        current_price: f64,
+        config: &RiskConfig,
+    ) -> Option<ExitReason> {
 
         position.current_price = current_price;
 
@@ -507,11 +558,11 @@ impl RiskManager {
         position.pnl = (price_diff / position.entry_price) * position.size;
         position.pnl_pct = price_diff / position.entry_price;
 
-        if !position.checkpoint_armed && position.pnl_pct >= self.config.checkpoint_arm_roi {
+        if !position.checkpoint_armed && position.pnl_pct >= config.checkpoint_arm_roi {
             position.checkpoint_armed = true;
             position.checkpoint_peak_roi = position.pnl_pct;
             position.checkpoint_floor_roi =
-                self.checkpoint_floor_from_peak(position.checkpoint_peak_roi);
+                Self::checkpoint_floor_from_peak_inner(config, position.checkpoint_peak_roi);
             position.checkpoint_breach_ticks = 0;
         }
 
@@ -520,7 +571,7 @@ impl RiskManager {
             Direction::Up => {
                 if current_price > position.peak_price {
                     position.peak_price = current_price;
-                    position.stop_price = current_price * (1.0 - self.config.trailing_stop_pct);
+                    position.stop_price = current_price * (1.0 - config.trailing_stop_pct);
                 }
                 // Check trailing stop (price dropped below stop)
                 if current_price <= position.stop_price {
@@ -530,7 +581,7 @@ impl RiskManager {
             Direction::Down => {
                 if current_price < position.peak_price {
                     position.peak_price = current_price;
-                    position.stop_price = current_price * (1.0 + self.config.trailing_stop_pct);
+                    position.stop_price = current_price * (1.0 + config.trailing_stop_pct);
                 }
                 // Check trailing stop (price rose above stop)
                 if current_price >= position.stop_price {
@@ -544,14 +595,15 @@ impl RiskManager {
             position.entry_price,
             position.stop_price,
         );
-        position.dynamic_hard_stop_roi = trailing_stop_roi.min(0.0).max(self.config.hard_stop_roi);
+        position.dynamic_hard_stop_roi = trailing_stop_roi.min(0.0).max(config.hard_stop_roi);
 
         if position.checkpoint_armed {
             if position.pnl_pct > position.checkpoint_peak_roi {
                 position.checkpoint_peak_roi = position.pnl_pct;
             }
 
-            let desired_floor = self.checkpoint_floor_from_peak(position.checkpoint_peak_roi);
+            let desired_floor =
+                Self::checkpoint_floor_from_peak_inner(config, position.checkpoint_peak_roi);
             if desired_floor > position.checkpoint_floor_roi {
                 position.checkpoint_floor_roi = desired_floor;
             }
@@ -568,7 +620,7 @@ impl RiskManager {
             }
         }
 
-        if position.pnl_pct <= self.config.hard_stop_roi {
+        if position.pnl_pct <= config.hard_stop_roi {
             position.hard_stop_breach_ticks = position.hard_stop_breach_ticks.saturating_add(1);
         } else {
             position.hard_stop_breach_ticks = 0;
@@ -585,7 +637,7 @@ impl RiskManager {
             return Some(ExitReason::MarketExpiry);
         }
         // Fallback to max_hold_duration for backwards compatibility
-        if now - position.opened_at > self.config.max_hold_duration_ms {
+        if now - position.opened_at > config.max_hold_duration_ms {
             return Some(ExitReason::TimeExpiry);
         }
 
@@ -601,9 +653,39 @@ impl RiskManager {
     ) -> Option<ClosedTrade> {
         let position = {
             let mut positions = self.positions.write().ok()?;
-            positions.remove(&asset)?
+            let key = positions
+                .iter()
+                .find(|(_, position)| position.asset == asset)
+                .map(|(key, _)| key.clone())?;
+            positions.remove(&key)?
         };
 
+        self.close_position_inner(position, asset, close_price, reason)
+    }
+
+    pub fn close_position_by_token_id(
+        &self,
+        token_id: &str,
+        close_price: f64,
+        reason: ExitReason,
+    ) -> Option<ClosedTrade> {
+        let position = {
+            let mut positions = self.positions.write().ok()?;
+            let key = Self::position_key_for_token(token_id)?;
+            positions.remove(&key)?
+        };
+
+        let asset = position.asset;
+        self.close_position_inner(position, asset, close_price, reason)
+    }
+
+    fn close_position_inner(
+        &self,
+        position: Position,
+        asset: Asset,
+        close_price: f64,
+        reason: ExitReason,
+    ) -> Option<ClosedTrade> {
         let price_diff = match position.direction {
             Direction::Up => close_price - position.entry_price,
             Direction::Down => position.entry_price - close_price,
@@ -627,6 +709,8 @@ impl RiskManager {
             }
         }
 
+        let _ = reason;
+
         Some(ClosedTrade {
             asset,
             direction: position.direction,
@@ -649,10 +733,10 @@ impl RiskManager {
         let mut exits = Vec::new();
         let now = Utc::now().timestamp_millis();
 
-        for (asset, pos) in positions.iter() {
+        for pos in positions.values() {
             // Check time expiry (even if price hasn't updated)
             if now - pos.opened_at > self.config.max_hold_duration_ms {
-                exits.push((*asset, ExitReason::TimeExpiry, pos.current_price));
+                exits.push((pos.asset, ExitReason::TimeExpiry, pos.current_price));
             }
         }
 
@@ -689,13 +773,35 @@ impl RiskManager {
     pub fn has_position(&self, asset: Asset) -> bool {
         self.positions
             .read()
-            .map(|p| p.contains_key(&asset))
+            .map(|p| p.values().any(|position| position.asset == asset))
             .unwrap_or(false)
+    }
+
+    pub fn has_position_token(&self, token_id: &str) -> bool {
+        let positions = match self.positions.read() {
+            Ok(positions) => positions,
+            Err(_) => return false,
+        };
+        let Some(key) = Self::position_key_for_token(token_id) else {
+            return false;
+        };
+        positions.contains_key(&key)
     }
 
     /// Get position for an asset
     pub fn get_position(&self, asset: Asset) -> Option<Position> {
-        self.positions.read().ok()?.get(&asset).cloned()
+        self.positions
+            .read()
+            .ok()?
+            .values()
+            .find(|position| position.asset == asset)
+            .cloned()
+    }
+
+    pub fn get_position_by_token_id(&self, token_id: &str) -> Option<Position> {
+        let positions = self.positions.read().ok()?;
+        let key = Self::position_key_for_token(token_id)?;
+        positions.get(&key).cloned()
     }
 
     /// Get all open positions
@@ -932,6 +1038,48 @@ mod tests {
         assert!(position.pnl > 0.0);
         assert_eq!(position.market_slug, "btc-test");
         assert_eq!(position.token_id, "token-1");
+    }
+
+    #[test]
+    fn test_restore_position_keeps_multiple_live_tokens_for_same_asset() {
+        let rm = RiskManager::default();
+        let now = Utc::now().timestamp_millis();
+
+        rm.restore_position(
+            Asset::BTC,
+            Direction::Down,
+            2.5,
+            0.51,
+            0.0,
+            now - 1_000,
+            now + 60_000,
+            "btc-expired".to_string(),
+            "token-expired".to_string(),
+        );
+        rm.restore_position(
+            Asset::BTC,
+            Direction::Up,
+            2.55,
+            0.51,
+            0.52,
+            now - 500,
+            now + 120_000,
+            "btc-active".to_string(),
+            "token-active".to_string(),
+        );
+
+        assert!(rm.has_position_token("token-expired"));
+        assert!(rm.has_position_token("token-active"));
+        assert_eq!(rm.all_positions().len(), 2);
+
+        let exit = rm.update_position_by_token_id("token-active", 0.52);
+        assert!(exit.is_none());
+        let active = rm.get_position_by_token_id("token-active").unwrap();
+        assert_eq!(active.market_slug, "btc-active");
+        assert!(active.pnl > 0.0);
+
+        let expired = rm.get_position_by_token_id("token-expired").unwrap();
+        assert_eq!(expired.current_price, 0.0);
     }
 
     #[test]

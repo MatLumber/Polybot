@@ -1812,6 +1812,10 @@ pub struct WalletPosition {
     #[serde(default)]
     pub outcome: Option<String>,
     #[serde(default)]
+    pub redeemable: bool,
+    #[serde(default)]
+    pub mergeable: bool,
+    #[serde(default)]
     pub slug: Option<String>,
     #[serde(default, alias = "title")]
     pub title: Option<String>,
