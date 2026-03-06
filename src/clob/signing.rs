@@ -24,6 +24,11 @@ const CLOB_AUTH_MESSAGE: &str = "This message attests that I control the given w
 
 const ZERO_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
 
+pub(crate) fn random_i64_compatible_nonce() -> u64 {
+    let nonce = rand::random::<u64>() & (i64::MAX as u64);
+    nonce.max(1)
+}
+
 /// CTF Exchange contract address on Polygon
 pub fn ctf_exchange_address() -> Address {
     // Official Polygon exchange contract from Polymarket client config.
@@ -279,7 +284,7 @@ pub async fn sign_order(order: &mut Order, private_key: &str, chain_id: u64) -> 
     order.signer = Some(signer);
 
     if order.nonce == 0 {
-        order.nonce = rand::random::<u64>();
+        order.nonce = random_i64_compatible_nonce();
     }
     if order.salt.is_zero() {
         order.salt = U256::from(rand::random::<u64>());
@@ -314,7 +319,7 @@ pub async fn derive_api_credentials(private_key: &str) -> Result<(String, String
         .to_string();
 
     let timestamp = Utc::now().timestamp();
-    let nonce = rand::random::<u64>();
+    let nonce = random_i64_compatible_nonce();
     let l1_signature = create_l1_signature(private_key, chain_id, timestamp, nonce).await?;
 
     let mut headers = HeaderMap::new();
