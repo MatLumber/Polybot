@@ -168,7 +168,7 @@ pub struct PersistenceConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PaperTradingCfg {
-    /// Enable paper trading mode (overrides dry_run)
+    /// Enable paper trading mode (takes precedence over live execution)
     pub enabled: bool,
     /// Starting virtual balance in USDC
     pub initial_balance: f64,
@@ -315,6 +315,16 @@ impl Default for MLConfig {
 }
 
 impl AppConfig {
+    pub fn trading_mode(&self) -> &'static str {
+        if self.paper_trading.enabled {
+            "paper"
+        } else if self.bot.dry_run {
+            "dry_run"
+        } else {
+            "live"
+        }
+    }
+
     /// Load configuration from file and environment
     pub fn load() -> Result<Self> {
         // Load .env file first
@@ -449,11 +459,13 @@ impl AppConfig {
     /// Generate a digest of the config (without secrets) for logging
     pub fn digest(&self) -> String {
         format!(
-            "bot={} assets={:?} timeframes={:?} dry_run={} min_conf={:.2}",
+            "bot={} mode={} assets={:?} timeframes={:?} dry_run={} paper_enabled={} min_conf={:.2}",
             self.bot.tag,
+            self.trading_mode(),
             self.bot.assets,
             self.bot.timeframes,
             self.bot.dry_run,
+            self.paper_trading.enabled,
             self.strategy.min_confidence
         )
     }
@@ -478,7 +490,13 @@ impl AppConfig {
             bail!("execution.signature_type must be 0, 1, or 2");
         }
 
-        let live_requested = !self.bot.dry_run || !self.paper_trading.enabled;
+        if !self.bot.dry_run && self.paper_trading.enabled {
+            bail!(
+                "Invalid config: bot.dry_run=false while paper_trading.enabled=true. Disable paper trading for LIVE mode."
+            );
+        }
+
+        let live_requested = self.trading_mode() == "live";
         if live_requested {
             if std::env::var("POLYMARKET_ADDRESS").is_err()
                 && std::env::var("POLYMARKET_WALLET").is_err()
