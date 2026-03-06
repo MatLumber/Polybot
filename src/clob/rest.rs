@@ -8,6 +8,7 @@ use base64::{engine::general_purpose, Engine as _};
 use chrono::Utc;
 use ethers::types::Address;
 use ethers::signers::{LocalWallet, Signer};
+use ethers::utils::to_checksum;
 use hmac::{Hmac, Mac};
 use reqwest::{
     header::{HeaderMap, HeaderValue, CONTENT_TYPE},
@@ -583,11 +584,11 @@ impl RestClient {
         let (address, api_key, _, _) = self.auth_tuple()?;
         let maker = order
             .maker
-            .map(|a| format!("{:#x}", a))
+            .map(|a| to_checksum(&a, None))
             .unwrap_or_else(|| address);
         let signer = order
             .signer
-            .map(|a| format!("{:#x}", a))
+            .map(|a| to_checksum(&a, None))
             .or_else(|| self.address.clone())
             .context("Signer address missing for CLOB POST /order")?;
         let signature = order
@@ -606,9 +607,9 @@ impl RestClient {
             Side::Sell => (shares_scaled, usdc_scaled),
         };
 
-        let side_code = match order.side {
-            Side::Buy => 0_u8,
-            Side::Sell => 1_u8,
+        let side_label = match order.side {
+            Side::Buy => "BUY",
+            Side::Sell => "SELL",
         };
         let order_type = if order.expiration > 0 { "GTD" } else { "GTC" };
         let post_only = order.expiration > 0;
@@ -625,7 +626,7 @@ impl RestClient {
                 "expiration": order.expiration.to_string(),
                 "nonce": order.nonce.to_string(),
                 "feeRateBps": fee_rate_bps.to_string(),
-                "side": side_code,
+                "side": side_label,
                 "signatureType": order.signature_type,
                 "signature": signature
             },
@@ -655,7 +656,7 @@ impl RestClient {
                 status,
                 text,
                 order.token_id,
-                side_code,
+                side_label,
                 maker_amount,
                 taker_amount,
                 fee_rate_bps,
