@@ -2829,7 +2829,8 @@ async fn main() -> Result<()> {
                             .with_auth(config.execution.signature_type, None, None);
                             order.condition_id = Some(signal.condition_id.clone());
                             if exec_plan.post_only {
-                                order.expiration = signal.expires_at.max(0) as u64;
+                                // Polymarket expects GTD expiration as a UTC seconds timestamp.
+                                order.expiration = (signal.expires_at.max(0) / 1000) as u64;
                             }
 
                             match clob_client.execute_order(&order).await {
