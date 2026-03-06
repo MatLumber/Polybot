@@ -606,6 +606,13 @@ impl RestClient {
             Side::Sell => (shares_scaled, usdc_scaled),
         };
 
+        let side_code = match order.side {
+            Side::Buy => 0_u8,
+            Side::Sell => 1_u8,
+        };
+        let order_type = if order.expiration > 0 { "GTD" } else { "GTC" };
+        let post_only = order.expiration > 0;
+
         let payload = serde_json::json!({
             "order": {
                 "salt": order.salt.to_string(),
@@ -618,13 +625,13 @@ impl RestClient {
                 "expiration": order.expiration.to_string(),
                 "nonce": order.nonce.to_string(),
                 "feeRateBps": fee_rate_bps.to_string(),
-                "side": match order.side { Side::Buy => "BUY", Side::Sell => "SELL" },
+                "side": side_code,
                 "signatureType": order.signature_type,
                 "signature": signature
             },
             "owner": api_key,
-            "orderType": if order.expiration > 0 { "GTD" } else { "GTC" },
-            "postOnly": order.expiration > 0
+            "orderType": order_type,
+            "postOnly": post_only
         });
 
         let body =
@@ -643,7 +650,19 @@ impl RestClient {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
-            bail!("Failed to create order: {} - {}", status, text);
+            bail!(
+                "Failed to create order: {} - {} [token_id={}, side={}, maker_amount={}, taker_amount={}, fee_rate_bps={}, order_type={}, post_only={}, signature_type={}]",
+                status,
+                text,
+                order.token_id,
+                side_code,
+                maker_amount,
+                taker_amount,
+                fee_rate_bps,
+                order_type,
+                post_only,
+                order.signature_type
+            );
         }
 
         let raw: serde_json::Value = response
