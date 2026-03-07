@@ -411,12 +411,15 @@ impl V3Strategy {
         // One-per-window throttle: max 1 trade per (asset, timeframe) window.
         // Run this before filters/ML to avoid repeated evaluations in the same window
         // after a trade was already opened.
-        let already_entered_this_window = self
-            .last_entry_window
-            .get(&(asset, timeframe))
-            .copied()
-            .map(|last| last == win_open_ts)
-            .unwrap_or(false);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let window_is_current = win_close_ts > now_ms;
+        let already_entered_this_window = window_is_current
+            && self
+                .last_entry_window
+                .get(&(asset, timeframe))
+                .copied()
+                .map(|last| last == win_open_ts)
+                .unwrap_or(false);
 
         if already_entered_this_window {
             tracing::info!(
