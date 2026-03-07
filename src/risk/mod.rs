@@ -402,18 +402,9 @@ impl RiskManager {
 
     /// Record a new position with stop-loss and take-profit
     pub fn open_position(&self, signal: &Signal, size: f64, price: f64) {
-        let (stop_price, take_profit_price, peak_price) = match signal.direction {
-            Direction::Up => (
-                price * (1.0 - self.config.trailing_stop_pct),
-                price * (1.0 + self.config.take_profit_pct),
-                price,
-            ),
-            Direction::Down => (
-                price * (1.0 + self.config.trailing_stop_pct),
-                price * (1.0 - self.config.take_profit_pct),
-                price,
-            ),
-        };
+        let take_profit_price = price * (1.0 + self.config.take_profit_pct);
+        let stop_price = price * (1.0 - self.config.trailing_stop_pct);
+        let peak_price = price;
 
         let position = Position {
             asset: signal.asset,
@@ -478,18 +469,9 @@ impl RiskManager {
             return;
         }
 
-        let (stop_price, take_profit_price, peak_price) = match direction {
-            Direction::Up => (
-                entry_price * (1.0 - self.config.trailing_stop_pct),
-                entry_price * (1.0 + self.config.take_profit_pct),
-                entry_price.max(current_price),
-            ),
-            Direction::Down => (
-                entry_price * (1.0 + self.config.trailing_stop_pct),
-                entry_price * (1.0 - self.config.take_profit_pct),
-                entry_price.min(current_price),
-            ),
-        };
+        let take_profit_price = entry_price * (1.0 + self.config.take_profit_pct);
+        let stop_price = entry_price * (1.0 - self.config.trailing_stop_pct);
+        let peak_price = entry_price.max(current_price);
 
         let key = Self::position_key(asset, &token_id);
 
@@ -550,13 +532,14 @@ impl RiskManager {
 
         position.current_price = current_price;
 
-        // Calculate PnL based on direction
-        let price_diff = match position.direction {
-            Direction::Up => current_price - position.entry_price,
-            Direction::Down => position.entry_price - current_price,
-        };
+        // Calculate PnL regardless of direction because we hold the Polymarket share
+        let price_diff = current_price - position.entry_price;
         position.pnl = (price_diff / position.entry_price) * position.size;
         position.pnl_pct = price_diff / position.entry_price;
+
+        if position.pnl_pct >= config.take_profit_pct {
+            return Some(ExitReason::TakeProfit);
+        }
 
         if !position.checkpoint_armed && position.pnl_pct >= config.checkpoint_arm_roi {
             position.checkpoint_armed = true;
@@ -566,35 +549,18 @@ impl RiskManager {
             position.checkpoint_breach_ticks = 0;
         }
 
-        // Update peak price and trailing stop
-        match position.direction {
-            Direction::Up => {
-                if current_price > position.peak_price {
-                    position.peak_price = current_price;
-                    position.stop_price = current_price * (1.0 - config.trailing_stop_pct);
-                }
-                // Check trailing stop (price dropped below stop)
-                if current_price <= position.stop_price {
-                    return Some(ExitReason::TrailingStop);
-                }
-            }
-            Direction::Down => {
-                if current_price < position.peak_price {
-                    position.peak_price = current_price;
-                    position.stop_price = current_price * (1.0 + config.trailing_stop_pct);
-                }
-                // Check trailing stop (price rose above stop)
-                if current_price >= position.stop_price {
-                    return Some(ExitReason::TrailingStop);
-                }
-            }
+        // Update peak price and trailing stop (applies the same for holding YES or NO token)
+        if current_price > position.peak_price {
+            position.peak_price = current_price;
+            position.stop_price = current_price * (1.0 - config.trailing_stop_pct);
+        }
+        // Check trailing stop (price dropped below stop)
+        if current_price <= position.stop_price {
+            return Some(ExitReason::TrailingStop);
         }
 
-        let trailing_stop_roi = Self::roi_from_stop_price(
-            position.direction,
-            position.entry_price,
-            position.stop_price,
-        );
+        // We compute trailing stop ROI as a fallback
+        let trailing_stop_roi = (position.stop_price - position.entry_price) / position.entry_price;
         position.dynamic_hard_stop_roi = trailing_stop_roi.min(0.0).max(config.hard_stop_roi);
 
         if position.checkpoint_armed {
@@ -686,10 +652,7 @@ impl RiskManager {
         close_price: f64,
         reason: ExitReason,
     ) -> Option<ClosedTrade> {
-        let price_diff = match position.direction {
-            Direction::Up => close_price - position.entry_price,
-            Direction::Down => position.entry_price - close_price,
-        };
+        let price_diff = close_price - position.entry_price;
         let pnl = (price_diff / position.entry_price) * position.size;
 
         // Update daily stats
@@ -947,14 +910,14 @@ mod tests {
         let rm = RiskManager::new(config);
         let sig = make_signal(Asset::BTC, 0.80, Direction::Up);
 
-        rm.open_position(&sig, 1000.0, 50000.0);
+        rm.open_position(&sig, 100.0, 0.50);
 
         // Price goes up - should update peak and stop
-        let exit = rm.update_position(Asset::BTC, 52000.0);
+        let exit = rm.update_position(Asset::BTC, 0.52);
         assert!(exit.is_none());
 
-        // Price drops 3% from peak (52000) -> 50440 should trigger stop
-        let exit = rm.update_position(Asset::BTC, 50440.0);
+        // Price drops 3% from peak (0.52) -> 0.5044 should trigger stop
+        let exit = rm.update_position(Asset::BTC, 0.5044);
         assert_eq!(exit, Some(ExitReason::TrailingStop));
     }
 
@@ -968,14 +931,15 @@ mod tests {
         let rm = RiskManager::new(config);
         let sig = make_signal(Asset::BTC, 0.80, Direction::Down);
 
-        rm.open_position(&sig, 1000.0, 50000.0);
+        // Buying NO token at 0.50
+        rm.open_position(&sig, 100.0, 0.50);
 
-        // Price goes down - good for short
-        let exit = rm.update_position(Asset::BTC, 48000.0);
+        // Token price goes up - should update peak and stop
+        let exit = rm.update_position(Asset::BTC, 0.52);
         assert!(exit.is_none());
 
-        // Price rises 3% from low (48000) -> 49440+ should trigger stop
-        let exit = rm.update_position(Asset::BTC, 49500.0);
+        // Token price drops 3% from peak (0.52) -> 0.5044 should trigger stop
+        let exit = rm.update_position(Asset::BTC, 0.5044);
         assert_eq!(exit, Some(ExitReason::TrailingStop));
     }
 
@@ -989,10 +953,10 @@ mod tests {
         let rm = RiskManager::new(config);
         let sig = make_signal(Asset::BTC, 0.80, Direction::Up);
 
-        rm.open_position(&sig, 1000.0, 50000.0);
+        rm.open_position(&sig, 100.0, 0.50);
 
-        // Price goes up 5% -> 52500 should trigger take-profit
-        let exit = rm.update_position(Asset::BTC, 52500.0);
+        // Price goes up 5% (0.50 * 1.05 = 0.525) -> should trigger take-profit
+        let exit = rm.update_position(Asset::BTC, 0.525);
         assert_eq!(exit, Some(ExitReason::TakeProfit));
     }
 
@@ -1023,8 +987,8 @@ mod tests {
             Asset::BTC,
             Direction::Up,
             2.5,
-            50000.0,
-            50500.0,
+            0.50,
+            0.51,
             1700000000000,
             1700003600000,
             "btc-test".to_string(),
@@ -1033,7 +997,7 @@ mod tests {
 
         assert!(rm.has_position(Asset::BTC));
 
-        rm.update_position(Asset::BTC, 51000.0);
+        rm.update_position(Asset::BTC, 0.52);
         let position = rm.get_position(Asset::BTC).unwrap();
         assert!(position.pnl > 0.0);
         assert_eq!(position.market_slug, "btc-test");
@@ -1096,16 +1060,16 @@ mod tests {
         let rm = RiskManager::new(config);
         let sig = make_signal(Asset::BTC, 0.85, Direction::Up);
 
-        rm.open_position(&sig, 1000.0, 50000.0);
+        rm.open_position(&sig, 100.0, 0.50);
 
-        let exit = rm.update_position(Asset::BTC, 53000.0);
-        assert!(exit.is_none());
+        let exit = rm.update_position(Asset::BTC, 0.53);
+        assert!(exit.is_none()); // Checkpoint armed but not breached
 
         let position = rm.get_position(Asset::BTC).unwrap();
         assert!(position.checkpoint_armed);
-        assert!(position.checkpoint_floor_roi >= 0.03);
+        assert!(position.checkpoint_floor_roi >= 0.03); // Peak is 0.06 roi, floor is 0.04
 
-        let exit = rm.update_position(Asset::BTC, 51500.0);
+        let exit = rm.update_position(Asset::BTC, 0.515); // Drops to 0.03 roi, below floor
         assert_eq!(exit, Some(ExitReason::CheckpointTakeProfit));
     }
 }

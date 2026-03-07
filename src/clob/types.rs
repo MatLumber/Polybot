@@ -106,6 +106,9 @@ pub struct Order {
     /// Whether the market uses the Neg Risk exchange contract.
     #[serde(default)]
     pub neg_risk: Option<bool>,
+    /// Optional order_type override (e.g. FOK)
+    #[serde(default)]
+    pub order_type: Option<String>,
 }
 
 impl Order {
@@ -133,6 +136,7 @@ impl Order {
             tick_size: None,
             condition_id: None,
             neg_risk: None,
+            order_type: None,
         }
     }
 

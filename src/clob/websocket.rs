@@ -362,6 +362,7 @@ impl WsClient {
             tick_size: None,
             condition_id: None,
             neg_risk: None,
+            order_type: None,
         };
 
         let _ = self.event_tx.send(WsEvent::OrderUpdate(order)).await;

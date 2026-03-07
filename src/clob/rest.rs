@@ -156,6 +156,7 @@ fn remote_open_order_to_order(remote: RemoteOpenOrder) -> Order {
             Some(remote.market)
         },
         neg_risk: None,
+        order_type: None,
     }
 }
 
@@ -736,8 +737,10 @@ impl RestClient {
             Side::Buy => "BUY",
             Side::Sell => "SELL",
         };
-        let order_type = if order.expiration > 0 { "GTD" } else { "GTC" };
-        let post_only = order.expiration > 0;
+        let order_type = order.order_type.clone().unwrap_or_else(|| {
+            if order.expiration > 0 { "GTD".to_string() } else { "GTC".to_string() }
+        });
+        let post_only = order.expiration > 0 && order.order_type.is_none();
 
         let payload = serde_json::json!({
             "order": {

@@ -2048,15 +2048,16 @@ async fn main() -> Result<()> {
                                             continue;
                                         }
                                     };
-                                    let close_order = Order::new(
+                                    let mut close_order = Order::new(
                                         token_id.clone(),
                                         clob::Side::Sell,
-                                        quote.bid.clamp(0.01, 0.99),
+                                        (quote.bid - 0.05).max(0.01).clamp(0.01, 0.99),
                                         size,
                                     )
                                     .with_auth(config.execution.signature_type, None, None);
-                                    let mut close_order = close_order;
                                     close_order.condition_id = pos.condition_id.clone();
+                                    close_order.order_type = Some("FOK".to_string());
+                                    close_order.expiration = 0;
                                     let sell_filled = match position_client
                                         .execute_sell_confirmed(&close_order, 3)
                                         .await
@@ -3299,6 +3300,13 @@ async fn main() -> Result<()> {
                             } else {
                                 i64::MAX
                             };
+
+                            if seconds_to_expiry < 60 {
+                                info!(signal_id = %signal_id, seconds_to_expiry, "Skipping order due to close expiry (< 60s remaining)");
+                                #[cfg(feature = "dashboard")]
+                                live_main_dashboard_memory.record_execution_rejection("too_close_to_expiry").await;
+                                continue;
+                            }
 
                             let exec_plan = match crate::polymarket::plan_buy_execution(
                                 quote.bid,
