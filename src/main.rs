@@ -3443,6 +3443,11 @@ async fn main() -> Result<()> {
                             if exec_plan.post_only {
                                 // Polymarket expects GTD expiration as a UTC seconds timestamp.
                                 order.expiration = (signal.expires_at.max(0) / 1000) as u64;
+                            } else {
+                                // Taker path: use FAK so the order is immediately filled or cancelled.
+                                // Without this, the order defaults to GTC which may sit on the book.
+                                order.order_type = Some("FAK".to_string());
+                                order.expiration = 0;
                             }
 
                             match clob_client.execute_order(&order).await {

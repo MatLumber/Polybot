@@ -122,6 +122,14 @@ risk:
   time_stop_seconds_to_expiry_15m: 90   # 15m markets: close 90s before expiry
 
 # ============================================================================
+# EXECUTION
+# ============================================================================
+execution:
+  post_only: false        # Never use post_only — GTD+post_only BUYs get rejected when marketable
+  maker_first: false      # Use taker (FAK) immediately — simpler, no retry needed
+  fallback_taker_seconds_to_expiry: 120
+
+# ============================================================================
 # PAPER TRADING
 # ============================================================================
 paper_trading:
