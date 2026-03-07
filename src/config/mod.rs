@@ -340,7 +340,7 @@ impl AppConfig {
             // Load default config
             .set_default("bot.tag", env!("CARGO_PKG_VERSION"))?
             .set_default("bot.dry_run", true)?
-            .set_default("bot.assets", vec!["BTC"])?
+            .set_default("bot.assets", vec!["BTC", "ETH"])?
             .set_default("bot.timeframes", vec!["15m", "1h"])?
             // Oracle defaults
             .set_default("oracle.binance_enabled", false)?
