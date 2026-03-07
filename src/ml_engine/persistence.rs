@@ -180,14 +180,7 @@ impl MLPersistenceManager {
 
     /// Cargar estado del ML
     pub fn load_ml_state(&self) -> anyhow::Result<Option<(MLPersistenceState, Dataset)>> {
-        if !MLPersistenceState::exists(&self.state_file) {
-            info!("📂 No previous ML state found, starting fresh");
-            return Ok(None);
-        }
-
-        let state = MLPersistenceState::load(&self.state_file)?;
-
-        // Intentar cargar dataset
+        // Always try to load dataset first so observations survive restarts
         let dataset = if Path::new(&self.dataset_file).exists() {
             match Dataset::load(&self.dataset_file) {
                 Ok(d) => {
@@ -202,6 +195,21 @@ impl MLPersistenceManager {
         } else {
             Dataset::new()
         };
+
+        if !MLPersistenceState::exists(&self.state_file) {
+            if dataset.is_empty() {
+                info!("📂 No previous ML state found, starting fresh");
+                return Ok(None);
+            }
+            // Dataset exists but no state file yet (model never trained) — restore observations
+            info!(
+                "📂 No ML state file but dataset has {} samples — restoring observations with default weights",
+                dataset.len()
+            );
+            return Ok(Some((MLPersistenceState::default(), dataset)));
+        }
+
+        let state = MLPersistenceState::load(&self.state_file)?;
 
         info!(
             "🧠 ML state restored: {} predictions, {} correct, {:.1}% accuracy",

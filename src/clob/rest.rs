@@ -742,19 +742,23 @@ impl RestClient {
         });
         let post_only = order.expiration > 0 && order.order_type.is_none();
 
+        let side_num: u8 = match order.side {
+            Side::Buy => 0,
+            Side::Sell => 1,
+        };
         let payload = serde_json::json!({
             "order": {
-                "salt": order.salt.as_u64(),
+                "salt": order.salt.to_string(),
                 "maker": maker,
                 "signer": signer,
                 "taker": "0x0000000000000000000000000000000000000000",
                 "tokenId": order.token_id,
                 "makerAmount": maker_amount.to_string(),
                 "takerAmount": taker_amount.to_string(),
-                "expiration": order.expiration,
-                "nonce": order.nonce,
+                "expiration": order.expiration.to_string(),
+                "nonce": order.nonce.to_string(),
                 "feeRateBps": fee_rate_bps.to_string(),
-                "side": side_label,
+                "side": side_num,
                 "signatureType": order.signature_type,
                 "signature": signature
             },

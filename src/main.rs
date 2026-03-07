@@ -747,6 +747,8 @@ async fn main() -> Result<()> {
     let oracle_last_tick_ts = last_tick_ts.clone();
     #[cfg(feature = "dashboard")]
     let oracle_dashboard_memory = dashboard_memory.clone();
+    #[cfg(feature = "dashboard")]
+    let oracle_dashboard_broadcaster = dashboard_broadcaster.clone();
     let oracle_handle = tokio::spawn(async move {
         use crate::oracle::sources::{BinanceClient, PriceSource as _, RtdsClient, SourceEvent};
         use crate::persistence::PriceRecord;
@@ -798,7 +800,10 @@ async fn main() -> Result<()> {
             tracing::warn!("RTDS feed disabled; native Polymarket data will be unavailable");
             None
         };
-        let mut tick_count: u64 = 0; // Process events and convert to PriceTicks
+        let mut tick_count: u64 = 0;
+        #[cfg(feature = "dashboard")]
+        let mut last_live_price_broadcast: i64 = 0;
+        // Process events and convert to PriceTicks
         while let Some(event) = event_rx.recv().await {
             match event {
                 SourceEvent::Tick(tick) => {
@@ -824,7 +829,29 @@ async fn main() -> Result<()> {
                     #[cfg(feature = "dashboard")]
                     oracle_dashboard_memory
                         .record_asset_tick(tick.asset, tick.source, received_ts, staleness_gate_ms)
-                        .await; // Forward to paper trading engine if enabled
+                        .await;
+                    // In live mode (paper disabled), update dashboard price history directly
+                    // since paper_price_rx loop won't be running.
+                    #[cfg(feature = "dashboard")]
+                    if !oracle_paper_enabled {
+                        oracle_dashboard_memory
+                            .update_price_at(
+                                tick.asset,
+                                tick.mid,
+                                tick.bid,
+                                tick.ask,
+                                tick.source,
+                                tick.ts,
+                            )
+                            .await;
+                        // Broadcast price updates throttled to ~2s to avoid UI flicker
+                        let now_ms = chrono::Utc::now().timestamp_millis();
+                        if now_ms - last_live_price_broadcast >= 2_000 {
+                            last_live_price_broadcast = now_ms;
+                            oracle_dashboard_broadcaster
+                                .broadcast_prices(oracle_dashboard_memory.get_prices().await.prices);
+                        }
+                    } // Forward to paper trading engine if enabled
                     if oracle_paper_enabled {
                         let _ = oracle_paper_tx.send(price_tick.clone()).await;
                     }
