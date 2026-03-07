@@ -337,6 +337,16 @@ pub enum WsMessage {
     Heartbeat(i64),
     /// Trading mode changed (true = paper, false = live)
     TradingModeChanged(bool),
+    /// Live balance update
+    LiveBalanceUpdate(LiveBalancePayload),
+}
+
+/// Live balance payload for WebSocket
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveBalancePayload {
+    pub balance: f64,
+    pub locked: f64,
+    pub timestamp: i64,
 }
 
 /// ML State update payload for WebSocket

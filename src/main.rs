@@ -2032,6 +2032,19 @@ async fn main() -> Result<()> {
                                 .or_else(|| {
                                     position_risk_for_monitor.update_position(asset, current_price)
                                 })
+                                .and_then(|r| {
+                                    use crate::risk::ExitReason;
+                                    match r {
+                                        ExitReason::HardStop
+                                        | ExitReason::TakeProfit
+                                        | ExitReason::CheckpointTakeProfit
+                                        | ExitReason::TrailingStop => {
+                                            tracing::debug!(reason = %r, token_id = %token_id, "Live SL/TP suppressed — binary options exit by time only");
+                                            None
+                                        }
+                                        _ => Some(r),
+                                    }
+                                })
                             {
                                 let should_close = {
                                     let mut pending = live_pending_closes_for_monitor.lock().await;
@@ -2584,6 +2597,7 @@ async fn main() -> Result<()> {
                     {
                         *live_dashboard_memory.live_balance.write().await = balance;
                         *live_dashboard_memory.live_locked.write().await = locked_in_positions;
+                        live_dashboard_broadcaster.broadcast_live_balance(balance, locked_in_positions);
                     }
                 }
                 Err(e) => {

@@ -86,6 +86,17 @@ impl WebSocketBroadcaster {
         self.broadcast(&WsMessage::LivePositionsUpdate(positions));
     }
 
+    /// Broadcast live balance update
+    pub fn broadcast_live_balance(&self, balance: f64, locked: f64) {
+        self.broadcast(&WsMessage::LiveBalanceUpdate(
+            super::types::LiveBalancePayload {
+                balance,
+                locked,
+                timestamp: chrono::Utc::now().timestamp_millis(),
+            },
+        ));
+    }
+
     /// Broadcast heartbeat
     pub fn broadcast_heartbeat(&self) {
         self.broadcast(&WsMessage::Heartbeat(chrono::Utc::now().timestamp_millis()));

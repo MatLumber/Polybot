@@ -244,6 +244,12 @@ export interface SignalWire {
   expires_at: number
 }
 
+export interface LiveBalanceWire {
+  balance: number
+  locked: number
+  timestamp: number
+}
+
 export type WsMessageWire =
   | { type: 'FullState'; data: DashboardStateWire }
   | { type: 'StatsUpdate'; data: PaperStatsWire }
@@ -259,3 +265,5 @@ export type WsMessageWire =
   | { type: 'MLPrediction'; data: MLPredictionWire }
   | { type: 'MLMetricsUpdate'; data: MLMetricsWire }
   | { type: 'Heartbeat'; data: number }
+  | { type: 'LiveBalanceUpdate'; data: LiveBalanceWire }
+  | { type: 'TradingModeChanged'; data: boolean }

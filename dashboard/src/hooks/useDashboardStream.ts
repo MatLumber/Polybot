@@ -240,6 +240,21 @@ function reducer(state: DashboardStreamState, action: StreamAction): DashboardSt
         }
       }
 
+      if (message.type === 'LiveBalanceUpdate') {
+        return {
+          ...nextState,
+          dashboard: {
+            ...state.dashboard,
+            live: {
+              ...state.dashboard.live,
+              balance: message.data.balance,
+              locked: message.data.locked,
+              available: message.data.balance - message.data.locked,
+            },
+          },
+        }
+      }
+
       if (message.type === 'LiveStatsUpdate') {
         return {
           ...nextState,

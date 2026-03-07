@@ -765,7 +765,6 @@ impl RestClient {
 
         let body =
             serde_json::to_string(&payload).context("Failed to serialize create order payload")?;
-        tracing::warn!("POST /order payload: {}", body);
         let headers = self.build_l2_headers("POST", request_path, &body)?;
 
         let response = self

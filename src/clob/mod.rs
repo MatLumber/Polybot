@@ -379,13 +379,6 @@ impl ClobClient {
                 to_submit.neg_risk = cached.or(fetched);
             }
         }
-        tracing::warn!(
-            token_id = %to_submit.token_id,
-            neg_risk = ?to_submit.neg_risk,
-            fee_rate_bps = ?to_submit.fee_rate_bps,
-            tick_size = ?to_submit.tick_size,
-            "Signing order with neg_risk"
-        );
         if to_submit.signature.is_none() {
             let private_key = self
                 .config
