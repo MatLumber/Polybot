@@ -733,10 +733,6 @@ impl RestClient {
 
         let (maker_amount, taker_amount) = order_amounts(order)?;
 
-        let side_num: u8 = match order.side {
-            Side::Buy => 0,
-            Side::Sell => 1,
-        };
         let side_label = match order.side {
             Side::Buy => "BUY",
             Side::Sell => "SELL",
