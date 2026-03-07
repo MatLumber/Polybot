@@ -260,7 +260,8 @@ async fn main() -> Result<()> {
         // the old counters are from a previous model session and are meaningless
         // without the training data -- syncing them would show stale accuracy on
         // the dashboard. Skip so the dashboard starts clean at 0.
-        if strategy_guard.get_ml_state().dataset_size > 0 {
+        let min_samples = config.ml_engine.min_samples_for_training;
+        if strategy_guard.get_ml_state().dataset_size >= min_samples {
             strategy_guard.sync_prediction_counters(total, correct, incorrect);
             strategy_guard.force_save_state();
             info!(
@@ -270,7 +271,11 @@ async fn main() -> Result<()> {
                 "Synchronized ML counters from persisted paper trading state"
             );
         } else {
-            info!("Skipping counter sync - dataset is empty, starting fresh");
+            info!(
+                dataset = strategy_guard.get_ml_state().dataset_size,
+                min_needed = min_samples,
+                "Skipping counter sync - not enough data to have a trained model, starting fresh"
+            );
         }
     }
     let mut risk_cfg = risk::RiskConfig::default();
