@@ -256,14 +256,22 @@ async fn main() -> Result<()> {
         load_persisted_prediction_counters(&config.persistence.data_dir)
     {
         let mut strategy_guard = strategy.lock().await;
-        strategy_guard.sync_prediction_counters(total, correct, incorrect);
-        strategy_guard.force_save_state();
-        info!(
-            total_predictions = total,
-            correct_predictions = correct,
-            incorrect_predictions = incorrect,
-            "Synchronized ML counters from persisted paper trading state"
-        );
+        // Only sync counters if the dataset has samples. If the dataset is empty
+        // the old counters are from a previous model session and are meaningless
+        // without the training data -- syncing them would show stale accuracy on
+        // the dashboard. Skip so the dashboard starts clean at 0.
+        if strategy_guard.get_ml_state().dataset_size > 0 {
+            strategy_guard.sync_prediction_counters(total, correct, incorrect);
+            strategy_guard.force_save_state();
+            info!(
+                total_predictions = total,
+                correct_predictions = correct,
+                incorrect_predictions = incorrect,
+                "Synchronized ML counters from persisted paper trading state"
+            );
+        } else {
+            info!("Skipping counter sync - dataset is empty, starting fresh");
+        }
     }
     let mut risk_cfg = risk::RiskConfig::default();
     risk_cfg.max_position_size = config.risk.max_position_usdc;
