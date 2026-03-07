@@ -795,6 +795,28 @@ impl V3Strategy {
                 score,
                 "âŒ Fallback signal rejected (insufficient directional alignment â€” need all 3 indicators)"
             );
+            let ema_signal = match (features.ema_9, features.ema_21) {
+                (Some(e9), Some(e21)) => if e9 > e21 { "bullish" } else { "bearish" },
+                _ => "missing",
+            };
+            let macd_signal = match features.macd_hist.or(features.macd) {
+                Some(v) => if v > 0.0 { "bullish" } else { "bearish" },
+                None => "missing",
+            };
+            let ha_signal = match &features.ha_trend {
+                Some(Direction::Up) => "bullish",
+                Some(Direction::Down) => "bearish",
+                None => "missing",
+            };
+            tracing::debug!(
+                asset = ?features.asset,
+                timeframe = ?features.timeframe,
+                score,
+                ema = ema_signal,
+                macd = macd_signal,
+                ha = ha_signal,
+                "Fallback rejected: partial alignment (need all 3 to agree)"
+            );
             self.last_filter_reason = Some("fallback_weak_directional_score".to_string());
             return None;
         }

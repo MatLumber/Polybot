@@ -118,7 +118,7 @@ risk:
   # Trail gap for checkpoint floor growth.
   checkpoint_trail_gap_roi: 0.03
   hard_stop_roi: -0.045
-  time_stop_seconds_to_expiry: 90
+  time_stop_seconds_to_expiry: 300
 
 # ============================================================================
 # PAPER TRADING

@@ -1595,6 +1595,9 @@ async fn main() -> Result<()> {
         Arc::new(Mutex::new(std::collections::HashSet::new()));
     let live_pending_closes_for_monitor = live_pending_closes.clone();
     let live_pending_closes_for_main = live_pending_closes.clone();
+    let live_sell_retries: Arc<Mutex<std::collections::HashMap<String, u32>>> =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let live_sell_retries_for_monitor = live_sell_retries.clone();
     let live_recently_closed: Arc<Mutex<std::collections::HashSet<String>>> =
         Arc::new(Mutex::new(std::collections::HashSet::new()));
     let live_recently_closed_for_monitor = live_recently_closed.clone();
@@ -1875,10 +1878,9 @@ async fn main() -> Result<()> {
                                 current_price,
                                 size_usdc,
                                 pnl: unrealized_pnl,
-                                pnl_pct: if size_usdc > 0.0 {
-                                    (unrealized_pnl / size_usdc) * 100.0
-                                } else {
-                                    0.0
+                                pnl_pct: {
+                                    let cost_basis = (entry_cost + open_fee).max(0.01);
+                                    (unrealized_pnl / cost_basis) * 100.0
                                 },
                                 opened_at: live_context
                                     .as_ref()
@@ -1926,10 +1928,9 @@ async fn main() -> Result<()> {
                                     .as_ref()
                                     .map(|position| position.checkpoint_peak_roi * 100.0)
                                     .unwrap_or(0.0),
-                                trading_roi: if size_usdc > 0.0 {
-                                    (unrealized_pnl / size_usdc) * 100.0
-                                } else {
-                                    0.0
+                                trading_roi: {
+                                    let cost_basis = (entry_cost + open_fee).max(0.01);
+                                    (unrealized_pnl / cost_basis) * 100.0
                                 },
                                 prediction_roi: 0.0,
                                 entry_share_price,
@@ -2017,15 +2018,51 @@ async fn main() -> Result<()> {
                                     .with_auth(config.execution.signature_type, None, None);
                                     let mut close_order = close_order;
                                     close_order.condition_id = pos.condition_id.clone();
-                                    if let Err(e) =
-                                        position_client.execute_order(&close_order).await
-                                    {
-                                        tracing::warn!(error = %e, token_id = %token_id, "Failed to submit live close order");
-                                        live_pending_closes_for_monitor
-                                            .lock()
-                                            .await
-                                            .remove(&token_id);
-                                        continue;
+                                    match position_client.execute_order(&close_order).await {
+                                        Ok(_) => {
+                                            live_sell_retries_for_monitor
+                                                .lock()
+                                                .await
+                                                .remove(&token_id);
+                                        }
+                                        Err(e) => {
+                                            let retries = {
+                                                let mut retries_map =
+                                                    live_sell_retries_for_monitor.lock().await;
+                                                let count = retries_map
+                                                    .entry(token_id.clone())
+                                                    .or_insert(0);
+                                                *count += 1;
+                                                *count
+                                            };
+                                            if retries > 5 {
+                                                tracing::error!(
+                                                    token_id = %token_id,
+                                                    retries = retries,
+                                                    "SELL retry limit exceeded — abandoning position internally"
+                                                );
+                                                live_sell_retries_for_monitor
+                                                    .lock()
+                                                    .await
+                                                    .remove(&token_id);
+                                                live_pending_closes_for_monitor
+                                                    .lock()
+                                                    .await
+                                                    .remove(&token_id);
+                                            } else {
+                                                tracing::warn!(
+                                                    error = %e,
+                                                    token_id = %token_id,
+                                                    retries = retries,
+                                                    "SELL order failed — will retry next tick"
+                                                );
+                                                live_pending_closes_for_monitor
+                                                    .lock()
+                                                    .await
+                                                    .remove(&token_id);
+                                            }
+                                            continue;
+                                        }
                                     }
                                     close_order.price
                                 };
@@ -2095,10 +2132,9 @@ async fn main() -> Result<()> {
                                     exit_price: exit_share_price,
                                     size_usdc,
                                     pnl,
-                                    pnl_pct: if size_usdc > 0.0 {
-                                        (pnl / size_usdc) * 100.0
-                                    } else {
-                                        0.0
+                                    pnl_pct: {
+                                        let cost_basis = (entry_cost + open_fee).max(0.01);
+                                        (pnl / cost_basis) * 100.0
                                     },
                                     result: internal_result.to_string(),
                                     prediction_correct: official_result
@@ -2176,10 +2212,9 @@ async fn main() -> Result<()> {
                                     shares: size,
                                     fee_paid: open_fee + close_fee,
                                     pnl,
-                                    pnl_pct: if size_usdc > 0.0 {
-                                        (pnl / size_usdc) * 100.0
-                                    } else {
-                                        0.0
+                                    pnl_pct: {
+                                        let cost_basis = (entry_cost + open_fee).max(0.01);
+                                        (pnl / cost_basis) * 100.0
                                     },
                                     result: internal_result.to_string(),
                                     exit_reason: exit_reason.to_string(),
