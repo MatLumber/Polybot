@@ -431,9 +431,9 @@ impl AppConfig {
             .set_default("use_v3_strategy", true)?
             .set_default("ml_engine.enabled", true)?
             .set_default("ml_engine.model_type", "ensemble")?
-            .set_default("ml_engine.retrain_interval_trades", 50)?
-            .set_default("ml_engine.retrain_interval_window_observations", 100)?
-            .set_default("ml_engine.min_samples_for_training", 20)?
+            .set_default("ml_engine.retrain_interval_trades", 20)?
+            .set_default("ml_engine.retrain_interval_window_observations", 20)?
+            .set_default("ml_engine.min_samples_for_training", 10)?
             .set_default("ml_engine.use_microstructure", true)?
             .set_default("ml_engine.use_temporal_patterns", true)?
             .set_default("ml_engine.use_cross_asset", true)?
