@@ -179,9 +179,11 @@ pub struct MLFeatureVector {
     // ============ Intra-Window Wicks ============
     /// Upper shadow ratio: (window_high - close) / (window_high - window_low), [0, 1].
     /// High = price rejected from the highs (bearish pressure).
+    #[serde(default)]
     pub window_upper_shadow: f64,
     /// Lower shadow ratio: (close - window_low) / (window_high - window_low), [0, 1].
     /// High = price bounced from the lows (bullish pressure).
+    #[serde(default)]
     pub window_lower_shadow: f64,
 }
 

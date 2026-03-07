@@ -1217,7 +1217,7 @@ impl ClobClient {
             }
 
             if candidates.is_empty() {
-                tracing::warn!(
+                tracing::debug!(
                     asset = ?asset,
                     timeframe = ?timeframe,
                     cache_total = total,
