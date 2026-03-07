@@ -532,6 +532,15 @@ impl RiskManager {
 
         position.current_price = current_price;
 
+        // Time-based expiry ALWAYS takes priority — check before any price-based logic
+        let now = Utc::now().timestamp_millis();
+        if position.expires_at > 0 && now >= position.expires_at {
+            return Some(ExitReason::MarketExpiry);
+        }
+        if now - position.opened_at > config.max_hold_duration_ms {
+            return Some(ExitReason::TimeExpiry);
+        }
+
         // Calculate PnL regardless of direction because we hold the Polymarket share
         let price_diff = current_price - position.entry_price;
         position.pnl = (price_diff / position.entry_price) * position.size;
@@ -590,15 +599,6 @@ impl RiskManager {
             position.hard_stop_breach_ticks = position.hard_stop_breach_ticks.saturating_add(1);
         } else {
             position.hard_stop_breach_ticks = 0;
-        }
-
-        // Check time-based expiry BEFORE price stops — expired markets must always exit
-        let now = Utc::now().timestamp_millis();
-        if position.expires_at > 0 && now >= position.expires_at {
-            return Some(ExitReason::MarketExpiry);
-        }
-        if now - position.opened_at > config.max_hold_duration_ms {
-            return Some(ExitReason::TimeExpiry);
         }
 
         if position.hard_stop_breach_ticks >= 1 {
