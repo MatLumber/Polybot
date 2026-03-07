@@ -332,14 +332,14 @@ impl V3Strategy {
                     self.dataset.len(),
                     self.window_observations_count
                 );
-                    // Auto-save every 10 new observations (reuses trade-save interval logic)
-                    if self.dataset.len() % 10 == 0 {
-                        if let Err(e) = self.dataset.save(self.persistence.dataset_file()) {
-                            warn!(
-                                "Failed to auto-save dataset after window observation: {}",
-                                e
-                            );
-                        }
+                    // Auto-save after EVERY new observation to survive restarts.
+                    // Previously saved every 10 observations, but frequent restarts
+                    // caused data loss since the threshold was never reached.
+                    if let Err(e) = self.dataset.save(self.persistence.dataset_file()) {
+                        warn!(
+                            "Failed to auto-save dataset after window observation: {}",
+                            e
+                        );
                     }
                     // Check if we need to retrain based on window observations
                     if self.window_observations_count
@@ -1223,6 +1223,10 @@ impl V3Strategy {
 
     /// Force save state to disk gracefully
     pub fn force_save_state(&mut self) {
+        // Always save dataset first (critical during bootstrap when no model exists)
+        if let Err(e) = self.dataset.save(self.persistence.dataset_file()) {
+            tracing::warn!("Failed to save dataset on shutdown: {}", e);
+        }
         if let Some(ref predictor) = self.predictor {
             if let Err(e) = self
                 .persistence
@@ -1230,8 +1234,16 @@ impl V3Strategy {
             {
                 tracing::warn!("Failed to auto-save ML state: {}", e);
             } else {
-                tracing::info!("ðŸ’¾ V3 ML State safely persisted on shutdown");
+                tracing::info!(
+                    dataset_size = self.dataset.len(),
+                    "V3 ML State safely persisted on shutdown"
+                );
             }
+        } else {
+            tracing::info!(
+                dataset_size = self.dataset.len(),
+                "Dataset saved on shutdown (no model trained yet)"
+            );
         }
     }
 
@@ -1370,10 +1382,14 @@ impl V3Strategy {
 
     /// Save ML state manually
     pub fn save_state(&mut self) -> anyhow::Result<()> {
+        // Always save dataset
+        self.dataset.save(self.persistence.dataset_file())?;
         if let Some(ref predictor) = self.predictor {
             self.persistence
                 .save_ml_state(predictor, &self.state, &self.dataset)?;
-            info!("ðŸ’¾ ML state saved manually");
+            info!(dataset_size = self.dataset.len(), "ML state saved manually");
+        } else {
+            info!(dataset_size = self.dataset.len(), "Dataset saved manually (no model yet)");
         }
         Ok(())
     }
