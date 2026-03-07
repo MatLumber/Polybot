@@ -122,6 +122,10 @@ pub struct RiskConfig {
     pub checkpoint_trail_gap_roi: f64,
     /// Hard stop ROI
     pub hard_stop_roi: f64,
+    /// Take profit limit percentage (e.g. 0.15 = 15%)
+    pub take_profit_pct: f64,
+    /// Trailing stop limit percentage (e.g. 0.03 = 3%)
+    pub trailing_stop_pct: f64,
     /// Time-stop threshold to expiry
     pub time_stop_seconds_to_expiry: i64,
     /// Exposure limits
@@ -374,6 +378,8 @@ impl AppConfig {
             .set_default("risk.checkpoint_initial_floor_roi", 0.022)?
             .set_default("risk.checkpoint_trail_gap_roi", 0.012)?
             .set_default("risk.hard_stop_roi", -0.07)?
+            .set_default("risk.take_profit_pct", 0.15)?
+            .set_default("risk.trailing_stop_pct", 0.05)?
             .set_default("risk.time_stop_seconds_to_expiry", 90)?
             .set_default("risk.max_open_exposure_total", 0.12)?
             .set_default("risk.max_open_exposure_asset", 0.04)?

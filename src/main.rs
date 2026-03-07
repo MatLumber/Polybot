@@ -272,6 +272,8 @@ async fn main() -> Result<()> {
         * config.risk.max_open_positions as f64)
         .max(config.risk.max_position_usdc);
     risk_cfg.min_confidence = config.strategy.min_confidence.max(0.01).min(0.99);
+    risk_cfg.take_profit_pct = config.risk.take_profit_pct;
+    risk_cfg.trailing_stop_pct = config.risk.trailing_stop_pct;
 
     // Scale confidence thresholds to match strategy min_confidence
     let mc = risk_cfg.min_confidence;
@@ -2056,7 +2058,7 @@ async fn main() -> Result<()> {
                                     )
                                     .with_auth(config.execution.signature_type, None, None);
                                     close_order.condition_id = pos.condition_id.clone();
-                                    close_order.order_type = Some("FOK".to_string());
+                                    close_order.order_type = Some("FAK".to_string());
                                     close_order.expiration = 0;
                                     let sell_filled = match position_client
                                         .execute_sell_confirmed(&close_order, 3)
