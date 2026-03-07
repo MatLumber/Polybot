@@ -237,6 +237,12 @@ pub struct Features {
     pub intra_window_volatility: Option<f64>,
     /// Price range within current window (high - low) / open
     pub intra_window_range: Option<f64>,
+    /// Upper shadow ratio: (window_high - close) / (window_high - window_low), [0, 1]
+    /// High = price rejected from highs (bearish pressure)
+    pub window_upper_shadow: Option<f64>,
+    /// Lower shadow ratio: (close - window_low) / (window_high - window_low), [0, 1]
+    /// High = price bounced from lows (bullish pressure)
+    pub window_lower_shadow: Option<f64>,
 
     /// Market timing score (-1.0 to 1.0)
     /// Positive = good time to enter UP, Negative = good time to enter DOWN
@@ -609,6 +615,15 @@ impl FeatureEngine {
                 // Intra-window range
                 let range = (window_high - window_low) / start_price;
                 features.intra_window_range = Some(range);
+
+                // Intra-window shadow ratios (wick analysis)
+                let wick_range = window_high - window_low;
+                if wick_range > 1e-8 {
+                    let upper_shadow = (window_high - last.close) / wick_range;
+                    let lower_shadow = (last.close - window_low) / wick_range;
+                    features.window_upper_shadow = Some(upper_shadow.clamp(0.0, 1.0));
+                    features.window_lower_shadow = Some(lower_shadow.clamp(0.0, 1.0));
+                }
 
                 // Window progress (how far into the window are we)
                 // FIX: Use current time, not candle open time

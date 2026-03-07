@@ -41,8 +41,11 @@ struct WindowObservation {
 pub struct V3Strategy {
     /// ML Engine configuration
     config: MLEngineConfig,
-    /// Ensemble predictor with RF, GB, LR models
+    /// Ensemble predictor with RF, GB, LR models (shared, all assets/timeframes)
     predictor: Option<MLPredictor>,
+    /// Per-asset predictors (BTC, ETH) — trained when asset has >= min_samples.
+    /// Preferred over shared predictor when available (better asset-specific patterns).
+    asset_predictors: HashMap<Asset, MLPredictor>,
     /// Feature engineering engine
     feature_engine: FeatureEngine,
     /// Smart filters for trade validation
@@ -180,6 +183,7 @@ impl V3Strategy {
         let mut strategy = Self {
             config: ml_config.clone(),
             predictor,
+            asset_predictors: HashMap::new(),
             feature_engine: FeatureEngine::new(),
             filter_engine,
             training_pipeline,
@@ -454,8 +458,10 @@ impl V3Strategy {
             }
         }
 
-        // Check if ML is enabled and models are trained
-        let ml_available = self.config.enabled && self.predictor.is_some();
+        // Check if ML is enabled and models are trained.
+        // ml_available if shared predictor exists OR an asset-specific predictor exists.
+        let ml_available = self.config.enabled
+            && (self.predictor.is_some() || self.asset_predictors.contains_key(&asset));
         let dataset_size = self.dataset.len();
         let min_samples = self.config.training.min_samples_for_training;
 
@@ -464,6 +470,7 @@ impl V3Strategy {
             ?timeframe,
             ml_enabled = self.config.enabled,
             predictor_loaded = self.predictor.is_some(),
+            asset_predictor_loaded = self.asset_predictors.contains_key(&asset),
             dataset_size,
             min_samples_required = min_samples,
             "ML status check"
@@ -549,7 +556,14 @@ impl V3Strategy {
         features: &crate::features::Features,
         _context: &crate::ml_engine::features::MarketContext,
     ) -> Option<GeneratedSignal> {
-        let predictor = self.predictor.as_ref()?;
+        // Prefer asset-specific predictor; fall back to shared predictor.
+        let predictor: &MLPredictor = if let Some(p) = self.asset_predictors.get(&features.asset) {
+            p
+        } else if let Some(ref p) = self.predictor {
+            p
+        } else {
+            return None;
+        };
         let prediction = predictor.predict(ml_features)?;
 
         tracing::debug!(
@@ -641,11 +655,12 @@ impl V3Strategy {
         // Calculate final confidence: blend model confidence with edge strength.
         // Previous formula (model_conf * edge * 2.0) required prob_up > 0.76 to pass
         // min_confidence=0.52, which silently rejected every ML signal.
-        // New formula: confidence = model_conf * (0.5 + edge).
-        // At edge=0.15 (prob_up=0.65): confidence = model_conf * 0.65
-        // At edge=0.30 (prob_up=0.80): confidence = model_conf * 0.80
+        // New formula: confidence = model_conf * (0.7 + edge).
+        // At edge=0.05 (prob_up=0.55): confidence = model_conf * 0.75 → model_conf=0.70 passes 0.52
+        // At edge=0.15 (prob_up=0.65): confidence = model_conf * 0.85
+        // At edge=0.30 (prob_up=0.80): confidence = model_conf * 1.00
         let edge = (prediction.prob_up - 0.5).abs();
-        let confidence = (prediction.confidence * (0.5 + edge)).clamp(0.0, 1.0);
+        let confidence = (prediction.confidence * (0.7 + edge)).clamp(0.0, 1.0);
 
         // Require a minimum edge (at least 5% = prob_up > 0.55 or < 0.45)
         if edge < 0.05 {
@@ -787,8 +802,8 @@ impl V3Strategy {
             return None;
         }
 
-        // Require full alignment: EMA(1.0) + MACD(0.5) + HA(0.5) = 2.0 â€” all 3 must agree
-        if score.abs() < 2.0 {
+        // Require 2-of-3 alignment: EMA(1.0) + MACD(0.5) + HA(0.5) ≥ 1.5 (2-of-3 sufficient)
+        if score.abs() < 1.5 {
             tracing::info!(
                 ?features.asset,
                 ?features.timeframe,
@@ -933,6 +948,50 @@ impl V3Strategy {
             );
         } else {
             warn!("âš ï¸ Predictor is None, cannot train. ML may be disabled.");
+        }
+
+        // Train per-asset predictors when each asset has sufficient data.
+        // Asset-specific models capture BTC vs ETH dynamics better than the shared model.
+        let min_samples = self.config.training.min_samples_for_training;
+        let unique_assets: std::collections::HashSet<Asset> =
+            self.dataset.samples.iter().map(|s| s.asset).collect();
+        for asset in unique_assets {
+            let asset_samples: Vec<_> = self
+                .dataset
+                .samples
+                .iter()
+                .filter(|s| s.asset == asset)
+                .cloned()
+                .collect();
+            if asset_samples.len() < min_samples {
+                tracing::info!(
+                    ?asset,
+                    samples = asset_samples.len(),
+                    min_required = min_samples,
+                    "Per-asset predictor not ready yet (insufficient samples)"
+                );
+                continue;
+            }
+            let mut asset_dataset = crate::ml_engine::dataset::Dataset::new();
+            for s in asset_samples {
+                asset_dataset.samples.push(s);
+            }
+            asset_dataset.balance_classes();
+            let weights =
+                crate::ml_engine::models::EnsembleWeights::from_config(&self.config.ensemble);
+            let mut asset_predictor = crate::ml_engine::models::MLPredictor::new(weights);
+            match asset_predictor.train(&asset_dataset) {
+                Ok(()) => {
+                    info!(
+                        "✅ Per-asset predictor trained for {:?}: {} samples, {:.2}% accuracy",
+                        asset,
+                        asset_dataset.len(),
+                        asset_predictor.ensemble_accuracy() * 100.0
+                    );
+                    self.asset_predictors.insert(asset, asset_predictor);
+                }
+                Err(e) => warn!("⚠️ Per-asset predictor training failed for {:?}: {}", asset, e),
+            }
         }
 
         // Run walk-forward validation
@@ -1086,6 +1145,13 @@ impl V3Strategy {
                         trade_id = %trade_sample.trade_id,
                         "Missing predicted_prob_up; skipping predictor outcome update"
                     );
+                }
+            }
+            // Also update asset-specific predictor if one exists.
+            if let Some(ref mut asset_pred) = self.asset_predictors.get_mut(&asset) {
+                if let Some(prob) = trade_sample.predicted_prob_up {
+                    asset_pred.record_outcome(prob, is_win);
+                    asset_pred.adjust_weights_dynamically();
                 }
             }
 

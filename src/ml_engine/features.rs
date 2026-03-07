@@ -14,7 +14,8 @@ pub struct MLFeatureVector {
     pub rsi: f64,
     /// RSI normalizado (-1 a 1)
     pub rsi_normalized: f64,
-    /// Divergencia RSI (1 = bullish div, -1 = bearish div, 0 = none)
+    /// Divergencia RSI — never computed, kept for serde compat only
+    #[serde(default)]
     pub rsi_divergence: f64,
 
     /// MACD line
@@ -174,6 +175,14 @@ pub struct MLFeatureVector {
     /// High value = market has strong consensus (little room for edge).
     /// Low value = market is uncertain (50/50) — more room for ML divergence.
     pub market_certainty: f64,
+
+    // ============ Intra-Window Wicks ============
+    /// Upper shadow ratio: (window_high - close) / (window_high - window_low), [0, 1].
+    /// High = price rejected from the highs (bearish pressure).
+    pub window_upper_shadow: f64,
+    /// Lower shadow ratio: (close - window_low) / (window_high - window_low), [0, 1].
+    /// High = price bounced from the lows (bullish pressure).
+    pub window_lower_shadow: f64,
 }
 
 impl MLFeatureVector {
@@ -185,7 +194,7 @@ impl MLFeatureVector {
         vec![
             self.rsi,
             self.rsi_normalized,
-            self.rsi_divergence,
+            // rsi_divergence REMOVED (always 0.0, adds noise)
             self.macd,
             self.macd_signal,
             self.macd_histogram,
@@ -249,18 +258,21 @@ impl MLFeatureVector {
             self.price_vs_strike_pct,
             // Market Edge (1)
             self.market_certainty,
+            // Intra-Window Wicks (2)
+            self.window_upper_shadow,
+            self.window_lower_shadow,
         ]
     }
 
-    /// Número total de features (56 + 1 market_certainty = 57)
-    pub const NUM_FEATURES: usize = 57;
+    /// 57 (prior) - 1 (rsi_divergence removed) + 2 (window_upper/lower_shadow added) = 58
+    pub const NUM_FEATURES: usize = 58;
 
     /// Nombres de las features (para importancia)
     pub fn feature_names() -> Vec<&'static str> {
         vec![
             "rsi",
             "rsi_normalized",
-            "rsi_divergence",
+            // rsi_divergence removed
             "macd",
             "macd_signal",
             "macd_histogram",
@@ -318,6 +330,9 @@ impl MLFeatureVector {
             "price_vs_strike_pct",
             // Market Edge
             "market_certainty",
+            // Intra-Window Wicks
+            "window_upper_shadow",
+            "window_lower_shadow",
         ]
     }
 }
@@ -446,6 +461,10 @@ impl FeatureEngine {
         // market_certainty = how far the token price is from 50% (market consensus strength).
         // Range [0, 0.49]. High = market is certain (less room for ML divergence).
         ml_features.market_certainty = (ml_features.polymarket_price - 0.5).abs();
+
+        // ============ Intra-Window Wicks ============
+        ml_features.window_upper_shadow = features.window_upper_shadow.unwrap_or(0.5);
+        ml_features.window_lower_shadow = features.window_lower_shadow.unwrap_or(0.5);
 
         // Guardar en historial
         self.feature_history

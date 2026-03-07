@@ -56,12 +56,12 @@ ml_engine:
   # Smart filters
   # Late-entry gate
   # 0.85 = allow entries until 85% of window life (while still avoiding the final stretch).
-  max_window_progress: 0.85
+  max_window_progress: 0.65
   # Keep at least 1 minute before expiry for new entries
   min_time_to_close_minutes: 1.0
-  max_spread_bps_15m: 500     # ~5% spread on token price (hard cap; 800bps = illiquid)
-  max_spread_bps_1h: 700      # 1h markets tolerate slightly wider spread
-  min_depth_usdc: 0
+  max_spread_bps_15m: 150     # 1.5% spread max — needs ~4% edge to be profitable after fees
+  max_spread_bps_1h: 200      # 2% spread max for 1h markets
+  min_depth_usdc: 300         # require $300 minimum depth to avoid illiquid phantom wins
   max_volatility_5m: 0.10
   optimal_hours_only: false
 
@@ -117,8 +117,9 @@ risk:
   checkpoint_initial_floor_roi: 0.03
   # Trail gap for checkpoint floor growth.
   checkpoint_trail_gap_roi: 0.03
-  hard_stop_roi: -0.045
-  time_stop_seconds_to_expiry: 300
+  hard_stop_roi: -0.10
+  time_stop_seconds_to_expiry: 300      # 1h markets: close 5 min before expiry
+  time_stop_seconds_to_expiry_15m: 90   # 15m markets: close 90s before expiry
 
 # ============================================================================
 # PAPER TRADING

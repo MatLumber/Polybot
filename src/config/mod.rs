@@ -126,8 +126,10 @@ pub struct RiskConfig {
     pub take_profit_pct: f64,
     /// Trailing stop limit percentage (e.g. 0.03 = 3%)
     pub trailing_stop_pct: f64,
-    /// Time-stop threshold to expiry
+    /// Time-stop threshold to expiry (used for 1h markets)
     pub time_stop_seconds_to_expiry: i64,
+    /// Time-stop threshold for 15m markets (shorter window needs tighter exit)
+    pub time_stop_seconds_to_expiry_15m: i64,
     /// Exposure limits
     pub max_open_exposure_total: f64,
     pub max_open_exposure_asset: f64,
@@ -380,7 +382,8 @@ impl AppConfig {
             .set_default("risk.hard_stop_roi", -0.25)?
             .set_default("risk.take_profit_pct", 0.20)?
             .set_default("risk.trailing_stop_pct", 0.15)?
-            .set_default("risk.time_stop_seconds_to_expiry", 90)?
+            .set_default("risk.time_stop_seconds_to_expiry", 300)?
+            .set_default("risk.time_stop_seconds_to_expiry_15m", 90)?
             .set_default("risk.max_open_exposure_total", 0.12)?
             .set_default("risk.max_open_exposure_asset", 0.04)?
             .set_default("risk.max_open_exposure_market", 0.015)?

@@ -228,8 +228,10 @@ pub struct PaperTradingConfig {
     pub checkpoint_trail_gap_roi: f64,
     /// Hard stop ROI baseline.
     pub hard_stop_roi: f64,
-    /// Time-stop threshold in seconds to expiry
+    /// Time-stop threshold in seconds to expiry (1h markets)
     pub time_stop_seconds_to_expiry: i64,
+    /// Time-stop threshold for 15m markets (shorter window)
+    pub time_stop_seconds_to_expiry_15m: i64,
     /// Kelly sizing toggle and parameters
     pub kelly_enabled: bool,
     pub kelly_fraction_15m: f64,
@@ -263,7 +265,8 @@ impl Default for PaperTradingConfig {
             checkpoint_initial_floor_roi: 0.022,
             checkpoint_trail_gap_roi: 0.012,
             hard_stop_roi: -0.07,
-            time_stop_seconds_to_expiry: 90,
+            time_stop_seconds_to_expiry: 300,
+            time_stop_seconds_to_expiry_15m: 90,
             kelly_enabled: true,
             kelly_fraction_15m: 0.25,
             kelly_fraction_1h: 0.50,
@@ -1536,7 +1539,11 @@ impl PaperTradingEngine {
 
                 if pos.market_close_ts > 0 {
                     let secs_to_expiry = ((pos.market_close_ts - now) / 1000).max(0);
-                    if secs_to_expiry <= self.config.time_stop_seconds_to_expiry {
+                    let time_stop_threshold = match pos.timeframe {
+                        Timeframe::Min15 => self.config.time_stop_seconds_to_expiry_15m,
+                        _ => self.config.time_stop_seconds_to_expiry,
+                    };
+                    if secs_to_expiry <= time_stop_threshold {
                         let p_market = mid_share.clamp(0.01, 0.99);
                         let p_model = pos.confidence.clamp(0.01, 0.99);
                         let spread = (ask_share - bid_share).max(0.0);
@@ -1855,8 +1862,22 @@ impl PaperTradingEngine {
             Timeframe::Min15 => (self.config.kelly_fraction_15m, self.config.kelly_cap_15m),
             Timeframe::Hour1 => (self.config.kelly_fraction_1h, self.config.kelly_cap_1h),
         };
+        // Dynamic uncertainty: when win_rate < 50%, inflate sigma to reduce Kelly size.
+        // With >= 10 closed trades: sigma = max(0.05, 0.50 - win_rate).
+        // At 60% win_rate: sigma = max(0.05, -0.10) = 0.05 (same as before).
+        // At 45% win_rate: sigma = max(0.05, 0.05) = 0.05.
+        // At 40% win_rate: sigma = max(0.05, 0.10) = 0.10 (more conservative).
+        let kelly_sigma = {
+            let stats = self.stats.read().unwrap();
+            if stats.total_trades >= 10 {
+                let win_rate = stats.wins as f64 / stats.total_trades as f64;
+                (0.50 - win_rate).max(0.05)
+            } else {
+                0.05
+            }
+        };
         let kelly_quote =
-            compute_fractional_kelly(p_model, 0.05, share_price, kelly_fraction, kelly_cap);
+            compute_fractional_kelly(p_model, kelly_sigma, share_price, kelly_fraction, kelly_cap);
 
         let max_per_trade = available_balance * 0.15;
         let max_total = available_balance * 0.50;
