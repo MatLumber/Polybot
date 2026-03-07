@@ -289,7 +289,7 @@ pub async fn sign_order(order: &mut Order, private_key: &str, chain_id: u64) -> 
     order.signer = Some(signer);
 
     if order.salt.is_zero() {
-        order.salt = U256::from(rand::random::<u64>());
+        order.salt = U256::from(rand::random::<u32>());
     }
 
     let typed = order_typed_data(order, maker, signer, chain_id)?;
