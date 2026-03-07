@@ -88,7 +88,6 @@ fn live_context_is_viable(context: &LivePositionContext) -> bool {
     context.shares_size > 0.0
         && context.entry_share_price > 0.0
         && context.size_usdc > 0.0
-        && !context.market_slug.trim().is_empty()
 }
 
 fn load_persisted_prediction_counters(data_dir: &str) -> Option<(usize, usize, usize)> {
@@ -1678,9 +1677,39 @@ async fn main() -> Result<()> {
                                 .get(&token_id)
                                 .cloned()
                         };
+                        // Backfill market_slug if it was empty when the position was opened.
+                        if let Some(ctx) = live_context.as_mut() {
+                            if ctx.market_slug.trim().is_empty() {
+                                let backfill_slug = pos.slug.clone()
+                                    .unwrap_or_default();
+                                if !backfill_slug.is_empty() {
+                                    ctx.market_slug = backfill_slug;
+                                    let mut contexts = live_contexts_for_monitor.lock().await;
+                                    if let Some(stored) = contexts.get_mut(&token_id) {
+                                        stored.market_slug = ctx.market_slug.clone();
+                                        persist_live_position_contexts(
+                                            &live_contexts_path_for_monitor,
+                                            &contexts,
+                                        );
+                                    }
+                                }
+                            }
+                        }
                         if live_context
                             .as_ref()
-                            .map(|ctx| !live_context_is_viable(ctx))
+                            .map(|ctx| {
+                                let viable = live_context_is_viable(ctx);
+                                if !viable {
+                                    tracing::debug!(
+                                        token_id = %token_id,
+                                        shares_size = ctx.shares_size,
+                                        entry_share_price = ctx.entry_share_price,
+                                        size_usdc = ctx.size_usdc,
+                                        "live_context_is_viable=false — removing context"
+                                    );
+                                }
+                                !viable
+                            })
                             .unwrap_or(false)
                         {
                             let mut contexts = live_contexts_for_monitor.lock().await;
@@ -1742,12 +1771,22 @@ async fn main() -> Result<()> {
                         };
 
                         if live_context.is_none() {
-                            if let (Some(asset), Some(timeframe)) = (
-                                infer_asset_from_market_text(&fallback_market_text)
-                                    .or_else(|| infer_asset_from_market_text(&pos.asset)),
+                            let inferred_asset = infer_asset_from_market_text(&fallback_market_text)
+                                .or_else(|| infer_asset_from_market_text(&pos.asset));
+                            let inferred_timeframe =
                                 parse_timeframe_from_market_text(&fallback_market_text)
-                                    .or_else(|| parse_timeframe_from_market_text(&pos.asset)),
-                            ) {
+                                    .or_else(|| parse_timeframe_from_market_text(&pos.asset));
+                            if inferred_asset.is_none() || inferred_timeframe.is_none() {
+                                tracing::debug!(
+                                    token_id = %token_id,
+                                    fallback_text = %fallback_market_text,
+                                    asset_text = %pos.asset,
+                                    inferred_asset = ?inferred_asset,
+                                    inferred_timeframe = ?inferred_timeframe,
+                                    "Cannot rehydrate live context — asset or timeframe could not be inferred from market text"
+                                );
+                            }
+                            if let (Some(asset), Some(timeframe)) = (inferred_asset, inferred_timeframe) {
                                 let inferred_context = LivePositionContext {
                                     signal_id: format!("rehydrated_{}", token_id),
                                     asset,
@@ -2018,13 +2057,11 @@ async fn main() -> Result<()> {
                                     .with_auth(config.execution.signature_type, None, None);
                                     let mut close_order = close_order;
                                     close_order.condition_id = pos.condition_id.clone();
-                                    match position_client.execute_order(&close_order).await {
-                                        Ok(_) => {
-                                            live_sell_retries_for_monitor
-                                                .lock()
-                                                .await
-                                                .remove(&token_id);
-                                        }
+                                    let sell_filled = match position_client
+                                        .execute_sell_confirmed(&close_order, 3)
+                                        .await
+                                    {
+                                        Ok(filled) => filled,
                                         Err(e) => {
                                             let retries = {
                                                 let mut retries_map =
@@ -2054,7 +2091,7 @@ async fn main() -> Result<()> {
                                                     error = %e,
                                                     token_id = %token_id,
                                                     retries = retries,
-                                                    "SELL order failed — will retry next tick"
+                                                    "SELL execute_sell_confirmed error — will retry next tick"
                                                 );
                                                 live_pending_closes_for_monitor
                                                     .lock()
@@ -2063,7 +2100,26 @@ async fn main() -> Result<()> {
                                             }
                                             continue;
                                         }
+                                    };
+                                    if !sell_filled {
+                                        tracing::error!(
+                                            token_id = %token_id,
+                                            "SELL could not be confirmed filled after 3 attempts — keeping position tracked"
+                                        );
+                                        live_sell_retries_for_monitor
+                                            .lock()
+                                            .await
+                                            .remove(&token_id);
+                                        live_pending_closes_for_monitor
+                                            .lock()
+                                            .await
+                                            .remove(&token_id);
+                                        continue;
                                     }
+                                    live_sell_retries_for_monitor
+                                        .lock()
+                                        .await
+                                        .remove(&token_id);
                                     close_order.price
                                 };
 
@@ -3885,6 +3941,8 @@ fn parse_timeframe_from_market_text(raw: &str) -> Option<Timeframe> {
         || text.contains("min15")
         || text.contains("m15")
         || text.contains("15 min")
+        || text.contains("15-min")
+        || text.contains("15min")
         || text.contains("15-minute")
         || text.contains("15 minute")
         || text.contains("updown-15m")
@@ -3900,7 +3958,43 @@ fn parse_timeframe_from_market_text(raw: &str) -> Option<Timeframe> {
         || text.contains("60-minute")
         || text.contains("updown-1h")
         || looks_like_hourly_updown_market_text(&text)
+        || looks_like_hourly_updown_time_slug(&text)
     {
+        return Some(Timeframe::Hour1);
+    }
+    // For "will-X-be-above-Y-at-HH-MM" slugs: if the time suffix ends in -00 it's
+    // top-of-hour (Hour1); any other minute value (e.g. -15, -30, -45) → Min15.
+    if let Some(tf) = infer_timeframe_from_time_suffix(&text) {
+        return Some(tf);
+    }
+    None
+}
+
+/// Matches slugs like "will-btc-be-above-93000-at-3-00-pm-et" (top of hour → Hour1).
+fn looks_like_hourly_updown_time_slug(text: &str) -> bool {
+    // "will-" prefix indicates a Polymarket binary "will X be above/below Y" market.
+    if !text.starts_with("will-") && !text.contains("will-btc") && !text.contains("will-eth") {
+        return false;
+    }
+    // If the slug ends with an on-the-hour pattern like "-3-00-pm" or "-12-00-am"
+    // but NOT a non-zero minute like "-3-15-pm".
+    let re_hour = ["-0-00-", "-1-00-", "-2-00-", "-3-00-", "-4-00-",
+                   "-5-00-", "-6-00-", "-7-00-", "-8-00-", "-9-00-",
+                   "-10-00-", "-11-00-", "-12-00-"];
+    re_hour.iter().any(|pat| text.contains(pat))
+}
+
+/// For slugs containing a time suffix "-HH-MM-" where MM != 00, infer Min15.
+fn infer_timeframe_from_time_suffix(text: &str) -> Option<Timeframe> {
+    // Match minute values that indicate sub-hour windows.
+    let min15_patterns = ["-15-pm", "-15-am", "-30-pm", "-30-am", "-45-pm", "-45-am",
+                          "-15-et", "-30-et", "-45-et"];
+    if min15_patterns.iter().any(|pat| text.contains(pat)) {
+        return Some(Timeframe::Min15);
+    }
+    // On-the-hour → Hour1.
+    let hour_patterns = ["-00-pm", "-00-am", "-00-et"];
+    if hour_patterns.iter().any(|pat| text.contains(pat)) {
         return Some(Timeframe::Hour1);
     }
     None

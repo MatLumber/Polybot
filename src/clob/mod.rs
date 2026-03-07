@@ -460,6 +460,82 @@ impl ClobClient {
         self.execute_order_with_policy(order).await
     }
 
+    /// Execute a SELL order and confirm it was actually filled before returning.
+    ///
+    /// Returns `Ok(true)` if the order was filled, `Ok(false)` if all attempts
+    /// failed to produce a confirmed fill (caller should NOT remove position from tracking).
+    pub async fn execute_sell_confirmed(
+        &self,
+        order: &Order,
+        max_attempts: u32,
+    ) -> Result<bool> {
+        for attempt in 1..=max_attempts {
+            let mut sell_order = order.clone();
+            // On retries, lower the ask price by one tick to be more aggressive.
+            if attempt > 1 {
+                sell_order.price = (sell_order.price - 0.01).max(0.01);
+            }
+
+            let order_id = match self.submit_order(&sell_order).await {
+                Ok(id) => id,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        token_id = %order.token_id,
+                        attempt = attempt,
+                        "SELL submit_order failed"
+                    );
+                    continue;
+                }
+            };
+
+            tracing::info!(
+                token_id = %order.token_id,
+                attempt = attempt,
+                max_attempts = max_attempts,
+                order_id = %order_id,
+                price = sell_order.price,
+                "SELL order placed — waiting for fill confirmation"
+            );
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(4)).await;
+
+            let filled = match self.rest.get_order(&order_id).await {
+                Ok(remote) => matches!(remote.status, OrderStatus::Filled),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        token_id = %order.token_id,
+                        order_id = %order_id,
+                        "Failed to fetch SELL order status — assuming unfilled"
+                    );
+                    false
+                }
+            };
+
+            if filled {
+                tracing::info!(
+                    token_id = %order.token_id,
+                    order_id = %order_id,
+                    attempt = attempt,
+                    "SELL order confirmed filled"
+                );
+                return Ok(true);
+            }
+
+            tracing::warn!(
+                token_id = %order.token_id,
+                order_id = %order_id,
+                attempt = attempt,
+                max_attempts = max_attempts,
+                "SELL order placed but not filled — cancelling and repricing"
+            );
+            let _ = self.rest.cancel_order(&order_id).await;
+        }
+
+        Ok(false)
+    }
+
     /// Initialize the client (derive API keys if needed)
     pub async fn initialize(&self) -> Result<()> {
         if !self.dry_run {
