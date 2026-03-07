@@ -733,6 +733,10 @@ impl RestClient {
 
         let (maker_amount, taker_amount) = order_amounts(order)?;
 
+        let side_num: u8 = match order.side {
+            Side::Buy => 0,
+            Side::Sell => 1,
+        };
         let side_label = match order.side {
             Side::Buy => "BUY",
             Side::Sell => "SELL",
@@ -754,7 +758,7 @@ impl RestClient {
                 "expiration": order.expiration.to_string(),
                 "nonce": order.nonce.to_string(),
                 "feeRateBps": fee_rate_bps.to_string(),
-                "side": side_label,
+                "side": side_num,
                 "signatureType": order.signature_type,
                 "signature": signature
             },
