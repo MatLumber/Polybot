@@ -1648,10 +1648,11 @@ async fn main() -> Result<()> {
                             continue;
                         }
 
+                        let token_id = pos.token_id.clone().unwrap_or_else(|| pos.asset.clone());
                         let avg_price = parse_position_number(Some(&pos.avg_price)).unwrap_or(0.0);
                         let current_value =
                             parse_position_number(pos.current_value.as_deref()).unwrap_or(0.0);
-                        let current_price = parse_position_number(pos.current_price.as_deref())
+                        let fallback_price = parse_position_number(pos.current_price.as_deref())
                             .or_else(|| {
                                 if current_value > 0.0 && size > 0.0 {
                                     Some(current_value / size)
@@ -1660,7 +1661,11 @@ async fn main() -> Result<()> {
                                 }
                             })
                             .unwrap_or(avg_price);
-                        let token_id = pos.token_id.clone().unwrap_or_else(|| pos.asset.clone());
+
+                        let current_price = match position_client.quote_token(&token_id).await {
+                            Ok(quote) if quote.bid >= 0.01 => quote.bid.clamp(0.01, 1.0),
+                            _ => fallback_price,
+                        };
                         if pos.redeemable {
                             let mut contexts = live_contexts_for_monitor.lock().await;
                             if contexts.remove(&token_id).is_some() {

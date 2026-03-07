@@ -82,14 +82,14 @@ impl Default for RiskConfig {
             min_confidence: 0.72,     // Match strategy min_confidence
             confidence_scale: ConfidenceScale::default(),
             max_trades_per_day: 10,          // Fewer, higher quality trades
-            trailing_stop_pct: 0.03,         // 3% trailing stop
-            take_profit_pct: 0.05,           // 5% take-profit
+            trailing_stop_pct: 0.15,         // 15% trailing stop
+            take_profit_pct: 0.20,           // 20% take-profit
             max_hold_duration_ms: 7_200_000, // 2 hours
             kill_switch_enabled: true,
             checkpoint_arm_roi: 0.05,
-            checkpoint_initial_floor_roi: 0.022,
-            checkpoint_trail_gap_roi: 0.012,
-            hard_stop_roi: -0.07,
+            checkpoint_initial_floor_roi: 0.05,
+            checkpoint_trail_gap_roi: 0.03,
+            hard_stop_roi: -0.25,
         }
     }
 }
