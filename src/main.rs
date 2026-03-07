@@ -2008,7 +2008,7 @@ async fn main() -> Result<()> {
                                         None
                                     };
 
-                                let exit_share_price = if official_result.as_deref() == Some("WIN")
+                                let (exit_share_price, final_exit_reason) = if official_result.as_deref() == Some("WIN")
                                 {
                                     if let Some(condition_id) = pos.condition_id.as_deref() {
                                         let redeem_key = format!("{}:{}", condition_id, token_id);
@@ -2040,10 +2040,27 @@ async fn main() -> Result<()> {
                                             continue;
                                         }
                                     }
-                                    1.0
+                                    (1.0, "RESOLUTION_WIN".to_string())
                                 } else if official_result.as_deref() == Some("LOSS") {
-                                    0.0
+                                    (0.0, "RESOLUTION_LOSS".to_string())
                                 } else {
+                                    let now_ms = chrono::Utc::now().timestamp_millis();
+                                    let is_expired = live_context.as_ref()
+                                        .map(|ctx| now_ms > (ctx.expires_at_ms + 60_000))
+                                        .unwrap_or(false);
+
+                                    if is_expired {
+                                        tracing::info!(
+                                            token_id = %token_id,
+                                            "Market is expired. Awaiting UMA resolution, skipping CLOB sell"
+                                        );
+                                        live_pending_closes_for_monitor
+                                            .lock()
+                                            .await
+                                            .remove(&token_id);
+                                        continue;
+                                    }
+
                                     let quote = match position_client.quote_token(&token_id).await {
                                         Ok(quote) => quote,
                                         Err(e) => {
@@ -2128,7 +2145,7 @@ async fn main() -> Result<()> {
                                         .lock()
                                         .await
                                         .remove(&token_id);
-                                    close_order.price
+                                    (close_order.price, exit_reason.to_string())
                                 };
 
                                 let _ = position_risk_for_monitor
@@ -2163,7 +2180,7 @@ async fn main() -> Result<()> {
                                     size,
                                     pnl,
                                     internal_result: internal_result.to_string(),
-                                    exit_reason: exit_reason.to_string(),
+                                    exit_reason: final_exit_reason.clone(),
                                     official_result: official_result.clone(),
                                 };
                                 position_tracker.record_winloss(record.clone());

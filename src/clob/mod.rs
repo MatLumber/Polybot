@@ -874,7 +874,7 @@ impl ClobClient {
                     .as_deref()
                     .map(|s| s.eq_ignore_ascii_case("resolved"))
                     .unwrap_or(false);
-                if !closed && !uma_resolved {
+                if !uma_resolved {
                     return None;
                 }
 
