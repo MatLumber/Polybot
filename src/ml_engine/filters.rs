@@ -199,7 +199,9 @@ impl SmartFilterEngine {
 
     /// Check 1: Suficiente liquidez
     fn check_liquidity(&self, context: &FilterContext) -> Option<FilterDecision> {
-        if context.orderbook_depth < self.config.min_depth_usdc {
+        // Only reject if depth data is actually populated (> 0). A depth of 0
+        // means no orderbook data yet — skip rather than block all signals.
+        if context.orderbook_depth > 0.0 && context.orderbook_depth < self.config.min_depth_usdc {
             return Some(FilterDecision::Reject(FilterReason::InsufficientLiquidity));
         }
         None
