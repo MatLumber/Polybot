@@ -592,19 +592,17 @@ impl RiskManager {
             position.hard_stop_breach_ticks = 0;
         }
 
-        if position.hard_stop_breach_ticks >= 1 {
-            return Some(ExitReason::HardStop);
-        }
-
-        // Check time-based expiry
+        // Check time-based expiry BEFORE price stops — expired markets must always exit
         let now = Utc::now().timestamp_millis();
-        // Check market expiry first (if we have it)
         if position.expires_at > 0 && now >= position.expires_at {
             return Some(ExitReason::MarketExpiry);
         }
-        // Fallback to max_hold_duration for backwards compatibility
         if now - position.opened_at > config.max_hold_duration_ms {
             return Some(ExitReason::TimeExpiry);
+        }
+
+        if position.hard_stop_breach_ticks >= 1 {
+            return Some(ExitReason::HardStop);
         }
 
         None
