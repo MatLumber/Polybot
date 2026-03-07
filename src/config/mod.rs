@@ -370,52 +370,52 @@ impl AppConfig {
             .set_default("strategy.reeval_interval_secs", 10)?
             .set_default("strategy.calibration_min_samples_per_market", 30)?
             // Risk defaults
-            .set_default("risk.max_position_usdc", 100.0)?
-            .set_default("risk.max_daily_loss_usdc", 500.0)?
+            .set_default("risk.max_position_usdc", 50.0)?
+            .set_default("risk.max_daily_loss_usdc", 500.0)? // Kill switch budget
             .set_default("risk.max_open_positions", 5)?
-            .set_default("risk.max_drawdown_pct", 10.0)?
+            .set_default("risk.max_drawdown_pct", 0.15)? // Re-evaluate logic if down 15%
             .set_default("risk.kill_switch_enabled", true)?
-            .set_default("risk.min_oracle_confidence", 0.7)?
-            .set_default("risk.checkpoint_arm_roi", 0.05)?
+            .set_default("risk.min_oracle_confidence", 0.8)? // Need high confidence in feed
+            .set_default("risk.checkpoint_arm_roi", 0.10)?
             .set_default("risk.checkpoint_initial_floor_roi", 0.05)?
-            .set_default("risk.checkpoint_trail_gap_roi", 0.03)?
-            .set_default("risk.hard_stop_roi", -0.25)?
-            .set_default("risk.take_profit_pct", 0.20)?
-            .set_default("risk.trailing_stop_pct", 0.15)?
-            .set_default("risk.time_stop_seconds_to_expiry", 300)?
-            .set_default("risk.time_stop_seconds_to_expiry_15m", 90)?
-            .set_default("risk.max_open_exposure_total", 0.12)?
-            .set_default("risk.max_open_exposure_asset", 0.04)?
-            .set_default("risk.max_open_exposure_market", 0.015)?
+            .set_default("risk.checkpoint_trail_gap_roi", 0.05)? // Allow 5% breathing room
+            .set_default("risk.hard_stop_roi", -0.07)? // 7% absolute hard stop on position
+            .set_default("risk.take_profit_pct", 0.40)?
+            .set_default("risk.trailing_stop_pct", 0.30)?
+            .set_default("risk.time_stop_seconds_to_expiry", 600)? // 10 minutes (for 1h markets)
+            .set_default("risk.time_stop_seconds_to_expiry_15m", 300)? // 5 minutes for 15m markets
+            .set_default("risk.max_open_exposure_total", 200.0)? // Total simultaneous risk
+            .set_default("risk.max_open_exposure_asset", 100.0)? // Max risk per base asset
+            .set_default("risk.max_open_exposure_market", 50.0)? // Max risk per specific market
             // Execution defaults
             .set_default("execution.clob_url", "https://clob.polymarket.com")?
             .set_default("execution.gamma_url", "https://gamma-api.polymarket.com")?
             .set_default("execution.chain_id", 137)?
-            .set_default("execution.signature_type", 0)?
-            .set_default("execution.order_timeout_ms", 5000)?
+            .set_default("execution.signature_type", 1)? // 1 = Proxy wallet by default for live logic
+            .set_default("execution.order_timeout_ms", 10000)?
             .set_default("execution.max_retries", 3)?
-            .set_default("execution.market_refresh_secs", 300)?
+            .set_default("execution.market_refresh_secs", 60)?
             .set_default("execution.maker_first", true)?
             .set_default("execution.post_only", true)?
-            .set_default("execution.fallback_taker_seconds_to_expiry", 120)?
+            .set_default("execution.fallback_taker_seconds_to_expiry", 900)? // 15 mins
             // Kelly defaults
             .set_default("kelly.enabled", true)?
-            .set_default("kelly.fraction_15m", 0.25)?
-            .set_default("kelly.fraction_1h", 0.50)?
-            .set_default("kelly.max_bankroll_fraction_15m", 0.0035)?
-            .set_default("kelly.max_bankroll_fraction_1h", 0.0075)?
+            .set_default("kelly.fraction_15m", 0.5)?
+            .set_default("kelly.fraction_1h", 0.7)?
+            .set_default("kelly.max_bankroll_fraction_15m", 0.05)? // Max 5% of bankroll per 15m trade
+            .set_default("kelly.max_bankroll_fraction_1h", 0.10)? // Max 10% of bankroll per 1h trade
             // Persistence defaults
             .set_default("persistence.data_dir", "./data")?
             .set_default("persistence.csv_enabled", true)?
-            .set_default("persistence.record_features", false)?
-            .set_default("persistence.feature_record_interval_secs", 10)?
-            // Paper trading defaults
-            .set_default("paper_trading.enabled", true)?
+            .set_default("persistence.record_features", true)? // Need for ML
+            .set_default("persistence.feature_record_interval_secs", 60)?
+            // Paper Trading defaults
+            .set_default("paper_trading.enabled", false)?
             .set_default("paper_trading.initial_balance", 1000.0)?
-            .set_default("paper_trading.slippage_bps", 5.0)?
-            .set_default("paper_trading.fee_bps", 10.0)?
-            .set_default("paper_trading.trailing_stop_pct", 0.005)?
-            .set_default("paper_trading.take_profit_pct", 0.008)?
+            .set_default("paper_trading.slippage_bps", 10.0)? // 0.1% defaults
+            .set_default("paper_trading.fee_bps", 1.0)? // Standard 0.01% fee on CLOB?
+            .set_default("paper_trading.take_profit_pct", 0.40)?
+            .set_default("paper_trading.trailing_stop_pct", 0.30)?
             .set_default("paper_trading.max_hold_duration_ms", 7_200_000)?
             .set_default("paper_trading.dashboard_interval_secs", 30)?
             .set_default("paper_trading.prefer_chainlink", true)?
