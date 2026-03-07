@@ -754,7 +754,7 @@ impl RestClient {
                 "expiration": order.expiration.to_string(),
                 "nonce": order.nonce.to_string(),
                 "feeRateBps": fee_rate_bps.to_string(),
-                "side": side_num,
+                "side": side_label,
                 "signatureType": order.signature_type,
                 "signature": signature
             },
