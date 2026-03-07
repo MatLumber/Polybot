@@ -227,6 +227,32 @@ function reducer(state: DashboardStreamState, action: StreamAction): DashboardSt
         }
       }
 
+      if (message.type === 'LivePositionsUpdate') {
+        return {
+          ...nextState,
+          dashboard: {
+            ...state.dashboard,
+            live: {
+              ...state.dashboard.live,
+              openPositions: message.data.map(mapPosition),
+            },
+          },
+        }
+      }
+
+      if (message.type === 'LiveStatsUpdate') {
+        return {
+          ...nextState,
+          dashboard: {
+            ...state.dashboard,
+            live: {
+              ...state.dashboard.live,
+              stats: mapPaperStats(message.data), // LiveStatsResponse has identical schema to PaperStatsResponse
+            },
+          },
+        }
+      }
+
       // ML Messages
       if (message.type === 'MLStateUpdate') {
         return {

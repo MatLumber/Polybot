@@ -32,9 +32,14 @@ impl WebSocketBroadcaster {
         }
     }
 
-    /// Broadcast stats update
+    /// Broadcast paper stats update
     pub fn broadcast_stats(&self, stats: super::types::PaperStatsResponse) {
         self.broadcast(&WsMessage::StatsUpdate(stats));
+    }
+
+    /// Broadcast live stats update
+    pub fn broadcast_live_stats(&self, stats: super::types::LiveStatsResponse) {
+        self.broadcast(&WsMessage::LiveStatsUpdate(stats));
     }
 
     /// Broadcast new trade
@@ -74,6 +79,11 @@ impl WebSocketBroadcaster {
     /// Broadcast full paper positions snapshot
     pub fn broadcast_positions(&self, positions: Vec<super::types::PositionResponse>) {
         self.broadcast(&WsMessage::PositionsUpdate(positions));
+    }
+
+    /// Broadcast full live positions snapshot
+    pub fn broadcast_live_positions(&self, positions: Vec<super::types::PositionResponse>) {
+        self.broadcast(&WsMessage::LivePositionsUpdate(positions));
     }
 
     /// Broadcast heartbeat

@@ -141,6 +141,8 @@ pub struct PaperStatsResponse {
     pub trading_win_rate: f64,
 }
 
+pub type LiveStatsResponse = PaperStatsResponse;
+
 impl Default for PaperStatsResponse {
     fn default() -> Self {
         Self {
@@ -307,8 +309,10 @@ pub struct CalibrationQualityResponse {
 pub enum WsMessage {
     /// Full state update (sent on connect)
     FullState(DashboardState),
-    /// Stats updated
+    /// Stats updated (paper)
     StatsUpdate(PaperStatsResponse),
+    /// Stats updated (live)
+    LiveStatsUpdate(LiveStatsResponse),
     /// New trade closed
     NewTrade(TradeResponse),
     /// New signal generated
@@ -321,6 +325,8 @@ pub enum WsMessage {
     PositionClosed(PositionClosedPayload),
     /// Full paper positions snapshot (for real-time position PnL/time updates)
     PositionsUpdate(Vec<PositionResponse>),
+    /// Full live positions snapshot
+    LivePositionsUpdate(Vec<PositionResponse>),
     /// ML Engine state update
     MLStateUpdate(MLStateUpdatePayload),
     /// ML Prediction made

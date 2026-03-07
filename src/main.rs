@@ -2456,14 +2456,14 @@ async fn main() -> Result<()> {
                         *live_dashboard_memory_for_positions
                             .live_positions
                             .write()
-                            .await = live_dashboard_positions;
+                            .await = live_dashboard_positions.clone();
                         *live_dashboard_memory_for_positions
                             .live_unrealized_pnl
                             .write()
                             .await = total_live_unrealized;
-                        let state = live_dashboard_memory_for_positions.get_state().await;
+                        // Avoid broadcasting FullState to prevent chart freezing
                         live_dashboard_broadcaster_for_positions
-                            .broadcast(&WsMessage::FullState(state));
+                            .broadcast_live_positions(live_dashboard_positions);
                     }
                 }
                 Err(e) => {
@@ -2536,12 +2536,12 @@ async fn main() -> Result<()> {
                         }
                     }
                     // Update live dashboard memory with real wallet balance
+                    // Do NOT broadcast FullState here — it resets the chart on every balance tick.
+                    // Live positions loop (broadcast_live_positions every 5s) keeps the UI fresh.
                     #[cfg(feature = "dashboard")]
                     {
                         *live_dashboard_memory.live_balance.write().await = balance;
                         *live_dashboard_memory.live_locked.write().await = locked_in_positions;
-                        let state = live_dashboard_memory.get_state().await;
-                        live_dashboard_broadcaster.broadcast(&WsMessage::FullState(state));
                     }
                 }
                 Err(e) => {
@@ -3532,13 +3532,13 @@ async fn main() -> Result<()> {
                                             entry_share_price: exec_plan.entry_price,
                                             current_share_price: quote.mid,
                                         };
-                                        {
+                                        let snapshot = {
                                             let mut live_positions = live_main_dashboard_memory.live_positions.write().await;
                                             live_positions.retain(|existing| existing.id != position.id);
                                             live_positions.push(position);
-                                        }
-                                        let state = live_main_dashboard_memory.get_state().await;
-                                        main_loop_broadcaster.broadcast(&WsMessage::FullState(state));
+                                            live_positions.clone()
+                                        };
+                                        main_loop_broadcaster.broadcast_live_positions(snapshot);
                                     }
 
                                     info!(signal_id = %signal_id, order_id = %order_id, "📈 LIVE order submitted successfully");

@@ -232,15 +232,29 @@ export interface MLTrainingWire {
   timestamp: number
 }
 
+export interface SignalWire {
+  timestamp: number
+  signal_id: string
+  asset: string
+  timeframe: string
+  direction: string
+  confidence: number
+  entry_price: number
+  market_slug: string
+  expires_at: number
+}
+
 export type WsMessageWire =
   | { type: 'FullState'; data: DashboardStateWire }
   | { type: 'StatsUpdate'; data: PaperStatsWire }
+  | { type: 'LiveStatsUpdate'; data: PaperStatsWire }
   | { type: 'NewTrade'; data: TradeWire }
-  | { type: 'NewSignal'; data: unknown }
+  | { type: 'NewSignal'; data: SignalWire }
   | { type: 'PriceUpdate'; data: Record<string, AssetPriceWire> }
   | { type: 'PositionOpened'; data: PositionWire }
   | { type: 'PositionClosed'; data: { position_id: string; trade: TradeWire } }
   | { type: 'PositionsUpdate'; data: PositionWire[] }
+  | { type: 'LivePositionsUpdate'; data: PositionWire[] }
   | { type: 'MLStateUpdate'; data: MLStateWire }
   | { type: 'MLPrediction'; data: MLPredictionWire }
   | { type: 'MLMetricsUpdate'; data: MLMetricsWire }
