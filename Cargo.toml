@@ -11,7 +11,16 @@ repository = "https://github.com/polybot/polybot"
 
 [dependencies]
 # Async runtime
-tokio = { version = "1.35", features = ["full"] }
+tokio = { version = "1.35", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "net",
+    "io-util",
+    "signal",
+    "fs",
+] }
 
 # WebSocket
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
@@ -55,15 +64,11 @@ rust_decimal_macros = "1.33"
 async-trait = "0.1"
 tokio-stream = "0.1"
 
-# Technical analysis (we'll implement our own, but this helps)
-ta = "0.5"
 
 # ML / Data Science
 smartcore = { version = "0.4", features = ["serde", "ndarray-bindings"] }
 ndarray = { version = "0.15", features = ["serde"] }
 
-# Data storage
-bincode = "1.3"
 
 # Random for nonces
 rand = "0.8"
