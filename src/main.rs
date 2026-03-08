@@ -2139,6 +2139,22 @@ async fn main() -> Result<()> {
                                                 );
                                             }
                                         }
+                                        // Remove from risk manager so it no longer blocks new entries
+                                        // for the same asset+timeframe after market expiry.
+                                        use crate::risk::ExitReason;
+                                        let _ = position_risk_for_monitor
+                                            .close_position_by_token_id(
+                                                &token_id,
+                                                0.0,
+                                                ExitReason::MarketExpiry,
+                                            )
+                                            .or_else(|| {
+                                                position_risk_for_monitor.close_position(
+                                                    asset,
+                                                    0.0,
+                                                    ExitReason::MarketExpiry,
+                                                )
+                                            });
                                         live_pending_closes_for_monitor
                                             .lock()
                                             .await
