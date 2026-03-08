@@ -86,6 +86,11 @@ impl WebSocketBroadcaster {
         self.broadcast(&WsMessage::LivePositionsUpdate(positions));
     }
 
+    /// Broadcast a newly closed live trade so Recent Trades updates in real-time
+    pub fn broadcast_live_trade(&self, trade: super::types::TradeResponse) {
+        self.broadcast(&WsMessage::LiveTradeAdded(trade));
+    }
+
     /// Broadcast live balance update
     pub fn broadcast_live_balance(&self, balance: f64, locked: f64) {
         self.broadcast(&WsMessage::LiveBalanceUpdate(

@@ -2045,7 +2045,22 @@ async fn main() -> Result<()> {
                         }
 
                         if let Some(asset) = asset {
-                            if let Some(exit_reason) = position_risk_for_monitor
+                            // Token price stop loss: if share price drops to ≤10¢ the position
+                            // is almost certainly lost — sell immediately to cut losses and
+                            // ensure the trade is recorded in Recent Trades.
+                            let token_price_stop = current_price <= 0.10;
+                            if token_price_stop {
+                                tracing::info!(
+                                    token_id = %token_id,
+                                    share_price = current_price,
+                                    "🔻 Token price ≤10¢ — auto stop-loss triggered"
+                                );
+                            }
+                            if let Some(exit_reason) = if token_price_stop {
+                                use crate::risk::ExitReason;
+                                Some(ExitReason::HardStop)
+                            } else {
+                            position_risk_for_monitor
                                 .update_position_by_token_id(&token_id, current_price)
                                 .or_else(|| {
                                     position_risk_for_monitor.update_position(asset, current_price)
@@ -2073,6 +2088,7 @@ async fn main() -> Result<()> {
                                         _ => Some(r),
                                     }
                                 })
+                            }
                             {
                                 let should_close = {
                                     let mut pending = live_pending_closes_for_monitor.lock().await;
@@ -2516,36 +2532,38 @@ async fn main() -> Result<()> {
 
                                 #[cfg(feature = "dashboard")]
                                 {
+                                    let dashboard_trade = crate::dashboard::TradeResponse {
+                                        timestamp: live_trade_record.timestamp,
+                                        trade_id: live_trade_record.trade_id.clone(),
+                                        asset: live_trade_record.asset.clone(),
+                                        timeframe: live_trade_record.timeframe.clone(),
+                                        direction: live_trade_record.direction.clone(),
+                                        confidence: live_trade_record.confidence,
+                                        entry_price: live_trade_record.entry_price,
+                                        exit_price: live_trade_record.exit_price,
+                                        size_usdc: live_trade_record.size_usdc,
+                                        pnl: live_trade_record.pnl,
+                                        pnl_pct: live_trade_record.pnl_pct,
+                                        result: live_trade_record.result.clone(),
+                                        prediction_correct: live_trade_record.prediction_correct,
+                                        exit_reason: live_trade_record.exit_reason.clone(),
+                                        hold_duration_secs: live_trade_record.hold_duration_secs,
+                                        balance_after: live_trade_record.balance_after,
+                                        entry_share_price: live_trade_record.entry_share_price,
+                                        exit_share_price: live_trade_record.exit_share_price,
+                                        trading_win: live_trade_record.trading_win,
+                                        rsi_at_entry: None,
+                                        macd_hist_at_entry: None,
+                                        bb_position_at_entry: None,
+                                        adx_at_entry: None,
+                                        volatility_at_entry: None,
+                                    };
                                     live_dashboard_memory_for_positions
-                                        .add_live_trade(crate::dashboard::TradeResponse {
-                                            timestamp: live_trade_record.timestamp,
-                                            trade_id: live_trade_record.trade_id.clone(),
-                                            asset: live_trade_record.asset.clone(),
-                                            timeframe: live_trade_record.timeframe.clone(),
-                                            direction: live_trade_record.direction.clone(),
-                                            confidence: live_trade_record.confidence,
-                                            entry_price: live_trade_record.entry_price,
-                                            exit_price: live_trade_record.exit_price,
-                                            size_usdc: live_trade_record.size_usdc,
-                                            pnl: live_trade_record.pnl,
-                                            pnl_pct: live_trade_record.pnl_pct,
-                                            result: live_trade_record.result.clone(),
-                                            prediction_correct: live_trade_record
-                                                .prediction_correct,
-                                            exit_reason: live_trade_record.exit_reason.clone(),
-                                            hold_duration_secs: live_trade_record
-                                                .hold_duration_secs,
-                                            balance_after: live_trade_record.balance_after,
-                                            entry_share_price: live_trade_record.entry_share_price,
-                                            exit_share_price: live_trade_record.exit_share_price,
-                                            trading_win: live_trade_record.trading_win,
-                                            rsi_at_entry: None,
-                                            macd_hist_at_entry: None,
-                                            bb_position_at_entry: None,
-                                            adx_at_entry: None,
-                                            volatility_at_entry: None,
-                                        })
+                                        .add_live_trade(dashboard_trade.clone())
                                         .await;
+                                    // Broadcast so Recent Trades updates without page reload
+                                    live_dashboard_broadcaster_for_positions
+                                        .broadcast_live_trade(dashboard_trade);
                                 }
                                 live_recently_closed_for_monitor
                                     .lock()

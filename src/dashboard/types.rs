@@ -339,6 +339,8 @@ pub enum WsMessage {
     TradingModeChanged(bool),
     /// Live balance update
     LiveBalanceUpdate(LiveBalancePayload),
+    /// New live trade closed (real-time update for Recent Trades)
+    LiveTradeAdded(TradeResponse),
 }
 
 /// Live balance payload for WebSocket

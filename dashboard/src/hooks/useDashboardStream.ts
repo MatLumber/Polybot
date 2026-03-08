@@ -240,6 +240,20 @@ function reducer(state: DashboardStreamState, action: StreamAction): DashboardSt
         }
       }
 
+      if (message.type === 'LiveTradeAdded') {
+        const trade = mapTrade(message.data)
+        return {
+          ...nextState,
+          dashboard: {
+            ...state.dashboard,
+            live: {
+              ...state.dashboard.live,
+              recentTrades: mergeRecentTrades(state.dashboard.live.recentTrades, trade),
+            },
+          },
+        }
+      }
+
       if (message.type === 'LiveBalanceUpdate') {
         return {
           ...nextState,

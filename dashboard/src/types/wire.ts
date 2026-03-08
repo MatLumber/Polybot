@@ -267,3 +267,4 @@ export type WsMessageWire =
   | { type: 'Heartbeat'; data: number }
   | { type: 'LiveBalanceUpdate'; data: LiveBalanceWire }
   | { type: 'TradingModeChanged'; data: boolean }
+  | { type: 'LiveTradeAdded'; data: TradeWire }
