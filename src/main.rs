@@ -1836,6 +1836,26 @@ async fn main() -> Result<()> {
                                 );
                             }
                             if let (Some(asset), Some(timeframe)) = (inferred_asset, inferred_timeframe) {
+                                let inferred_expires_at_ms = fallback_market
+                                    .as_ref()
+                                    .and_then(|market| {
+                                        market
+                                            .end_date
+                                            .as_deref()
+                                            .or(market.end_date_iso.as_deref())
+                                    })
+                                    .and_then(crate::clob::ClobClient::parse_expiry_to_timestamp)
+                                    .unwrap_or(0);
+                                let now_ms_rehydrate = chrono::Utc::now().timestamp_millis();
+                                if inferred_expires_at_ms > 0
+                                    && now_ms_rehydrate > inferred_expires_at_ms + 60_000
+                                {
+                                    tracing::debug!(
+                                        token_id = %token_id,
+                                        "Expired market position awaiting UMA resolution — skipping rehydration"
+                                    );
+                                    continue;
+                                }
                                 let inferred_context = LivePositionContext {
                                     signal_id: format!("rehydrated_{}", token_id),
                                     asset,
@@ -1854,18 +1874,7 @@ async fn main() -> Result<()> {
                                     shares_size: size,
                                     entry_share_price: derived_entry_share_price,
                                     opened_at_ms: chrono::Utc::now().timestamp_millis(),
-                                    expires_at_ms: fallback_market
-                                        .as_ref()
-                                        .and_then(|market| {
-                                            market
-                                                .end_date
-                                                .as_deref()
-                                                .or(market.end_date_iso.as_deref())
-                                        })
-                                        .and_then(
-                                            crate::clob::ClobClient::parse_expiry_to_timestamp,
-                                        )
-                                        .unwrap_or(0),
+                                    expires_at_ms: inferred_expires_at_ms,
                                 };
                                 {
                                     let mut contexts = live_contexts_for_monitor.lock().await;
@@ -2118,8 +2127,17 @@ async fn main() -> Result<()> {
                                     if is_expired {
                                         tracing::info!(
                                             token_id = %token_id,
-                                            "Market is expired. Awaiting UMA resolution, skipping CLOB sell"
+                                            "Market is expired. Awaiting UMA resolution, removing from live contexts"
                                         );
+                                        {
+                                            let mut contexts = live_contexts_for_monitor.lock().await;
+                                            if contexts.remove(&token_id).is_some() {
+                                                persist_live_position_contexts(
+                                                    &live_contexts_path_for_monitor,
+                                                    &contexts,
+                                                );
+                                            }
+                                        }
                                         live_pending_closes_for_monitor
                                             .lock()
                                             .await
