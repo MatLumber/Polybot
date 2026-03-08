@@ -496,8 +496,9 @@ impl V3Strategy {
         // Try ML prediction if available
         if ml_ready {
             if let Some(prediction) = self.try_ml_prediction(&ml_features, features, &context) {
-                self.last_entry_window
-                    .insert((asset, timeframe), win_open_ts);
+                // NOTE: do NOT mark last_entry_window here — it's marked in main.rs after
+                // the risk manager approves, via confirm_window_entered(). This prevents
+                // phantom throttles when the risk manager rejects a valid signal.
                 return Some(prediction);
             }
 
@@ -539,8 +540,7 @@ impl V3Strategy {
                     confidence = signal.confidence,
                     "Fallback signal generated"
                 );
-                self.last_entry_window
-                    .insert((asset, timeframe), win_open_ts);
+                // NOTE: do NOT mark last_entry_window here — confirmed via confirm_window_entered()
                 return Some(signal);
             }
         }
@@ -1267,6 +1267,12 @@ impl V3Strategy {
     // Getters for dashboard/monitoring
     pub fn last_filter_reason(&self) -> Option<String> {
         self.last_filter_reason.clone()
+    }
+
+    /// Mark the window as entered. Called from main.rs AFTER the risk manager approves a signal,
+    /// so the one_per_window throttle only fires when a trade was actually attempted.
+    pub fn confirm_window_entered(&mut self, asset: crate::types::Asset, timeframe: crate::types::Timeframe, win_open_ts: i64) {
+        self.last_entry_window.insert((asset, timeframe), win_open_ts);
     }
 
     pub fn export_calibrator_state_v2(&self) -> HashMap<String, Vec<IndicatorStats>> {

@@ -96,6 +96,10 @@ pub trait Strategy: Send + Sync {
 
     /// Force state save specifically for clean shutdowns
     fn force_save_state(&mut self) {}
+
+    /// Confirm that the window was actually entered (called after risk manager approves).
+    /// V3 uses this to mark the window so one_per_window throttle works correctly.
+    fn confirm_window_entered(&mut self, _asset: Asset, _timeframe: Timeframe, _win_open_ts: i64) {}
 }
 
 // Implementación para StrategyEngine (V2)
@@ -244,6 +248,10 @@ impl Strategy for crate::strategy::V3Strategy {
 
     fn get_dataset_stats(&self) -> crate::strategy::v3_strategy::DatasetStats {
         crate::strategy::V3Strategy::get_dataset_stats(self)
+    }
+
+    fn confirm_window_entered(&mut self, asset: Asset, timeframe: Timeframe, win_open_ts: i64) {
+        crate::strategy::V3Strategy::confirm_window_entered(self, asset, timeframe, win_open_ts);
     }
 
     fn register_closed_trade_result(&mut self, record: &crate::paper_trading::PaperTradeRecord) {
