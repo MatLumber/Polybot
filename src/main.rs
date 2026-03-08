@@ -2608,6 +2608,10 @@ async fn main() -> Result<()> {
     #[cfg(feature = "dashboard")]
     let manual_close_broadcaster = dashboard_broadcaster.clone();
     let manual_close_config = config.execution.clone();
+    let manual_close_wallet = std::env::var("POLYMARKET_WALLET")
+        .ok()
+        .or_else(|| std::env::var("POLYMARKET_ADDRESS").ok())
+        .unwrap_or_default();
     tokio::spawn(async move {
         while let Some(token_id) = manual_close_rx.recv().await {
             tracing::warn!(token_id = %token_id, "🔴 Manual close triggered from dashboard");
@@ -2626,11 +2630,43 @@ async fn main() -> Result<()> {
                 contexts.get(&token_id).cloned()
             };
 
-            let Some(ctx) = ctx else {
-                tracing::warn!(token_id = %token_id, "Manual close: no live context found");
+            // Resolve shares_size and condition_id — prefer live_context, fall back to wallet
+            let (shares_size, condition_id) = if let Some(ref c) = ctx {
+                (c.shares_size, Some(c.condition_id.clone()))
+            } else {
+                // No live_context: fetch position size directly from the Polymarket wallet
+                tracing::warn!(token_id = %token_id, "Manual close: no live context — fetching wallet position");
+                let wallet_pos = if !manual_close_wallet.is_empty() {
+                    manual_close_client
+                        .fetch_wallet_positions(&manual_close_wallet)
+                        .await
+                        .ok()
+                        .and_then(|positions| {
+                            positions.into_iter().find(|p| {
+                                p.token_id.as_deref() == Some(token_id.as_str())
+                            })
+                        })
+                } else {
+                    None
+                };
+                match wallet_pos {
+                    Some(p) => {
+                        let size: f64 = p.size.parse().unwrap_or(0.0);
+                        (size, None)
+                    }
+                    None => {
+                        tracing::error!(token_id = %token_id, "Manual close: position not found in wallet either, aborting");
+                        manual_close_pending.lock().await.remove(&token_id);
+                        continue;
+                    }
+                }
+            };
+
+            if shares_size <= 0.0 {
+                tracing::warn!(token_id = %token_id, "Manual close: shares_size is 0, nothing to sell");
                 manual_close_pending.lock().await.remove(&token_id);
                 continue;
-            };
+            }
 
             // Quote current price for sell
             let sell_price = match manual_close_client.quote_token(&token_id).await {
@@ -2642,10 +2678,12 @@ async fn main() -> Result<()> {
                 token_id.clone(),
                 crate::clob::Side::Sell,
                 sell_price,
-                ctx.shares_size,
+                shares_size,
             )
             .with_auth(manual_close_config.signature_type, None, None);
-            close_order.condition_id = Some(ctx.condition_id.clone());
+            if let Some(cid) = condition_id {
+                close_order.condition_id = Some(cid);
+            }
             close_order.order_type = Some("FAK".to_string());
             close_order.expiration = 0;
 
@@ -2657,7 +2695,13 @@ async fn main() -> Result<()> {
                     use crate::risk::ExitReason;
                     let _ = manual_close_risk
                         .close_position_by_token_id(&token_id, sell_price, ExitReason::Manual)
-                        .or_else(|| manual_close_risk.close_position(ctx.asset, sell_price, ExitReason::Manual));
+                        .or_else(|| {
+                            if let Some(ref c) = ctx {
+                                manual_close_risk.close_position(c.asset, sell_price, ExitReason::Manual)
+                            } else {
+                                None
+                            }
+                        });
 
                     // Remove from live_contexts
                     {
