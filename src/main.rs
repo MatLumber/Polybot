@@ -1928,6 +1928,7 @@ async fn main() -> Result<()> {
                             {
                                 position_risk_for_monitor.restore_position(
                                     asset,
+                                    ctx.timeframe,
                                     direction,
                                     size_usdc,
                                     entry_share_price,
@@ -2039,8 +2040,18 @@ async fn main() -> Result<()> {
                                         | ExitReason::TakeProfit
                                         | ExitReason::CheckpointTakeProfit
                                         | ExitReason::TrailingStop => {
-                                            tracing::debug!(reason = %r, token_id = %token_id, "Live SL/TP suppressed — binary options exit by time only");
-                                            None
+                                            // Allow exit when share price hits 90¢ (guaranteed profit territory)
+                                            if current_price >= 0.90 {
+                                                tracing::info!(
+                                                    token_id = %token_id,
+                                                    share_price = current_price,
+                                                    "💰 Share price TP at 90¢ — exiting live position early"
+                                                );
+                                                Some(ExitReason::TakeProfit)
+                                            } else {
+                                                tracing::debug!(reason = %r, token_id = %token_id, "Live SL/TP suppressed — binary options exit by time only");
+                                                None
+                                            }
                                         }
                                         _ => Some(r),
                                     }

@@ -126,6 +126,7 @@ impl std::fmt::Display for ExitReason {
 #[derive(Debug, Clone)]
 pub struct Position {
     pub asset: Asset,
+    pub timeframe: Timeframe,
     pub direction: Direction,
     pub size: f64,
     pub entry_price: f64,
@@ -158,6 +159,7 @@ impl Default for Position {
     fn default() -> Self {
         Self {
             asset: Asset::BTC,
+            timeframe: Timeframe::Hour1,
             direction: Direction::Up,
             size: 0.0,
             entry_price: 0.0,
@@ -338,10 +340,12 @@ impl RiskManager {
             return Ok(false);
         }
 
-        // Check if we already have a position in this asset
+        // Check if we already have a position in this asset+timeframe combo
         {
             let positions = self.positions.read().map_err(|e| e.to_string())?;
-            if positions.values().any(|position| position.asset == signal.asset) {
+            if positions.values().any(|position| {
+                position.asset == signal.asset && position.timeframe == signal.timeframe
+            }) {
                 return Ok(false);
             }
         }
@@ -408,6 +412,7 @@ impl RiskManager {
 
         let position = Position {
             asset: signal.asset,
+            timeframe: signal.timeframe,
             direction: signal.direction,
             size,
             entry_price: price,
@@ -452,6 +457,7 @@ impl RiskManager {
     pub fn restore_position(
         &self,
         asset: Asset,
+        timeframe: Timeframe,
         direction: Direction,
         size: f64,
         entry_price: f64,
@@ -477,6 +483,7 @@ impl RiskManager {
 
         let position = Position {
             asset,
+            timeframe,
             direction,
             size,
             entry_price,
