@@ -1633,6 +1633,13 @@ async fn main() -> Result<()> {
         Arc::new(Mutex::new(persisted_live_contexts));
     let live_contexts_for_monitor = live_position_contexts.clone();
     let live_contexts_for_main = live_position_contexts.clone();
+    // Manual close channel: dashboard sends token_id → close task executes SELL
+    let (manual_close_tx, mut manual_close_rx) =
+        tokio::sync::mpsc::unbounded_channel::<String>();
+    #[cfg(feature = "dashboard")]
+    {
+        *dashboard_memory.manual_close_tx.lock().unwrap() = Some(manual_close_tx);
+    }
     let live_contexts_path_for_monitor = live_contexts_path.clone();
     let live_contexts_path_for_main = live_contexts_path.clone();
     let live_pending_closes: Arc<Mutex<std::collections::HashSet<String>>> =
@@ -2572,7 +2579,94 @@ async fn main() -> Result<()> {
                 }
             }
         }
-    }); // Balance tracking task - fetches balance periodically and updates trackers
+    }); // Manual close task — executes immediate SELL when dashboard button is pressed
+    let manual_close_client = clob_client.clone();
+    let manual_close_contexts = live_position_contexts.clone();
+    let manual_close_contexts_path = live_contexts_path.clone();
+    let manual_close_risk = risk_manager.clone();
+    let manual_close_pending = live_pending_closes.clone();
+    #[cfg(feature = "dashboard")]
+    let manual_close_dashboard_memory = dashboard_memory.clone();
+    #[cfg(feature = "dashboard")]
+    let manual_close_broadcaster = dashboard_broadcaster.clone();
+    let manual_close_config = config.execution.clone();
+    tokio::spawn(async move {
+        while let Some(token_id) = manual_close_rx.recv().await {
+            tracing::warn!(token_id = %token_id, "🔴 Manual close triggered from dashboard");
+
+            // Prevent double-close
+            {
+                let mut pending = manual_close_pending.lock().await;
+                if !pending.insert(token_id.clone()) {
+                    tracing::warn!(token_id = %token_id, "Manual close already in progress, skipping");
+                    continue;
+                }
+            }
+
+            let ctx = {
+                let contexts = manual_close_contexts.lock().await;
+                contexts.get(&token_id).cloned()
+            };
+
+            let Some(ctx) = ctx else {
+                tracing::warn!(token_id = %token_id, "Manual close: no live context found");
+                manual_close_pending.lock().await.remove(&token_id);
+                continue;
+            };
+
+            // Quote current price for sell
+            let sell_price = match manual_close_client.quote_token(&token_id).await {
+                Ok(q) if q.bid >= 0.01 => (q.bid - 0.02).max(0.01).clamp(0.01, 0.99),
+                _ => 0.10_f64,
+            };
+
+            let mut close_order = crate::clob::types::Order::new(
+                token_id.clone(),
+                crate::clob::Side::Sell,
+                sell_price,
+                ctx.shares_size,
+            )
+            .with_auth(manual_close_config.signature_type, None, None);
+            close_order.condition_id = Some(ctx.condition_id.clone());
+            close_order.order_type = Some("FAK".to_string());
+            close_order.expiration = 0;
+
+            match manual_close_client.execute_order(&close_order).await {
+                Ok(order_id) => {
+                    tracing::info!(token_id = %token_id, order_id = %order_id, "✅ Manual close SELL executed");
+
+                    // Remove from risk manager
+                    use crate::risk::ExitReason;
+                    let _ = manual_close_risk
+                        .close_position_by_token_id(&token_id, sell_price, ExitReason::Manual)
+                        .or_else(|| manual_close_risk.close_position(ctx.asset, sell_price, ExitReason::Manual));
+
+                    // Remove from live_contexts
+                    {
+                        let mut contexts = manual_close_contexts.lock().await;
+                        contexts.remove(&token_id);
+                        persist_live_position_contexts(&manual_close_contexts_path, &contexts);
+                    }
+
+                    // Update dashboard
+                    #[cfg(feature = "dashboard")]
+                    {
+                        let mut live_positions = manual_close_dashboard_memory.live_positions.write().await;
+                        live_positions.retain(|p| p.id != token_id);
+                        let snapshot = live_positions.clone();
+                        drop(live_positions);
+                        manual_close_broadcaster.broadcast_live_positions(snapshot);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, token_id = %token_id, "❌ Manual close SELL failed");
+                }
+            }
+
+            manual_close_pending.lock().await.remove(&token_id);
+        }
+    });
+    // Balance tracking task - fetches balance periodically and updates trackers
     let balance_client = clob_client.clone();
     let balance_tracker_clone = balance_tracker.clone();
     let balance_risk = risk_manager.clone();

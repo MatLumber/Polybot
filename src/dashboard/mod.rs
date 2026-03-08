@@ -86,6 +86,9 @@ pub struct DashboardMemory {
     pub health: RwLock<HealthResponse>,
     /// Runtime trading mode: true = paper, false = live (toggleable without restart)
     pub trading_mode: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Channel sender for manual position close requests from the dashboard.
+    /// Main loop creates the channel and stores the sender here; API handler reads it.
+    pub manual_close_tx: std::sync::Arc<std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>>>,
 }
 
 impl Default for DashboardMemory {
@@ -128,6 +131,7 @@ impl Default for DashboardMemory {
                 ..HealthResponse::default()
             }),
             trading_mode: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            manual_close_tx: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 }

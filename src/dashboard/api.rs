@@ -75,6 +75,8 @@ pub fn create_router(
             "/api/trading-mode",
             get(get_trading_mode).post(set_trading_mode),
         )
+        // Manual position close
+        .route("/api/close-position", post(close_position_handler))
         // WebSocket
         .route("/ws", axum::routing::get(websocket_handler))
         // State
@@ -778,4 +780,52 @@ async fn set_trading_mode(
         live_ready,
     }))
     .into_response()
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Manual position close
+// ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct ClosePositionRequest {
+    token_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ClosePositionResponse {
+    token_id: String,
+    status: String,
+}
+
+/// POST /api/close-position - Request immediate manual close of a live position
+async fn close_position_handler(
+    State((memory, _, _)): State<AppState>,
+    Json(req): Json<ClosePositionRequest>,
+) -> Response {
+    let tx = memory.manual_close_tx.lock().unwrap().clone();
+    match tx {
+        Some(sender) => {
+            if sender.send(req.token_id.clone()).is_ok() {
+                tracing::info!(token_id = %req.token_id, "Manual close requested via dashboard");
+                Json(ApiResponse::success(ClosePositionResponse {
+                    token_id: req.token_id,
+                    status: "closing".into(),
+                }))
+                .into_response()
+            } else {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiResponse::<ClosePositionResponse>::error("Close channel unavailable")),
+                )
+                    .into_response()
+            }
+        }
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ApiResponse::<ClosePositionResponse>::error(
+                "Manual close not available in this mode",
+            )),
+        )
+            .into_response(),
+    }
 }
