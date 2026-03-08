@@ -125,6 +125,7 @@ pub fn order_amounts(order: &Order) -> Result<(U256, U256)> {
 
     match order.side {
         Side::Buy => {
+            // BUY: maker=USDC (max 2 decimal places), taker=shares (max 5 decimal places)
             let raw_taker_amount = round_down(order.size.max(0.0), round_config.size);
             let mut raw_maker_amount = raw_taker_amount * raw_price;
             if decimal_places(raw_maker_amount) > round_config.amount {
@@ -133,12 +134,15 @@ pub fn order_amounts(order: &Order) -> Result<(U256, U256)> {
                     raw_maker_amount = round_down(raw_maker_amount, round_config.amount);
                 }
             }
+            // Polymarket API hard constraint for market buy orders: USDC max 2 decimals
+            raw_maker_amount = round_down(raw_maker_amount, 2);
             Ok((
                 U256::from(to_token_decimals(raw_maker_amount)),
                 U256::from(to_token_decimals(raw_taker_amount)),
             ))
         }
         Side::Sell => {
+            // SELL: maker=shares (max 5 decimal places), taker=USDC (max 2 decimal places)
             let raw_maker_amount = round_down(order.size.max(0.0), round_config.size);
             let mut raw_taker_amount = raw_maker_amount * raw_price;
             if decimal_places(raw_taker_amount) > round_config.amount {
@@ -147,6 +151,8 @@ pub fn order_amounts(order: &Order) -> Result<(U256, U256)> {
                     raw_taker_amount = round_down(raw_taker_amount, round_config.amount);
                 }
             }
+            // Polymarket API hard constraint for market sell orders: USDC max 2 decimals
+            raw_taker_amount = round_down(raw_taker_amount, 2);
             Ok((
                 U256::from(to_token_decimals(raw_maker_amount)),
                 U256::from(to_token_decimals(raw_taker_amount)),
@@ -531,7 +537,8 @@ mod tests {
         let mut order = Order::new("1".to_string(), Side::Buy, 0.551, 3.629764);
         order.tick_size = Some("0.01".to_string());
         let (maker_amount, taker_amount) = order_amounts(&order).unwrap();
-        assert_eq!(maker_amount, U256::from(1_991_000_u64));
+        // maker=USDC: 3.62*0.55=1.991 → round_down to 2 decimals = 1.99 → 1_990_000
+        assert_eq!(maker_amount, U256::from(1_990_000_u64));
         assert_eq!(taker_amount, U256::from(3_620_000_u64));
     }
 
@@ -540,7 +547,8 @@ mod tests {
         let mut order = Order::new("1".to_string(), Side::Sell, 0.551, 3.629764);
         order.tick_size = Some("0.01".to_string());
         let (maker_amount, taker_amount) = order_amounts(&order).unwrap();
+        // taker=USDC: 3.62*0.55=1.991 → round_down to 2 decimals = 1.99 → 1_990_000
         assert_eq!(maker_amount, U256::from(3_620_000_u64));
-        assert_eq!(taker_amount, U256::from(1_991_000_u64));
+        assert_eq!(taker_amount, U256::from(1_990_000_u64));
     }
 }
