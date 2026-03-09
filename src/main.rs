@@ -2603,6 +2603,10 @@ async fn main() -> Result<()> {
     let manual_close_contexts_path = live_contexts_path.clone();
     let manual_close_risk = risk_manager.clone();
     let manual_close_pending = live_pending_closes.clone();
+    let manual_close_recently_closed = live_recently_closed.clone();
+    let manual_close_tracker = balance_tracker.clone();
+    let manual_close_csv = csv_persistence.clone();
+    let manual_close_strategy = strategy.clone();
     #[cfg(feature = "dashboard")]
     let manual_close_dashboard_memory = dashboard_memory.clone();
     #[cfg(feature = "dashboard")]
@@ -2704,13 +2708,112 @@ async fn main() -> Result<()> {
                         });
 
                     // Remove from live_contexts
-                    {
+                    let removed_ctx = {
                         let mut contexts = manual_close_contexts.lock().await;
-                        contexts.remove(&token_id);
+                        let c = contexts.remove(&token_id);
                         persist_live_position_contexts(&manual_close_contexts_path, &contexts);
+                        c
+                    };
+
+                    // Mark as recently closed so position monitor doesn't re-display it
+                    manual_close_recently_closed.lock().await.insert(token_id.clone());
+                    manual_close_pending.lock().await.remove(&token_id);
+
+                    // Record trade in history, update balance, ML learning
+                    let ctx_ref = removed_ctx.as_ref().or(ctx.as_ref());
+                    if let Some(c) = ctx_ref {
+                        let entry_share_price = c.entry_share_price;
+                        let size = c.shares_size;
+                        let open_fee = c.size_usdc * crate::polymarket::fee_rate_from_price(entry_share_price);
+                        let entry_cost = entry_share_price * size;
+                        let close_fee = sell_price * size * crate::polymarket::fee_rate_from_price(sell_price);
+                        let pnl = (sell_price * size) - close_fee - entry_cost - open_fee;
+                        let pnl_pct = (pnl / (entry_cost + open_fee).max(0.01)) * 100.0;
+                        let is_win = pnl >= 0.0;
+
+                        use crate::persistence::{LiveTradeRecord, WinLossRecord};
+                        let now_ms = chrono::Utc::now().timestamp_millis();
+                        let record = WinLossRecord {
+                            timestamp: chrono::Utc::now().timestamp(),
+                            market_slug: c.market_slug.clone(),
+                            token_id: token_id.clone(),
+                            entry_price: entry_share_price,
+                            exit_price: sell_price,
+                            size,
+                            pnl,
+                            internal_result: if is_win { "WIN" } else { "LOSS" }.to_string(),
+                            exit_reason: "MANUAL".to_string(),
+                            official_result: None,
+                        };
+                        manual_close_tracker.record_winloss(record);
+
+                        let live_trade = LiveTradeRecord {
+                            timestamp: now_ms,
+                            trade_id: format!("{}_manual_close", c.signal_id),
+                            asset: format!("{:?}", c.asset),
+                            timeframe: format!("{:?}", c.timeframe),
+                            direction: format!("{:?}", c.direction),
+                            confidence: c.confidence,
+                            entry_price: entry_share_price,
+                            exit_price: sell_price,
+                            size_usdc: c.size_usdc,
+                            pnl,
+                            pnl_pct,
+                            result: if is_win { "WIN" } else { "LOSS" }.to_string(),
+                            prediction_correct: is_win,
+                            exit_reason: "MANUAL".to_string(),
+                            hold_duration_secs: ((now_ms - c.opened_at_ms) / 1000).max(0),
+                            balance_after: 0.0,
+                            entry_share_price,
+                            exit_share_price: sell_price,
+                            trading_win: is_win,
+                        };
+                        if let Err(e) = manual_close_csv.save_live_trade(live_trade.clone()).await {
+                            tracing::warn!(error = %e, "Failed to save manual close trade record");
+                        }
+
+                        // ML learning: register trade result via calibrator
+                        {
+                            use crate::strategy::TradeResult;
+                            let result = if is_win { TradeResult::Win } else { TradeResult::Loss };
+                            manual_close_strategy.lock().await
+                                .record_trade_with_indicators_for_market(c.asset, c.timeframe, &[], result);
+                        }
+
+                        #[cfg(feature = "dashboard")]
+                        {
+                            let trade_resp = crate::dashboard::TradeResponse {
+                                timestamp: now_ms,
+                                trade_id: live_trade.trade_id.clone(),
+                                asset: live_trade.asset.clone(),
+                                timeframe: live_trade.timeframe.clone(),
+                                direction: live_trade.direction.clone(),
+                                confidence: live_trade.confidence,
+                                entry_price: live_trade.entry_price,
+                                exit_price: live_trade.exit_price,
+                                size_usdc: live_trade.size_usdc,
+                                pnl: live_trade.pnl,
+                                pnl_pct: live_trade.pnl_pct,
+                                result: live_trade.result.clone(),
+                                prediction_correct: live_trade.prediction_correct,
+                                exit_reason: live_trade.exit_reason.clone(),
+                                hold_duration_secs: live_trade.hold_duration_secs,
+                                balance_after: live_trade.balance_after,
+                                entry_share_price: live_trade.entry_share_price,
+                                exit_share_price: live_trade.exit_share_price,
+                                trading_win: live_trade.trading_win,
+                                rsi_at_entry: None,
+                                macd_hist_at_entry: None,
+                                bb_position_at_entry: None,
+                                adx_at_entry: None,
+                                volatility_at_entry: None,
+                            };
+                            manual_close_dashboard_memory.add_live_trade(trade_resp.clone()).await;
+                            manual_close_broadcaster.broadcast_live_trade(trade_resp);
+                        }
                     }
 
-                    // Update dashboard
+                    // Remove from dashboard positions
                     #[cfg(feature = "dashboard")]
                     {
                         let mut live_positions = manual_close_dashboard_memory.live_positions.write().await;
@@ -2722,6 +2825,7 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => {
                     tracing::error!(error = %e, token_id = %token_id, "❌ Manual close SELL failed");
+                    manual_close_pending.lock().await.remove(&token_id);
                 }
             }
 
