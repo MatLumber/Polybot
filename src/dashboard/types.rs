@@ -180,6 +180,8 @@ impl Default for PaperStatsResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PositionResponse {
     pub id: String,
+    #[serde(default)]
+    pub token_id: Option<String>,
     pub asset: String,
     pub timeframe: String,
     pub direction: String,
