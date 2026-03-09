@@ -85,9 +85,7 @@ fn parse_position_number(raw: Option<&str>) -> Option<f64> {
 }
 
 fn live_context_is_viable(context: &LivePositionContext) -> bool {
-    context.shares_size > 0.0
-        && context.entry_share_price > 0.0
-        && context.size_usdc > 0.0
+    context.shares_size > 0.0 && context.entry_share_price > 0.0 && context.size_usdc > 0.0
 }
 
 fn load_persisted_prediction_counters(data_dir: &str) -> Option<(usize, usize, usize)> {
@@ -681,6 +679,7 @@ async fn main() -> Result<()> {
                 };
                 PositionResponse {
                     id: p.id.clone(),
+                    token_id: None,
                     asset: format!("{:?}", p.asset),
                     timeframe: format!("{:?}", p.timeframe),
                     direction: format!("{:?}", p.direction),
@@ -853,8 +852,9 @@ async fn main() -> Result<()> {
                         let now_ms = chrono::Utc::now().timestamp_millis();
                         if now_ms - last_live_price_broadcast >= 2_000 {
                             last_live_price_broadcast = now_ms;
-                            oracle_dashboard_broadcaster
-                                .broadcast_prices(oracle_dashboard_memory.get_prices().await.prices);
+                            oracle_dashboard_broadcaster.broadcast_prices(
+                                oracle_dashboard_memory.get_prices().await.prices,
+                            );
                         }
                     } // Forward to paper trading engine if enabled
                     if oracle_paper_enabled {
@@ -1638,8 +1638,7 @@ async fn main() -> Result<()> {
     let live_contexts_for_monitor = live_position_contexts.clone();
     let live_contexts_for_main = live_position_contexts.clone();
     // Manual close channel: dashboard sends token_id → close task executes SELL
-    let (manual_close_tx, mut manual_close_rx) =
-        tokio::sync::mpsc::unbounded_channel::<String>();
+    let (manual_close_tx, mut manual_close_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     #[cfg(feature = "dashboard")]
     {
         *dashboard_memory.manual_close_tx.lock().unwrap() = Some(manual_close_tx);
@@ -1702,7 +1701,7 @@ async fn main() -> Result<()> {
                             continue;
                         }
 
-                        let token_id = pos.token_id.clone().unwrap_or_else(|| pos.asset.clone());
+                        let token_id = pos.resolved_token_id().to_string();
                         let avg_price = parse_position_number(Some(&pos.avg_price)).unwrap_or(0.0);
                         let current_value =
                             parse_position_number(pos.current_value.as_deref()).unwrap_or(0.0);
@@ -1741,8 +1740,7 @@ async fn main() -> Result<()> {
                         // Backfill market_slug if it was empty when the position was opened.
                         if let Some(ctx) = live_context.as_mut() {
                             if ctx.market_slug.trim().is_empty() {
-                                let backfill_slug = pos.slug.clone()
-                                    .unwrap_or_default();
+                                let backfill_slug = pos.slug.clone().unwrap_or_default();
                                 if !backfill_slug.is_empty() {
                                     ctx.market_slug = backfill_slug;
                                     let mut contexts = live_contexts_for_monitor.lock().await;
@@ -1832,8 +1830,9 @@ async fn main() -> Result<()> {
                         };
 
                         if live_context.is_none() {
-                            let inferred_asset = infer_asset_from_market_text(&fallback_market_text)
-                                .or_else(|| infer_asset_from_market_text(&pos.asset));
+                            let inferred_asset =
+                                infer_asset_from_market_text(&fallback_market_text)
+                                    .or_else(|| infer_asset_from_market_text(&pos.asset));
                             let inferred_timeframe =
                                 parse_timeframe_from_market_text(&fallback_market_text)
                                     .or_else(|| parse_timeframe_from_market_text(&pos.asset));
@@ -1847,7 +1846,9 @@ async fn main() -> Result<()> {
                                     "Cannot rehydrate live context — asset or timeframe could not be inferred from market text"
                                 );
                             }
-                            if let (Some(asset), Some(timeframe)) = (inferred_asset, inferred_timeframe) {
+                            if let (Some(asset), Some(timeframe)) =
+                                (inferred_asset, inferred_timeframe)
+                            {
                                 let inferred_expires_at_ms = fallback_market
                                     .as_ref()
                                     .and_then(|market| {
@@ -1974,6 +1975,7 @@ async fn main() -> Result<()> {
                                 });
                             live_dashboard_positions.push(PositionResponse {
                                 id: token_id.clone(),
+                                token_id: Some(token_id.clone()),
                                 asset: asset
                                     .map(|value| value.to_string())
                                     .or_else(|| {
@@ -2064,7 +2066,7 @@ async fn main() -> Result<()> {
                                 use crate::risk::ExitReason;
                                 Some(ExitReason::HardStop)
                             } else {
-                            position_risk_for_monitor
+                                position_risk_for_monitor
                                 .update_position_by_token_id(&token_id, current_price)
                                 .or_else(|| {
                                     position_risk_for_monitor.update_position(asset, current_price)
@@ -2092,8 +2094,7 @@ async fn main() -> Result<()> {
                                         _ => Some(r),
                                     }
                                 })
-                            }
-                            {
+                            } {
                                 let should_close = {
                                     let mut pending = live_pending_closes_for_monitor.lock().await;
                                     pending.insert(token_id.clone())
@@ -2111,7 +2112,9 @@ async fn main() -> Result<()> {
                                         None
                                     };
 
-                                let (exit_share_price, final_exit_reason) = if official_result.as_deref() == Some("WIN")
+                                let (exit_share_price, final_exit_reason) = if official_result
+                                    .as_deref()
+                                    == Some("WIN")
                                 {
                                     if let Some(condition_id) = pos.condition_id.as_deref() {
                                         let redeem_key = format!("{}:{}", condition_id, token_id);
@@ -2148,7 +2151,8 @@ async fn main() -> Result<()> {
                                     (0.0, "RESOLUTION_LOSS".to_string())
                                 } else {
                                     let now_ms = chrono::Utc::now().timestamp_millis();
-                                    let is_expired = live_context.as_ref()
+                                    let is_expired = live_context
+                                        .as_ref()
                                         .map(|ctx| now_ms > (ctx.expires_at_ms + 60_000))
                                         .unwrap_or(false);
 
@@ -2158,7 +2162,8 @@ async fn main() -> Result<()> {
                                             "Market is expired. Awaiting UMA resolution, removing from live contexts"
                                         );
                                         {
-                                            let mut contexts = live_contexts_for_monitor.lock().await;
+                                            let mut contexts =
+                                                live_contexts_for_monitor.lock().await;
                                             if contexts.remove(&token_id).is_some() {
                                                 persist_live_position_contexts(
                                                     &live_contexts_path_for_monitor,
@@ -2269,10 +2274,7 @@ async fn main() -> Result<()> {
                                             .remove(&token_id);
                                         continue;
                                     }
-                                    live_sell_retries_for_monitor
-                                        .lock()
-                                        .await
-                                        .remove(&token_id);
+                                    live_sell_retries_for_monitor.lock().await.remove(&token_id);
                                     (close_order.price, exit_reason.to_string())
                                 };
 
@@ -2648,24 +2650,28 @@ async fn main() -> Result<()> {
                         .await
                         .ok()
                         .and_then(|positions| {
-                            positions.into_iter().find(|p| {
-                                p.token_id.as_deref() == Some(token_id.as_str())
-                            })
+                            positions
+                                .into_iter()
+                                .find(|p| p.resolved_token_id() == token_id.as_str())
                         })
                 } else {
                     None
                 };
-                match wallet_pos {
-                    Some(p) => {
-                        let size: f64 = p.size.parse().unwrap_or(0.0);
-                        tracing::info!(token_id = %token_id, actual_shares = size, "Manual close: using actual wallet shares");
-                        size
-                    }
-                    None => {
-                        tracing::error!(token_id = %token_id, "Manual close: position not found in wallet, aborting");
-                        manual_close_pending.lock().await.remove(&token_id);
-                        continue;
-                    }
+                if let Some(p) = wallet_pos {
+                    let size: f64 = p.size.parse().unwrap_or(0.0);
+                    tracing::info!(token_id = %token_id, actual_shares = size, "Manual close: using actual wallet shares");
+                    size
+                } else if let Some(ctx) = ctx.as_ref().filter(|ctx| ctx.shares_size > 0.0) {
+                    tracing::warn!(
+                        token_id = %token_id,
+                        tracked_shares = ctx.shares_size,
+                        "Manual close: wallet lookup missed token id, falling back to tracked shares"
+                    );
+                    ctx.shares_size
+                } else {
+                    tracing::error!(token_id = %token_id, "Manual close: position not found in wallet or live context, aborting");
+                    manual_close_pending.lock().await.remove(&token_id);
+                    continue;
                 }
             };
 
@@ -2712,7 +2718,11 @@ async fn main() -> Result<()> {
                         .close_position_by_token_id(&token_id, sell_price, ExitReason::Manual)
                         .or_else(|| {
                             if let Some(ref c) = ctx {
-                                manual_close_risk.close_position(c.asset, sell_price, ExitReason::Manual)
+                                manual_close_risk.close_position(
+                                    c.asset,
+                                    sell_price,
+                                    ExitReason::Manual,
+                                )
                             } else {
                                 None
                             }
@@ -2727,7 +2737,10 @@ async fn main() -> Result<()> {
                     };
 
                     // Mark as recently closed so position monitor doesn't re-display it
-                    manual_close_recently_closed.lock().await.insert(token_id.clone());
+                    manual_close_recently_closed
+                        .lock()
+                        .await
+                        .insert(token_id.clone());
                     manual_close_pending.lock().await.remove(&token_id);
 
                     // Record trade in history, update balance, ML learning
@@ -2735,9 +2748,11 @@ async fn main() -> Result<()> {
                     if let Some(c) = ctx_ref {
                         let entry_share_price = c.entry_share_price;
                         let size = c.shares_size;
-                        let open_fee = c.size_usdc * crate::polymarket::fee_rate_from_price(entry_share_price);
+                        let open_fee =
+                            c.size_usdc * crate::polymarket::fee_rate_from_price(entry_share_price);
                         let entry_cost = entry_share_price * size;
-                        let close_fee = sell_price * size * crate::polymarket::fee_rate_from_price(sell_price);
+                        let close_fee =
+                            sell_price * size * crate::polymarket::fee_rate_from_price(sell_price);
                         let pnl = (sell_price * size) - close_fee - entry_cost - open_fee;
                         let pnl_pct = (pnl / (entry_cost + open_fee).max(0.01)) * 100.0;
                         let is_win = pnl >= 0.0;
@@ -2786,9 +2801,20 @@ async fn main() -> Result<()> {
                         // ML learning: register trade result via calibrator
                         {
                             use crate::strategy::TradeResult;
-                            let result = if is_win { TradeResult::Win } else { TradeResult::Loss };
-                            manual_close_strategy.lock().await
-                                .record_trade_with_indicators_for_market(c.asset, c.timeframe, &[], result);
+                            let result = if is_win {
+                                TradeResult::Win
+                            } else {
+                                TradeResult::Loss
+                            };
+                            manual_close_strategy
+                                .lock()
+                                .await
+                                .record_trade_with_indicators_for_market(
+                                    c.asset,
+                                    c.timeframe,
+                                    &[],
+                                    result,
+                                );
                         }
 
                         #[cfg(feature = "dashboard")]
@@ -2819,7 +2845,9 @@ async fn main() -> Result<()> {
                                 adx_at_entry: None,
                                 volatility_at_entry: None,
                             };
-                            manual_close_dashboard_memory.add_live_trade(trade_resp.clone()).await;
+                            manual_close_dashboard_memory
+                                .add_live_trade(trade_resp.clone())
+                                .await;
                             manual_close_broadcaster.broadcast_live_trade(trade_resp);
                         }
                     }
@@ -2827,7 +2855,8 @@ async fn main() -> Result<()> {
                     // Remove from dashboard positions
                     #[cfg(feature = "dashboard")]
                     {
-                        let mut live_positions = manual_close_dashboard_memory.live_positions.write().await;
+                        let mut live_positions =
+                            manual_close_dashboard_memory.live_positions.write().await;
                         live_positions.retain(|p| p.id != token_id);
                         let snapshot = live_positions.clone();
                         drop(live_positions);
@@ -2920,7 +2949,8 @@ async fn main() -> Result<()> {
                     {
                         *live_dashboard_memory.live_balance.write().await = balance;
                         *live_dashboard_memory.live_locked.write().await = locked_in_positions;
-                        live_dashboard_broadcaster.broadcast_live_balance(balance, locked_in_positions);
+                        live_dashboard_broadcaster
+                            .broadcast_live_balance(balance, locked_in_positions);
                     }
                 }
                 Err(e) => {
@@ -3049,6 +3079,7 @@ async fn main() -> Result<()> {
                             let trading_roi = if p.size_usdc > 0.0 { display_pnl / p.size_usdc * 100.0 } else { 0.0 };
                             PositionResponse {
                             id: p.id.clone(),
+                            token_id: None,
                             asset: format!("{:?}", p.asset),
                             timeframe: format!("{:?}", p.timeframe),
                             direction: format!("{:?}", p.direction),
@@ -3245,6 +3276,7 @@ async fn main() -> Result<()> {
                             let trading_roi = if p.size_usdc > 0.0 { display_pnl / p.size_usdc * 100.0 } else { 0.0 };
                             PositionResponse {
                             id: p.id.clone(),
+                            token_id: None,
                             asset: format!("{:?}", p.asset),
                             timeframe: format!("{:?}", p.timeframe),
                             direction: format!("{:?}", p.direction),
@@ -3459,6 +3491,7 @@ async fn main() -> Result<()> {
                                                 {
                                                     let position_response = PositionResponse {
                                                         id: pos.id.clone(),
+                                                        token_id: None,
                                                         asset: format!("{:?}", pos.asset),
                                                         timeframe: format!("{:?}", pos.timeframe),
                                                         direction: format!("{:?}", pos.direction),
@@ -3894,6 +3927,7 @@ async fn main() -> Result<()> {
                                             .or_else(|| position_risk.get_position(signal.asset));
                                         let position = PositionResponse {
                                             id: signal.token_id.clone(),
+                                            token_id: Some(signal.token_id.clone()),
                                             asset: signal.asset.to_string(),
                                             timeframe: signal.timeframe.to_string(),
                                             direction: signal.direction.to_string(),
@@ -4409,17 +4443,19 @@ fn looks_like_hourly_updown_time_slug(text: &str) -> bool {
     }
     // If the slug ends with an on-the-hour pattern like "-3-00-pm" or "-12-00-am"
     // but NOT a non-zero minute like "-3-15-pm".
-    let re_hour = ["-0-00-", "-1-00-", "-2-00-", "-3-00-", "-4-00-",
-                   "-5-00-", "-6-00-", "-7-00-", "-8-00-", "-9-00-",
-                   "-10-00-", "-11-00-", "-12-00-"];
+    let re_hour = [
+        "-0-00-", "-1-00-", "-2-00-", "-3-00-", "-4-00-", "-5-00-", "-6-00-", "-7-00-", "-8-00-",
+        "-9-00-", "-10-00-", "-11-00-", "-12-00-",
+    ];
     re_hour.iter().any(|pat| text.contains(pat))
 }
 
 /// For slugs containing a time suffix "-HH-MM-" where MM != 00, infer Min15.
 fn infer_timeframe_from_time_suffix(text: &str) -> Option<Timeframe> {
     // Match minute values that indicate sub-hour windows.
-    let min15_patterns = ["-15-pm", "-15-am", "-30-pm", "-30-am", "-45-pm", "-45-am",
-                          "-15-et", "-30-et", "-45-et"];
+    let min15_patterns = [
+        "-15-pm", "-15-am", "-30-pm", "-30-am", "-45-pm", "-45-am", "-15-et", "-30-et", "-45-et",
+    ];
     if min15_patterns.iter().any(|pat| text.contains(pat)) {
         return Some(Timeframe::Min15);
     }

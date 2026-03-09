@@ -464,11 +464,7 @@ impl ClobClient {
     ///
     /// Returns `Ok(true)` if the order was filled, `Ok(false)` if all attempts
     /// failed to produce a confirmed fill (caller should NOT remove position from tracking).
-    pub async fn execute_sell_confirmed(
-        &self,
-        order: &Order,
-        max_attempts: u32,
-    ) -> Result<bool> {
+    pub async fn execute_sell_confirmed(&self, order: &Order, max_attempts: u32) -> Result<bool> {
         for attempt in 1..=max_attempts {
             let mut sell_order = order.clone();
             // On retries, lower the ask price by one tick to be more aggressive.
@@ -1897,6 +1893,13 @@ pub struct WalletPosition {
     pub title: Option<String>,
 }
 
+impl WalletPosition {
+    /// The Data API may omit `tokenId` and place the ERC1155 position id in `asset`.
+    pub fn resolved_token_id(&self) -> &str {
+        self.token_id.as_deref().unwrap_or(self.asset.as_str())
+    }
+}
+
 fn de_string_or_number<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -2049,6 +2052,22 @@ mod tests {
         assert_eq!(position.current_price.as_deref(), Some("0.305"));
         assert_eq!(position.current_value.as_deref(), Some("1.525"));
         assert_eq!(position.slug.as_deref(), Some("eth-updown-15m-1772837100"));
+        assert_eq!(position.resolved_token_id(), "token-id");
+    }
+
+    #[test]
+    fn wallet_position_resolved_token_id_falls_back_to_asset() {
+        let raw = serde_json::json!({
+            "asset": "erc1155-position-id",
+            "size": 1,
+            "avgPrice": 0.12
+        });
+
+        let position: WalletPosition =
+            serde_json::from_value(raw).expect("wallet position should deserialize");
+
+        assert_eq!(position.token_id, None);
+        assert_eq!(position.resolved_token_id(), "erc1155-position-id");
     }
 
     #[tokio::test]
