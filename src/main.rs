@@ -2692,9 +2692,15 @@ async fn main() -> Result<()> {
             close_order.order_type = Some("FAK".to_string());
             close_order.expiration = 0;
 
-            match manual_close_client.execute_order(&close_order).await {
-                Ok(order_id) => {
-                    tracing::info!(token_id = %token_id, order_id = %order_id, "✅ Manual close SELL executed");
+            match manual_close_client
+                .execute_sell_confirmed(&close_order, 3)
+                .await
+            {
+                Ok(true) => {
+                    tracing::info!(
+                        token_id = %token_id,
+                        "✅ Manual close SELL confirmed filled"
+                    );
 
                     // Remove from risk manager
                     use crate::risk::ExitReason;
@@ -2823,6 +2829,12 @@ async fn main() -> Result<()> {
                         drop(live_positions);
                         manual_close_broadcaster.broadcast_live_positions(snapshot);
                     }
+                }
+                Ok(false) => {
+                    tracing::error!(
+                        token_id = %token_id,
+                        "❌ Manual close SELL was not confirmed filled; keeping position tracked"
+                    );
                 }
                 Err(e) => {
                     tracing::error!(error = %e, token_id = %token_id, "❌ Manual close SELL failed");
