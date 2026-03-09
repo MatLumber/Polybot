@@ -5,6 +5,8 @@
 
 use crate::clob::market_discovery::{DiscoveredMarket, MarketChange, MarketDiscovery};
 use crate::clob::websocket::{MarketFeedClient, WsEvent};
+#[cfg(feature = "dashboard")]
+use crate::dashboard::DashboardMemory;
 use crate::features::OrderbookImbalanceTracker;
 use crate::paper_trading::PolymarketSharePrices;
 use crate::types::{Asset, Direction, Timeframe};
@@ -21,6 +23,8 @@ pub struct DynamicOrderbookFeed {
     ws_url: String,
     current_token_map: HashMap<String, (Asset, Timeframe, Direction)>,
     current_token_ids: Vec<String>,
+    #[cfg(feature = "dashboard")]
+    dashboard_memory: Option<Arc<DashboardMemory>>,
 }
 
 impl DynamicOrderbookFeed {
@@ -36,7 +40,15 @@ impl DynamicOrderbookFeed {
             ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws/market".to_string(),
             current_token_map: HashMap::new(),
             current_token_ids: Vec::new(),
+            #[cfg(feature = "dashboard")]
+            dashboard_memory: None,
         }
+    }
+
+    #[cfg(feature = "dashboard")]
+    pub fn with_dashboard_memory(mut self, dashboard_memory: Arc<DashboardMemory>) -> Self {
+        self.dashboard_memory = Some(dashboard_memory);
+        self
     }
 
     /// Run the dynamic feed
@@ -195,11 +207,22 @@ impl DynamicOrderbookFeed {
         let tracker = self.tracker.clone();
         let share_prices = self.share_prices.clone();
         let ws_url = self.ws_url.clone();
+        #[cfg(feature = "dashboard")]
+        let dashboard_memory = self.dashboard_memory.clone();
 
         // Spawn WebSocket connection in a separate task
         tokio::spawn(async move {
             if let Err(e) =
-                run_websocket_connection(ws_url, token_ids, token_map, tracker, share_prices).await
+                run_websocket_connection(
+                    ws_url,
+                    token_ids,
+                    token_map,
+                    tracker,
+                    share_prices,
+                    #[cfg(feature = "dashboard")]
+                    dashboard_memory,
+                )
+                .await
             {
                 error!(error = %e, "WebSocket connection error");
             }
@@ -216,6 +239,7 @@ async fn run_websocket_connection(
     token_map: HashMap<String, (Asset, Timeframe, Direction)>,
     tracker: Arc<Mutex<OrderbookImbalanceTracker>>,
     share_prices: Arc<PolymarketSharePrices>,
+    #[cfg(feature = "dashboard")] dashboard_memory: Option<Arc<DashboardMemory>>,
 ) -> anyhow::Result<()> {
     let (event_tx, mut event_rx) = mpsc::channel::<WsEvent>(100);
     let (subscribe_tx, subscribe_rx) = mpsc::channel::<Vec<String>>(1);
@@ -329,13 +353,25 @@ async fn run_websocket_connection(
                 }
             }
             WsEvent::Error(e) => {
+                #[cfg(feature = "dashboard")]
+                if let Some(memory) = &dashboard_memory {
+                    memory.record_source_connection("ORDERBOOK", false).await;
+                }
                 error!(error = %e, "WebSocket error");
             }
             WsEvent::Disconnected => {
+                #[cfg(feature = "dashboard")]
+                if let Some(memory) = &dashboard_memory {
+                    memory.record_source_connection("ORDERBOOK", false).await;
+                }
                 info!("WebSocket disconnected");
                 break;
             }
             WsEvent::Connected => {
+                #[cfg(feature = "dashboard")]
+                if let Some(memory) = &dashboard_memory {
+                    memory.record_source_connection("ORDERBOOK", true).await;
+                }
                 info!("WebSocket connected");
             }
             _ => {

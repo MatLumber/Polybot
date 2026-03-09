@@ -729,12 +729,16 @@ async fn main() -> Result<()> {
     let orderbook_feed_tracker = orderbook_tracker.clone();
     let orderbook_share_prices = share_prices_for_orderbook.clone();
     let gamma_url = config.execution.gamma_url.clone();
+    #[cfg(feature = "dashboard")]
+    let orderbook_dashboard_memory = dashboard_memory.clone();
 
     let orderbook_feed_handle = tokio::spawn(async move {
         use crate::clob::DynamicOrderbookFeed;
 
         let feed =
             DynamicOrderbookFeed::new(gamma_url, orderbook_feed_tracker, orderbook_share_prices);
+        #[cfg(feature = "dashboard")]
+        let feed = feed.with_dashboard_memory(orderbook_dashboard_memory);
 
         feed.run().await;
     }); // Spawn oracle sources (native mode = RTDS only, otherwise RTDS + optional Binance).
