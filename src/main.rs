@@ -3384,15 +3384,6 @@ async fn main() -> Result<()> {
                                         confidence = %signal.confidence,
                                         "📋 [PAPER] Signal approved"
                                     );
-                                    // Mark window as entered now that risk manager approved
-                                    {
-                                        let window_ms = match signal.timeframe {
-                                            Timeframe::Min15 => 15 * 60 * 1000_i64,
-                                            Timeframe::Hour1 => 60 * 60 * 1000_i64,
-                                        };
-                                        let win_open_ts = (signal.ts / window_ms) * window_ms;
-                                        strategy_for_signals.lock().await.confirm_window_entered(signal.asset, signal.timeframe, win_open_ts);
-                                    }
 
                                     if !signal.token_id.trim().is_empty() {
                                         match clob_client.quote_token(&signal.token_id).await {
@@ -3434,6 +3425,12 @@ async fn main() -> Result<()> {
                                     match engine.execute_signal(&signal) {
                                         Ok(true) => {
                                             info!(signal_id = %signal_id, "📋 [PAPER] Order filled");
+                                            // Mark window only when order actually filled
+                                            {
+                                                let window_ms = match signal.timeframe { Timeframe::Min15 => 15*60*1000_i64, Timeframe::Hour1 => 60*60*1000_i64 };
+                                                let win_open_ts = (signal.ts / window_ms) * window_ms;
+                                                strategy_for_signals.lock().await.confirm_window_entered(signal.asset, signal.timeframe, win_open_ts);
+                                            }
                                             #[cfg(feature = "dashboard")]
                                             {
                                                 use crate::dashboard::PositionResponse;
@@ -3622,15 +3619,6 @@ async fn main() -> Result<()> {
                                 confidence = %signal.confidence,
                                 "🟥 [LIVE] Signal approved by risk manager - preparing REAL order submission"
                             );
-                            // Mark window as entered now that risk manager approved
-                            {
-                                let window_ms = match signal.timeframe {
-                                    Timeframe::Min15 => 15 * 60 * 1000_i64,
-                                    Timeframe::Hour1 => 60 * 60 * 1000_i64,
-                                };
-                                let win_open_ts = (signal.ts / window_ms) * window_ms;
-                                strategy_for_signals.lock().await.confirm_window_entered(signal.asset, signal.timeframe, win_open_ts);
-                            }
 
                             let market_slug = &signal.market_slug;
                             let token_id = signal.token_id.clone();
@@ -3834,6 +3822,13 @@ async fn main() -> Result<()> {
                                 Ok(order_id) => {
                                     live_recently_closed_for_main.lock().await.remove(&signal.token_id);
                                     live_pending_closes_for_main.lock().await.remove(&signal.token_id);
+
+                                    // Mark window only when LIVE order actually submitted successfully
+                                    {
+                                        let window_ms = match signal.timeframe { Timeframe::Min15 => 15*60*1000_i64, Timeframe::Hour1 => 60*60*1000_i64 };
+                                        let win_open_ts = (signal.ts / window_ms) * window_ms;
+                                        strategy_for_signals.lock().await.confirm_window_entered(signal.asset, signal.timeframe, win_open_ts);
+                                    }
 
                                     position_risk.open_position(&signal, effective_size_usdc, exec_plan.entry_price);
                                     {
