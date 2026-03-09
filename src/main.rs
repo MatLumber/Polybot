@@ -2634,12 +2634,10 @@ async fn main() -> Result<()> {
                 contexts.get(&token_id).cloned()
             };
 
-            // Resolve shares_size and condition_id — prefer live_context, fall back to wallet
-            let (shares_size, condition_id) = if let Some(ref c) = ctx {
-                (c.shares_size, Some(c.condition_id.clone()))
-            } else {
-                // No live_context: fetch position size directly from the Polymarket wallet
-                tracing::warn!(token_id = %token_id, "Manual close: no live context — fetching wallet position");
+            // ALWAYS fetch actual shares from wallet — ctx.shares_size is theoretical
+            // and differs from real balance due to fees/rounding, causing "not enough balance"
+            let condition_id = ctx.as_ref().map(|c| c.condition_id.clone());
+            let shares_size = {
                 let wallet_pos = if !manual_close_wallet.is_empty() {
                     manual_close_client
                         .fetch_wallet_positions(&manual_close_wallet)
@@ -2656,10 +2654,11 @@ async fn main() -> Result<()> {
                 match wallet_pos {
                     Some(p) => {
                         let size: f64 = p.size.parse().unwrap_or(0.0);
-                        (size, None)
+                        tracing::info!(token_id = %token_id, actual_shares = size, "Manual close: using actual wallet shares");
+                        size
                     }
                     None => {
-                        tracing::error!(token_id = %token_id, "Manual close: position not found in wallet either, aborting");
+                        tracing::error!(token_id = %token_id, "Manual close: position not found in wallet, aborting");
                         manual_close_pending.lock().await.remove(&token_id);
                         continue;
                     }
@@ -2672,11 +2671,13 @@ async fn main() -> Result<()> {
                 continue;
             }
 
-            // Quote current price for sell
+            // Quote current price — sell at bid to guarantee fill (taker)
             let sell_price = match manual_close_client.quote_token(&token_id).await {
-                Ok(q) if q.bid >= 0.01 => (q.bid - 0.02).max(0.01).clamp(0.01, 0.99),
-                _ => 0.10_f64,
+                Ok(q) if q.bid >= 0.01 => q.bid.clamp(0.01, 0.99),
+                Ok(q) if q.mid >= 0.01 => (q.mid * 0.95).clamp(0.01, 0.99),
+                _ => 0.05_f64,
             };
+            tracing::info!(token_id = %token_id, sell_price = sell_price, shares = shares_size, "Manual close: executing SELL");
 
             let mut close_order = crate::clob::types::Order::new(
                 token_id.clone(),
