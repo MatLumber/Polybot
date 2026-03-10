@@ -56,7 +56,7 @@ ml_engine:
   # Smart filters
   # Late-entry gate
   # 0.85 = allow entries until 85% of window life (while still avoiding the final stretch).
-  max_window_progress: 0.65
+  max_window_progress: 0.60
   # Keep at least 1 minute before expiry for new entries
   min_time_to_close_minutes: 1.0
   max_spread_bps_15m: 150     # 1.5% spread max — needs ~4% edge to be profitable after fees
@@ -142,7 +142,7 @@ paper_trading:
   max_hold_duration_ms: 900000
   dashboard_interval_secs: 30
   prefer_chainlink: true
-  min_edge_net: 0.01
+  min_edge_net: 0.025
 
 # ============================================================================
 # KELLY
@@ -150,7 +150,7 @@ paper_trading:
 kelly:
   enabled: true
   fraction_15m: 0.30
-  fraction_1h: 0.60
+  fraction_1h: 0.45
   max_bankroll_fraction_15m: 0.05
   max_bankroll_fraction_1h: 0.10
 

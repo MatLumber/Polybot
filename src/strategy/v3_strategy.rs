@@ -615,15 +615,16 @@ impl V3Strategy {
             return None;
         }
 
-        // Determine direction
-        let direction = if prediction.prob_up > 0.5 {
-            Direction::Up
-        } else {
-            Direction::Down
-        };
-
-        // Polymarket-native net edge check on the selected side (UP/NO).
+        // Determine direction by market edge, not model threshold.
+        // If model says prob_up=0.58 but market prices UP at 0.82, the opportunity is DOWN:
+        //   edge_down = (1 - 0.58) - (1 - 0.82) = 0.42 - 0.18 = +0.24 (profitable)
+        // Using prob_up > 0.5 would generate UP with edge = 0.58 - 0.82 = -0.24 (rejected).
         let p_market_up = ml_features.polymarket_price.clamp(0.01, 0.99);
+        let direction = if prediction.prob_up > p_market_up {
+            Direction::Up // model thinks UP is underpriced by market
+        } else {
+            Direction::Down // model thinks UP is overpriced; buy NO tokens
+        };
         let (p_model_side, p_market_side) = if direction == Direction::Up {
             (prediction.prob_up, p_market_up)
         } else {
@@ -814,11 +815,23 @@ impl V3Strategy {
                 "âŒ Fallback signal rejected (insufficient directional alignment â€” need all 3 indicators)"
             );
             let ema_signal = match (features.ema_9, features.ema_21) {
-                (Some(e9), Some(e21)) => if e9 > e21 { "bullish" } else { "bearish" },
+                (Some(e9), Some(e21)) => {
+                    if e9 > e21 {
+                        "bullish"
+                    } else {
+                        "bearish"
+                    }
+                }
                 _ => "missing",
             };
             let macd_signal = match features.macd_hist.or(features.macd) {
-                Some(v) => if v > 0.0 { "bullish" } else { "bearish" },
+                Some(v) => {
+                    if v > 0.0 {
+                        "bullish"
+                    } else {
+                        "bearish"
+                    }
+                }
                 None => "missing",
             };
             let ha_signal = match &features.ha_trend {
@@ -839,11 +852,43 @@ impl V3Strategy {
             return None;
         }
 
-        let direction = if score > 0.0 {
+        let indicator_direction = if score > 0.0 {
             Direction::Up
         } else {
             Direction::Down
         };
+
+        // Market edge gate: reject fallback signal if market has already priced in the direction.
+        // Example: EMA/MACD/HA all bullish → indicator says UP, but if market prices UP at 0.82,
+        // there is no edge on UP (we would be buying an overpriced token).
+        // In that case, reject the fallback rather than entering a losing trade.
+        if let Some(p_market) = features.polymarket_price {
+            let p_market = p_market.clamp(0.01, 0.99);
+            // Approximate prob_up from score: score of ±2.0 → prob 0.75/0.25
+            let prob_up_approx = (score / 2.0).clamp(-0.5, 0.5) + 0.5;
+            let edge_for_direction = match indicator_direction {
+                Direction::Up => prob_up_approx - p_market,
+                Direction::Down => (1.0 - prob_up_approx) - (1.0 - p_market),
+            };
+            if edge_for_direction < self.config.min_edge_net {
+                tracing::info!(
+                    asset = ?features.asset,
+                    timeframe = ?features.timeframe,
+                    score,
+                    p_market,
+                    edge = edge_for_direction,
+                    min_edge = self.config.min_edge_net,
+                    "❌ Fallback signal rejected — market already priced in direction (no edge)"
+                );
+                self.last_filter_reason = Some(format!(
+                    "fallback_no_market_edge: {:.3} < {:.3}",
+                    edge_for_direction, self.config.min_edge_net
+                ));
+                return None;
+            }
+        }
+
+        let direction = indicator_direction;
 
         Some(GeneratedSignal {
             asset: features.asset,
@@ -993,7 +1038,10 @@ impl V3Strategy {
                     );
                     self.asset_predictors.insert(asset, asset_predictor);
                 }
-                Err(e) => warn!("⚠️ Per-asset predictor training failed for {:?}: {}", asset, e),
+                Err(e) => warn!(
+                    "⚠️ Per-asset predictor training failed for {:?}: {}",
+                    asset, e
+                ),
             }
         }
 
@@ -1271,8 +1319,14 @@ impl V3Strategy {
 
     /// Mark the window as entered. Called from main.rs AFTER the risk manager approves a signal,
     /// so the one_per_window throttle only fires when a trade was actually attempted.
-    pub fn confirm_window_entered(&mut self, asset: crate::types::Asset, timeframe: crate::types::Timeframe, win_open_ts: i64) {
-        self.last_entry_window.insert((asset, timeframe), win_open_ts);
+    pub fn confirm_window_entered(
+        &mut self,
+        asset: crate::types::Asset,
+        timeframe: crate::types::Timeframe,
+        win_open_ts: i64,
+    ) {
+        self.last_entry_window
+            .insert((asset, timeframe), win_open_ts);
     }
 
     pub fn export_calibrator_state_v2(&self) -> HashMap<String, Vec<IndicatorStats>> {
@@ -1398,7 +1452,10 @@ impl V3Strategy {
                 .save_ml_state(predictor, &self.state, &self.dataset)?;
             info!(dataset_size = self.dataset.len(), "ML state saved manually");
         } else {
-            info!(dataset_size = self.dataset.len(), "Dataset saved manually (no model yet)");
+            info!(
+                dataset_size = self.dataset.len(),
+                "Dataset saved manually (no model yet)"
+            );
         }
         Ok(())
     }
