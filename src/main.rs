@@ -923,6 +923,7 @@ async fn main() -> Result<()> {
         .eq_ignore_ascii_case("native_only");
     let feature_clob_client = clob_client.clone();
     let feature_data_dir = config.persistence.data_dir.clone();
+    let feature_share_prices = polymarket_share_prices.clone();
     let feature_handle = tokio::spawn(async move {
         use crate::clob::PriceHistoryInterval;
         use crate::oracle::sources::BinanceClient;
@@ -1066,6 +1067,31 @@ async fn main() -> Result<()> {
                         {
                             features.polymarket_volume_24hr = Some(market.volume_24hr);
                             features.polymarket_liquidity = Some(market.liquidity_num);
+                        }
+
+                        // Patch polymarket_price, spread_bps, depth_top5 from share_prices.
+                        // The orderbook tracker often has no data (race condition), so we
+                        // use PolymarketSharePrices which is reliably populated by DynamicOrderbookFeed.
+                        // Without this, polymarket_price is always 0.5 in ML training data.
+                        {
+                            let up_quote = feature_share_prices.get_quote(tick.asset, timeframe, "UP");
+                            if let Some(q) = up_quote {
+                                if q.mid > 0.01 && q.mid < 0.99 {
+                                    features.polymarket_price = Some(q.mid);
+                                    if q.bid > 0.0 && q.ask > 0.0 {
+                                        let spread = (q.ask - q.bid) / q.mid * 10000.0;
+                                        features.spread_bps = Some(spread);
+                                    }
+                                    if q.depth_top5 > 0.0 {
+                                        features.orderbook_depth_top5 = Some(q.depth_top5);
+                                        let total_depth = q.bid_size + q.ask_size;
+                                        if total_depth > 0.0 {
+                                            let imbalance = (q.bid_size - q.ask_size) / total_depth;
+                                            features.orderbook_imbalance = Some(imbalance);
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         // Log features at DEBUG level to avoid log spam
