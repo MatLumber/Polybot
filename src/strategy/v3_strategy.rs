@@ -1000,6 +1000,10 @@ impl V3Strategy {
 
         // Crear copia balanceada para entrenamiento (segmentada por asset/timeframe)
         let mut training_dataset = self.build_segmented_training_dataset();
+        // Purge samples older than walk_forward_train_days to keep model fresh.
+        // Older market conditions (different volatility regimes, BTC price levels)
+        // hurt generalization more than they help with more data.
+        training_dataset.purge_old_samples(self.config.training.walk_forward_train_days);
         training_dataset.balance_classes();
         info!("Dataset balanced: {} samples", training_dataset.len());
 

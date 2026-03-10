@@ -404,6 +404,14 @@ impl FeatureEngine {
 
         // ============ Microestructura ============
         ml_features.spread_bps = features.spread_bps.unwrap_or(0.0);
+        // Update spread history so percentile calculation is meaningful.
+        // Was never populated before → spread_percentile was always 0.5 (constant).
+        if ml_features.spread_bps > 0.0 {
+            self.spread_history.push(ml_features.spread_bps);
+            if self.spread_history.len() > 1000 {
+                self.spread_history.remove(0);
+            }
+        }
         ml_features.spread_percentile = self.calculate_spread_percentile(ml_features.spread_bps);
 
         ml_features.orderbook_imbalance = features.orderbook_imbalance.unwrap_or(0.0);
@@ -428,6 +436,14 @@ impl FeatureEngine {
             MarketRegime::Volatile => 2.0,
         };
         ml_features.volatility_5m = features.volatility.unwrap_or(0.0);
+        // Update volatility history so percentile calculation is meaningful.
+        // Was never populated before → volatility_percentile was always 0.5 (constant).
+        if ml_features.volatility_5m > 0.0 {
+            self.volatility_history.push(ml_features.volatility_5m);
+            if self.volatility_history.len() > 1000 {
+                self.volatility_history.remove(0);
+            }
+        }
         ml_features.volatility_percentile =
             self.calculate_volatility_percentile(ml_features.volatility_5m);
         // correlation_change removed (was always 0)

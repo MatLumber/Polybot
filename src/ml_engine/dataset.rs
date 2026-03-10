@@ -326,6 +326,30 @@ impl Dataset {
         }
     }
 
+    /// Remove samples older than `max_age_days` days from the in-memory dataset.
+    /// Called before training to keep the model focused on recent market conditions
+    /// rather than stale patterns that no longer apply.
+    /// Does NOT modify the persisted dataset file — only affects training.
+    pub fn purge_old_samples(&mut self, max_age_days: i64) {
+        if self.samples.is_empty() || max_age_days <= 0 {
+            return;
+        }
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let cutoff_ms = now_ms - max_age_days * 24 * 60 * 60 * 1000;
+        let before = self.samples.len();
+        self.samples.retain(|s| s.timestamp >= cutoff_ms);
+        let removed = before - self.samples.len();
+        if removed > 0 {
+            tracing::info!(
+                removed,
+                remaining = self.samples.len(),
+                max_age_days,
+                "🗑️ Purged old training samples (>{} days old)",
+                max_age_days
+            );
+        }
+    }
+
     /// Balancear clases (oversampling de clase minoritaria)
     pub fn balance_classes(&mut self) {
         let n_up = self.samples.iter().filter(|s| s.target == 1.0).count();
