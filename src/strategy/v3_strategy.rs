@@ -1249,6 +1249,13 @@ impl V3Strategy {
             indicators_triggered: record.indicators_used.clone(),
         };
 
+        // Always add to dataset regardless of predictor state.
+        // During cold start (predictor=None), window observations build the dataset,
+        // but closed trades must also contribute — especially manual closes.
+        // This also breaks the bootstrap deadlock: fallback trades provide real BTC
+        // direction labels so the dataset grows even before ML is active.
+        self.add_trade_to_dataset(trade_sample.clone());
+
         if self.predictor.is_some() {
             let is_win = trade_sample.is_win;
 
@@ -1259,7 +1266,7 @@ impl V3Strategy {
                 } else {
                     tracing::warn!(
                         trade_id = %trade_sample.trade_id,
-                        "Missing predicted_prob_up; skipping predictor outcome update"
+                        “Missing predicted_prob_up; skipping predictor outcome update”
                     );
                 }
             }
@@ -1272,13 +1279,6 @@ impl V3Strategy {
             }
 
             self.state.add_prediction_result(is_win);
-            // All closed trades go into the training dataset (fallback + ML).
-            // The target is pure BTC direction (1.0=UP, 0.0=DOWN), so fallback trades
-            // provide valid supervised signal â€” the ML learns real BTC outcomes from them.
-            // Excluding fallbacks created a bootstrap deadlock: ML needs 30 samples to
-            // train, but with no samples it always uses fallback, which was excluded â†’
-            // dataset stays at 0 forever.
-            self.add_trade_to_dataset(trade_sample);
 
             // Auto-save ML state after every trade so we don't lose data on crash/restart
             if self.state.total_predictions % 1 == 0 {
@@ -1305,6 +1305,23 @@ impl V3Strategy {
                 "Trade outcome registered in V3 Predictor (using prediction_correct)"
             );
         }
+
+        // Always save dataset and trigger retraining check, even during cold start.
+        // This ensures manual closes and fallback trades accumulate in the dataset
+        // so the ML can activate as soon as 50 samples are reached.
+        if let Err(e) = self.dataset.save(self.persistence.dataset_file()) {
+            tracing::warn!("Failed to save dataset after trade: {}", e);
+        }
+        if let Err(e) = self.maybe_retrain() {
+            tracing::warn!("Failed during maybe_retrain check after trade: {}", e);
+        }
+        info!(
+            asset = ?asset,
+            timeframe = ?timeframe,
+            dataset_size = self.dataset.len(),
+            prediction_correct = record.prediction_correct,
+            "Trade added to ML dataset"
+        );
     }
 
     pub fn sync_prediction_counters(&mut self, total: usize, correct: usize, incorrect: usize) {

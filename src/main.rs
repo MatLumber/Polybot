@@ -2812,9 +2812,9 @@ async fn main() -> Result<()> {
                                 timestamp: now_ms_mc,
                                 trade_id: format!("{}_manual_close", c.signal_id),
                                 signal_id: c.signal_id.clone(),
-                                asset: format!("{:?}", c.asset),
-                                timeframe: format!("{:?}", c.timeframe),
-                                direction: format!("{:?}", c.direction),
+                                asset: c.asset.to_string(),           // "BTC"/"ETH" — from_str uses to_uppercase
+                                timeframe: c.timeframe.to_string(),   // "15m"/"1h"  — from_str requires this exact format
+                                direction: format!("{:?}", c.direction), // "Up"/"Down" — eq_ignore_ascii_case matches
                                 confidence: c.confidence,
                                 entry_price: entry_share_price,
                                 exit_price: sell_price,
