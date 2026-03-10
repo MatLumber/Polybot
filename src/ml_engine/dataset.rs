@@ -194,6 +194,19 @@ impl Dataset {
         price_at_open: f64,
         price_at_close: f64,
     ) {
+        // Validate: reject samples with NaN/inf features to prevent poisoning the model.
+        // Also reject invalid targets (must be 0.0 or 1.0).
+        if target.is_nan() || target.is_infinite() || (target != 0.0 && target != 1.0) {
+            tracing::warn!(?asset, ?timeframe, target, "Skipping window observation: invalid target");
+            return;
+        }
+        let feat_vec = features.to_vec();
+        let has_invalid = feat_vec.iter().any(|v| v.is_nan() || v.is_infinite());
+        if has_invalid {
+            let bad_count = feat_vec.iter().filter(|v| v.is_nan() || v.is_infinite()).count();
+            tracing::warn!(?asset, ?timeframe, bad_count, "Skipping window observation: {} NaN/inf features", bad_count);
+            return;
+        }
         self.samples.push(LabeledSample {
             features,
             target,

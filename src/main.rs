@@ -2798,23 +2798,81 @@ async fn main() -> Result<()> {
                             tracing::warn!(error = %e, "Failed to save manual close trade record");
                         }
 
-                        // ML learning: register trade result via calibrator
+                        // ML learning: register trade result in BOTH calibrator AND ML predictor.
+                        // Previously only called record_trade_with_indicators_for_market() which
+                        // updates the calibrator but NOT the ML dataset/predictor.
+                        // Manual closes must contribute to ML training just like auto closes.
                         {
                             use crate::strategy::TradeResult;
-                            let result = if is_win {
-                                TradeResult::Win
-                            } else {
-                                TradeResult::Loss
+                            let result = if is_win { TradeResult::Win } else { TradeResult::Loss };
+                            let open_fee_mc = c.size_usdc * crate::polymarket::fee_rate_from_price(entry_share_price);
+                            let close_fee_mc = sell_price * c.shares_size * crate::polymarket::fee_rate_from_price(sell_price);
+                            let now_ms_mc = chrono::Utc::now().timestamp_millis();
+                            let ml_record = crate::paper_trading::PaperTradeRecord {
+                                timestamp: now_ms_mc,
+                                trade_id: format!("{}_manual_close", c.signal_id),
+                                signal_id: c.signal_id.clone(),
+                                asset: format!("{:?}", c.asset),
+                                timeframe: format!("{:?}", c.timeframe),
+                                direction: format!("{:?}", c.direction),
+                                confidence: c.confidence,
+                                entry_price: entry_share_price,
+                                exit_price: sell_price,
+                                size_usdc: c.size_usdc,
+                                shares: c.shares_size,
+                                fee_paid: open_fee_mc + close_fee_mc,
+                                pnl,
+                                pnl_pct,
+                                result: if is_win { "WIN" } else { "LOSS" }.to_string(),
+                                exit_reason: "ManualClose".to_string(),
+                                hold_duration_ms: (now_ms_mc - c.opened_at_ms).max(0),
+                                balance_after: 0.0,
+                                market_open_ts: c.opened_at_ms,
+                                market_close_ts: c.expires_at_ms,
+                                time_remaining_at_entry_secs: ((c.expires_at_ms - c.opened_at_ms) / 1000).max(0),
+                                indicators_used: vec!["ManualClose".to_string()],
+                                market_id: c.condition_id.clone(),
+                                token_id: token_id.clone(),
+                                outcome: String::new(),
+                                entry_bid: entry_share_price,
+                                entry_ask: entry_share_price,
+                                entry_mid: entry_share_price,
+                                exit_bid: sell_price,
+                                exit_ask: sell_price,
+                                exit_mid: sell_price,
+                                fee_open: open_fee_mc,
+                                fee_close: close_fee_mc,
+                                slippage_open: 0.0,
+                                slippage_close: 0.0,
+                                p_market: 0.0,
+                                p_model: c.confidence as f64,
+                                edge_net: 0.0,
+                                kelly_raw: 0.0,
+                                kelly_applied: 0.0,
+                                exit_reason_detail: "ManualClose".to_string(),
+                                window_open_price: entry_share_price,
+                                window_close_price: sell_price,
+                                actual_price_direction: if is_win {
+                                    format!("{:?}", c.direction)
+                                } else if c.direction == crate::types::Direction::Up {
+                                    format!("{:?}", crate::types::Direction::Down)
+                                } else {
+                                    format!("{:?}", crate::types::Direction::Up)
+                                },
+                                prediction_correct: is_win,
+                                trading_pnl: pnl,
+                                trading_win: is_win,
                             };
-                            manual_close_strategy
-                                .lock()
-                                .await
-                                .record_trade_with_indicators_for_market(
-                                    c.asset,
-                                    c.timeframe,
-                                    &[],
-                                    result,
-                                );
+                            let mut strat = manual_close_strategy.lock().await;
+                            // Register in ML predictor + dataset (was missing before)
+                            strat.register_closed_trade_result(&ml_record);
+                            // Also update calibrator indicator weights
+                            strat.record_trade_with_indicators_for_market(
+                                c.asset,
+                                c.timeframe,
+                                &[],
+                                result,
+                            );
                         }
 
                         #[cfg(feature = "dashboard")]
