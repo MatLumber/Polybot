@@ -33,7 +33,7 @@ struct WindowObservation {
     asset: Asset,
     /// Timeframe
     timeframe: Timeframe,
-    /// Window open timestamp (ms) â€“ used as the sample timestamp
+    /// Window open timestamp (ms) â€" used as the sample timestamp
     open_ts: i64,
 }
 
@@ -66,14 +66,14 @@ pub struct V3Strategy {
     persistence: MLPersistenceManager,
     /// Pending window observations keyed by (asset, timeframe, window_open_ts).
     /// Captures one feature snapshot per market window so the ML can learn from
-    /// EVERY window outcome â€” not just windows where a trade was executed.
+    /// EVERY window outcome â€" not just windows where a trade was executed.
     pending_windows: HashMap<(Asset, Timeframe, i64), WindowObservation>,
     /// Finalized window outcomes per market (last 5). Used to compute sequential
     /// features: prev_window_dir_1/2/3, window_streak, cross_tf_alignment.
     window_history: HashMap<(Asset, Timeframe), VecDeque<f64>>,
     /// Recent Polymarket 24h volume per market for volume_trend feature.
     volume_history: HashMap<(Asset, Timeframe), VecDeque<f64>>,
-    /// Counter of window observations (NOT trades) â€” used for retraining trigger.
+    /// Counter of window observations (NOT trades) â€" used for retraining trigger.
     window_observations_count: usize,
     /// One-per-window throttle: tracks the last window open_ts we entered per market.
     last_entry_window: HashMap<(Asset, Timeframe), i64>,
@@ -97,7 +97,7 @@ impl V3Strategy {
         // Try to load previous state
         let (mut predictor, mut dataset, mut state) = match persistence.load_ml_state() {
             Ok(Some((persisted, loaded_dataset))) => {
-                info!("ðŸ§  Loading persisted ML state...");
+                info!("ðŸ§  Loading persisted ML state...");
 
                 // Restore ensemble weights
                 let weights = persisted.ensemble_weights;
@@ -108,7 +108,7 @@ impl V3Strategy {
                 };
 
                 let mut ml_state = MLEngineState::new(ml_config.clone());
-                // Don't restore prediction counters â€” the persisted values can be stale/corrupted
+                // Don't restore prediction counters â€" the persisted values can be stale/corrupted
                 // across restarts. Let accuracy accumulate freshly from closed trades this session.
                 ml_state.total_predictions = persisted.total_predictions;
                 ml_state.correct_predictions = persisted.correct_predictions;
@@ -151,7 +151,7 @@ impl V3Strategy {
                 (pred, Dataset::new(), MLEngineState::new(ml_config.clone()))
             }
             Err(e) => {
-                warn!("âš ï¸ Failed to load ML state: {}, starting fresh", e);
+                warn!("âš ï¸ Failed to load ML state: {}, starting fresh", e);
                 let weights = EnsembleWeights::from_config(&ml_config.ensemble);
                 let pred = if ml_config.enabled {
                     Some(MLPredictor::new(weights))
@@ -203,11 +203,11 @@ impl V3Strategy {
         // Auto-train models on startup if we have enough samples
         if strategy.dataset.len() >= strategy.config.training.min_samples_for_training {
             info!(
-                "ðŸŽ“ Auto-training models on startup with {} samples...",
+                "ðŸŽ" Auto-training models on startup with {} samples...",
                 strategy.dataset.len()
             );
             if let Err(e) = strategy.train_initial_model(vec![]) {
-                warn!("âš ï¸ Auto-training failed: {}", e);
+                warn!("âš ï¸ Auto-training failed: {}", e);
             }
         }
 
@@ -264,7 +264,7 @@ impl V3Strategy {
         }
 
         // 1. Finalize any windows that have already closed (use current price as proxy for
-        //    the window-close price â€” this is accurate to within one tick, ~1 second).
+        //    the window-close price â€" this is accurate to within one tick, ~1 second).
         //    IMPORTANT: only finalize windows for the *same asset* being processed here.
         //    Each asset's features carry that asset's price; mixing prices across assets
         //    produces wrong UP/DOWN labels and corrupts the ML training dataset.
@@ -303,7 +303,7 @@ impl V3Strategy {
                     price_close = current_price,
                     outcome = direction_label,
                     dataset_before = self.dataset.len(),
-                    "ðŸªŸ Window closed â€” recording ground-truth observation"
+                    "ðŸªŸ Window closed â€" recording ground-truth observation"
                 );
                 // Skip samples with mostly-zero features (captured before indicator warmup)
                 let feat_vec = obs.features.to_vec();
@@ -312,7 +312,7 @@ impl V3Strategy {
                     info!(
                         non_zero,
                         total = feat_vec.len(),
-                        "âš ï¸ Skipping low-quality window observation ({}/{} non-zero features)",
+                        "âš ï¸ Skipping low-quality window observation ({}/{} non-zero features)",
                         non_zero,
                         feat_vec.len()
                     );
@@ -328,7 +328,7 @@ impl V3Strategy {
                     );
                     self.window_observations_count += 1;
                     info!(
-                    "ðŸ“Š Window observation added to dataset: {} samples total ({} windows recorded)",
+                    "ðŸ"Š Window observation added to dataset: {} samples total ({} windows recorded)",
                     self.dataset.len(),
                     self.window_observations_count
                 );
@@ -348,11 +348,11 @@ impl V3Strategy {
                         && self.dataset.len() >= self.config.training.min_samples_for_training
                     {
                         info!(
-                            "ðŸ”„ Retraining after {} window observations...",
+                            "ðŸ"„ Retraining after {} window observations...",
                             self.window_observations_count
                         );
                         if let Err(e) = self.train_initial_model(vec![]) {
-                            warn!("âš ï¸ Retraining after window observations failed: {}", e);
+                            warn!("âš ï¸ Retraining after window observations failed: {}", e);
                         }
                     }
                 } // end else (non-zero filter)
@@ -389,7 +389,7 @@ impl V3Strategy {
                 ml_features.price_vs_strike_pct = pct.clamp(-10.0, 10.0);
             }
         } else {
-            // First tick of this window â€” no change yet.
+            // First tick of this window â€" no change yet.
             ml_features.token_price_window_open = current_token_price;
             ml_features.token_price_change_window = 0.0;
             ml_features.price_vs_strike_pct = 0.0;
@@ -505,7 +505,7 @@ impl V3Strategy {
                     ?asset, ?timeframe,
                     rolling_acc = predictor.recent_rolling_accuracy(),
                     baseline = predictor.drift_baseline_accuracy,
-                    "âš ï¸ Concept drift detected â€” market regime may have changed, consider retraining"
+                    "âš ï¸ Concept drift detected â€" market regime may have changed, consider retraining"
                 );
             }
         }
@@ -610,12 +610,12 @@ impl V3Strategy {
 
         // Token price divergence filter: only trade when our prediction diverges from the
         // Polymarket market consensus by â‰¥8%. Low divergence means we agree with the market
-        // and have no edge â€” the token price already reflects our prediction.
+        // and have no edge â€" the token price already reflects our prediction.
         // market_price ~0.5 when no real Polymarket data available (safe to proceed).
         let market_token_price = ml_features.polymarket_price;
         let divergence = (prediction.prob_up - market_token_price).abs();
         if market_token_price > 0.45 && market_token_price < 0.55 {
-            // Market is near 50% (high uncertainty) â€” divergence filter less meaningful,
+            // Market is near 50% (high uncertainty) â€" divergence filter less meaningful,
             // allow if our signal has sufficient edge already (edge check below covers this).
         } else if divergence < 0.08 {
             let reason = format!(
@@ -628,7 +628,7 @@ impl V3Strategy {
                 ml_prob = prediction.prob_up,
                 market_price = market_token_price,
                 divergence,
-                "âŒ ML signal rejected â€” no edge vs market consensus"
+                "âŒ ML signal rejected â€" no edge vs market consensus"
             );
             self.last_filter_reason = Some(reason);
             return None;
@@ -808,7 +808,7 @@ impl V3Strategy {
             }
         }
 
-        // RSI removed â€” in crypto/BTC, RSI overbought means momentum continuation (not reversal)
+        // RSI removed â€" in crypto/BTC, RSI overbought means momentum continuation (not reversal)
         // Only EMA(1.0), MACD(0.5), HA(0.5) are used. Max score = 2.0 when all 3 agree.
         let max_score = 2.0;
         let confidence = ((score as f64).abs() / max_score).min(1.0) * 0.5 + 0.5; // 0.5 floor
@@ -831,7 +831,7 @@ impl V3Strategy {
                 ?features.asset,
                 ?features.timeframe,
                 score,
-                "âŒ Fallback signal rejected (insufficient directional alignment â€” need all 3 indicators)"
+                "âŒ Fallback signal rejected (insufficient directional alignment â€" need all 3 indicators)"
             );
             let ema_signal = match (features.ema_9, features.ema_21) {
                 (Some(e9), Some(e21)) => {
@@ -1003,12 +1003,12 @@ impl V3Strategy {
         historical_trades: Vec<TradeSample>,
     ) -> anyhow::Result<()> {
         info!(
-            "ðŸŽ“ V3 training with {} new historical trades...",
+            "ðŸŽ" V3 training with {} new historical trades...",
             historical_trades.len()
         );
 
         let current_size = self.dataset.len();
-        info!("ðŸ“Š Current dataset size: {} samples", current_size);
+        info!("ðŸ"Š Current dataset size: {} samples", current_size);
 
         // Agregar nuevos trades al dataset EXISTENTE (acumulativo)
         for trade in historical_trades {
@@ -1016,7 +1016,7 @@ impl V3Strategy {
         }
 
         info!(
-            "ðŸ“ˆ Dataset updated: {} â†’ {} samples (added {})",
+            "ðŸ"ˆ Dataset updated: {} â†' {} samples (added {})",
             current_size,
             self.dataset.len(),
             self.dataset.len() - current_size
@@ -1060,7 +1060,7 @@ impl V3Strategy {
                 predictor.ensemble_accuracy() * 100.0
             );
         } else {
-            warn!("âš ï¸ Predictor is None, cannot train. ML may be disabled.");
+            warn!("âš ï¸ Predictor is None, cannot train. ML may be disabled.");
         }
 
         // Train per-asset predictors when each asset has sufficient data.
@@ -1134,13 +1134,13 @@ impl V3Strategy {
             }
         }
 
-        info!("ðŸ’¾ ML state saved after training");
+        info!("ðŸ'¾ ML state saved after training");
         Ok(())
     }
 
     /// Run walk-forward validation
     pub fn run_walk_forward(&mut self) -> anyhow::Result<()> {
-        info!("ðŸ”„ Running walk-forward validation...");
+        info!("ðŸ"„ Running walk-forward validation...");
 
         // This would use the training_pipeline in a full implementation
         // For now, we just mark it as complete
@@ -1175,7 +1175,7 @@ impl V3Strategy {
             is_win = is_win,
             accuracy = self.state.accuracy(),
             total = self.state.total_predictions,
-            "ðŸ§  V3 Indicator calibrator updated from trade"
+            "ðŸ§  V3 Indicator calibrator updated from trade"
         );
     }
 
@@ -1286,7 +1286,7 @@ impl V3Strategy {
             // Auto-save ML state after every trade
             if let Some(ref predictor) = self.predictor {
                 if let Err(e) = self.persistence.save_ml_state(predictor, &self.state, &self.dataset) {
-                    tracing::warn!(“Failed to auto-save ML state: {}”, e);
+                    tracing::warn!("Failed to auto-save ML state: {}", e);
                 }
             }
 
@@ -1295,7 +1295,7 @@ impl V3Strategy {
                 timeframe = ?timeframe,
                 prediction_correct = record.prediction_correct,
                 dataset_size = self.dataset.len(),
-                “Trade outcome registered in V3 Predictor”
+                "Trade outcome registered in V3 Predictor"
             );
         }
     }
@@ -1362,9 +1362,9 @@ impl V3Strategy {
             .state
             .should_retrain(self.config.training.retrain_interval_trades)
         {
-            info!("ðŸ”„ Retraining V3 models...");
+            info!("ðŸ"„ Retraining V3 models...");
             if let Err(e) = self.train_initial_model(vec![]) {
-                tracing::warn!("âš ï¸ Auto-training failed during retraining check: {}", e);
+                tracing::warn!("âš ï¸ Auto-training failed during retraining check: {}", e);
             }
         }
         Ok(())
@@ -1521,7 +1521,7 @@ impl V3Strategy {
     /// Create a backup of current ML state
     pub fn backup(&self) -> anyhow::Result<String> {
         let backup_path = self.persistence.backup()?;
-        info!("ðŸ’¾ ML state backed up to: {}", backup_path);
+        info!("ðŸ'¾ ML state backed up to: {}", backup_path);
         Ok(backup_path)
     }
 
@@ -1541,7 +1541,7 @@ impl V3Strategy {
             self.state.incorrect_predictions = persisted.incorrect_predictions;
             self.state.last_retraining = persisted.last_retraining;
             self.dataset = dataset;
-            info!("ðŸ”„ ML state restored from backup: {}", backup_name);
+            info!("ðŸ"„ ML state restored from backup: {}", backup_name);
         }
 
         Ok(())
@@ -1561,7 +1561,7 @@ impl V3Strategy {
             info!(
                 non_zero,
                 total = feature_vec.len(),
-                "âš ï¸ Skipping low-quality trade sample ({}/{} non-zero features)",
+                "âš ï¸ Skipping low-quality trade sample ({}/{} non-zero features)",
                 non_zero,
                 feature_vec.len()
             );
@@ -1576,12 +1576,12 @@ impl V3Strategy {
             if let Err(e) = self.dataset.save(self.persistence.dataset_file()) {
                 warn!("Failed to auto-save dataset: {}", e);
             } else {
-                info!("ðŸ’¾ Dataset auto-saved: {} samples", self.dataset.len());
+                info!("ðŸ'¾ Dataset auto-saved: {} samples", self.dataset.len());
             }
         }
 
         info!(
-            "ðŸ“Š Trade added to dataset: {} â†’ {} samples",
+            "ðŸ"Š Trade added to dataset: {} â†' {} samples",
             previous_size,
             self.dataset.len()
         );
