@@ -950,12 +950,24 @@ impl V3Strategy {
         let hour = dt.hour() as u8;
         let day_of_week = dt.weekday().num_days_from_monday() as u8;
 
+        // Compute real minutes-to-close based on actual market window boundaries.
+        // Old formula (60 * (24 - hour)) was "minutes until midnight UTC" — completely wrong.
+        // Correct: floor(ts / window_ms) gives window_open; window_open + window_ms = window_close.
+        let window_ms = match features.timeframe {
+            crate::types::Timeframe::Min15 => 15 * 60 * 1000i64,
+            crate::types::Timeframe::Hour1 => 60 * 60 * 1000i64,
+        };
+        let window_close_ts = ((features.ts / window_ms) + 1) * window_ms;
+        let minutes_to_close =
+            ((window_close_ts - features.ts).max(0) as f64 / 60_000.0)
+                .min(window_ms as f64 / 60_000.0);
+
         MarketContext {
             timestamp: features.ts,
             hour,
             day_of_week,
-            minutes_to_close: 60.0 * (24 - hour as i64) as f64, // Simplified
-            minutes_since_market_open: (hour as f64 * 60.0).max(0.0),
+            minutes_to_close,
+            minutes_since_market_open: 0.0, // Removed (was hour*60 = redundant with hour features)
             calibrator_confidence: self.calibrator.get_confidence(),
             // Count how many indicators currently agree on direction (0–4).
             // Previously hardcoded to 3 → constant feature, zero correlation with target.

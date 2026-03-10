@@ -230,12 +230,12 @@ impl MLFeatureVector {
             self.hour_cos,
             self.day_of_week,
             self.is_weekend,
-            self.minutes_since_market_open,
+            // minutes_since_market_open REMOVED (was hour*60 — redundant with hour_sin/cos)
             self.market_regime,
             self.volatility_5m,
             self.volatility_percentile,
             // correlation_change REMOVED (always 0)
-            self.market_sentiment,
+            // market_sentiment REMOVED (exact duplicate of orderbook_imbalance)
             self.calibrator_confidence,
             self.num_indicators_agreeing,
             self.indicators_avg_win_rate,
@@ -266,8 +266,8 @@ impl MLFeatureVector {
         ]
     }
 
-    /// 58 (prior) - 1 (vwap_distance_pct removed, always 0 in native_only mode) = 57
-    pub const NUM_FEATURES: usize = 57;
+    /// 57 (prior) - 1 (minutes_since_market_open: redundant) - 1 (market_sentiment: dupe) = 55
+    pub const NUM_FEATURES: usize = 55;
 
     /// Nombres de las features (para importancia)
     pub fn feature_names() -> Vec<&'static str> {
@@ -303,11 +303,11 @@ impl MLFeatureVector {
             "hour_cos",
             "day_of_week",
             "is_weekend",
-            "minutes_since_market_open",
+            // minutes_since_market_open REMOVED
             "market_regime",
             "volatility_5m",
             "volatility_percentile",
-            "market_sentiment",
+            // market_sentiment REMOVED (duplicate of orderbook_imbalance)
             "calibrator_confidence",
             "num_indicators_agreeing",
             "indicators_avg_win_rate",
@@ -524,11 +524,16 @@ impl FeatureEngine {
     }
 
     fn calculate_polymarket_momentum(&self, current_price: f64) -> f64 {
-        if self.feature_history.len() < 3 {
+        // Use 10-tick lookback for smoother momentum (avoids single-tick noise).
+        // 1-tick diff was very noisy since ticks arrive every ~1 second.
+        let n = self.feature_history.len();
+        if n < 3 {
             return 0.0;
         }
-        let last_price = self.feature_history.last().unwrap().1.polymarket_price;
-        current_price - last_price
+        let lookback = n.min(10);
+        let old_price = self.feature_history[n - lookback].1.polymarket_price;
+        // Clamp to ±0.10 to avoid extreme values at window boundaries.
+        (current_price - old_price).clamp(-0.10, 0.10)
     }
 
     fn calculate_vwap_distance(&self, features: &Features) -> f64 {
