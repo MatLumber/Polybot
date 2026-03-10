@@ -883,8 +883,11 @@ impl V3Strategy {
         // In that case, reject the fallback rather than entering a losing trade.
         if let Some(p_market) = features.polymarket_price {
             let p_market = p_market.clamp(0.01, 0.99);
-            // Approximate prob_up from score: score of ±2.0 → prob 0.75/0.25
-            let prob_up_approx = (score / 2.0).clamp(-0.5, 0.5) + 0.5;
+            // Approximate prob_up from score: score ±2.0 → prob [0.10, 0.90].
+            // Old formula used .clamp(-0.5,0.5)+0.5 → score≥1.0 always gave prob=1.0
+            // making the gate a no-op. Fixed: linear map without inner clamp.
+            // score=1.5→0.80, score=2.0→0.90, score=-1.5→0.20, score=-2.0→0.10
+            let prob_up_approx = ((score / 2.0) * 0.40 + 0.50).clamp(0.01, 0.99);
             let edge_for_direction = match indicator_direction {
                 Direction::Up => prob_up_approx - p_market,
                 Direction::Down => (1.0 - prob_up_approx) - (1.0 - p_market),
