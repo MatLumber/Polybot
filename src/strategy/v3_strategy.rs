@@ -940,17 +940,56 @@ impl V3Strategy {
             minutes_to_close: 60.0 * (24 - hour as i64) as f64, // Simplified
             minutes_since_market_open: (hour as f64 * 60.0).max(0.0),
             calibrator_confidence: self.calibrator.get_confidence(),
-            num_indicators_agreeing: 3, // Simplified
-            indicators_avg_win_rate: self.state.accuracy(),
-            bullish_weight: if features.macd.unwrap_or(0.0) > 0.0 {
-                1.0
-            } else {
-                0.0
+            // Count how many indicators currently agree on direction (0–4).
+            // Previously hardcoded to 3 → constant feature, zero correlation with target.
+            num_indicators_agreeing: {
+                let ema_bullish = features.ema_9
+                    .zip(features.ema_21)
+                    .map(|(e9, e21)| e9 > e21)
+                    .unwrap_or(false);
+                let macd_bullish = features.macd_hist
+                    .or(features.macd)
+                    .map(|v| v > 0.0)
+                    .unwrap_or(false);
+                let ha_bullish = matches!(&features.ha_trend, Some(Direction::Up));
+                let rsi_bullish = features.rsi
+                    .map(|r| r > 50.0 && r < 70.0)
+                    .unwrap_or(false);
+                let bullish_count = [ema_bullish, macd_bullish, ha_bullish, rsi_bullish]
+                    .iter()
+                    .filter(|&&b| b)
+                    .count();
+                let bearish_count = 4 - bullish_count;
+                bullish_count.max(bearish_count) // agreement = how many point same direction
             },
-            bearish_weight: if features.macd.unwrap_or(0.0) < 0.0 {
-                1.0
-            } else {
-                0.0
+            indicators_avg_win_rate: self.state.accuracy(),
+            // Weighted bullish/bearish signal using EMA (1.0), MACD (0.5), HA (0.5), RSI (0.3).
+            // Previously only checked MACD → binary 0/1, missed all other indicators.
+            bullish_weight: {
+                let ema_bull = features.ema_9.zip(features.ema_21)
+                    .map(|(e9, e21)| if e9 > e21 { 1.0_f64 } else { 0.0 })
+                    .unwrap_or(0.0);
+                let macd_bull = features.macd_hist.or(features.macd)
+                    .map(|v| if v > 0.0 { 0.5_f64 } else { 0.0 })
+                    .unwrap_or(0.0);
+                let ha_bull = if matches!(&features.ha_trend, Some(Direction::Up)) { 0.5 } else { 0.0 };
+                let rsi_bull = features.rsi
+                    .map(|r| if r > 50.0 && r < 70.0 { 0.3_f64 } else { 0.0 })
+                    .unwrap_or(0.0);
+                (ema_bull + macd_bull + ha_bull + rsi_bull) / 2.3 // normalize to [0,1]
+            },
+            bearish_weight: {
+                let ema_bear = features.ema_9.zip(features.ema_21)
+                    .map(|(e9, e21)| if e9 < e21 { 1.0_f64 } else { 0.0 })
+                    .unwrap_or(0.0);
+                let macd_bear = features.macd_hist.or(features.macd)
+                    .map(|v| if v < 0.0 { 0.5_f64 } else { 0.0 })
+                    .unwrap_or(0.0);
+                let ha_bear = if matches!(&features.ha_trend, Some(Direction::Down)) { 0.5 } else { 0.0 };
+                let rsi_bear = features.rsi
+                    .map(|r| if r < 50.0 && r > 30.0 { 0.3_f64 } else { 0.0 })
+                    .unwrap_or(0.0);
+                (ema_bear + macd_bear + ha_bear + rsi_bear) / 2.3
             },
         }
     }
