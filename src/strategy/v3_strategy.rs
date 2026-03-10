@@ -409,10 +409,14 @@ impl V3Strategy {
             ml_features.price_vs_strike_pct = 0.0;
         }
 
-        // 3. Register this window if we haven't seen it yet (one snapshot per window).
-        self.pending_windows
-            .entry(win_key)
-            .or_insert_with(|| WindowObservation {
+        // 3. Register this window once we have clean orderbook data.
+        // IMPORTANT: do NOT register on the first tick if the orderbook feed hasn't
+        // delivered data yet — those ticks have spread_bps=0, depth_top5=0, polymarket_price=0.5.
+        // We wait until spread_bps > 0 (confirms real orderbook data is available).
+        // The 2-5 second delay vs true window-open is negligible for 15m/1h markets.
+        let has_real_orderbook = features.spread_bps.map(|s| s > 0.0).unwrap_or(false);
+        if has_real_orderbook && !self.pending_windows.contains_key(&win_key) {
+            self.pending_windows.insert(win_key, WindowObservation {
                 features: ml_features.clone(),
                 price_at_open: current_price,
                 token_price_at_open: current_token_price,
@@ -421,6 +425,7 @@ impl V3Strategy {
                 timeframe,
                 open_ts: win_open_ts,
             });
+        }
 
         // Patch the stored window observation with real data as it arrives.
         // The first tick often has defaults (0.5 for prices, 0.0 for orderbook) because the
