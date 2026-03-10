@@ -499,11 +499,11 @@ impl AppConfig {
             bail!("execution.signature_type must be 0, 1, or 2");
         }
 
-        if !self.bot.dry_run && self.paper_trading.enabled {
-            bail!(
-                "Invalid config: bot.dry_run=false while paper_trading.enabled=true. Disable paper trading for LIVE mode."
-            );
-        }
+        // NOTE: dry_run=false + paper_trading.enabled=true is a valid combination.
+        // dry_run=false means the CLOB client is authenticated and can send real orders.
+        // paper_trading.enabled=true means the strategy starts in paper simulation mode.
+        // The runtime API (POST /api/trading-mode) can switch to live mode without restart.
+        // This is the intended "collect mode": paper by default, switch to live when ML is ready.
 
         let live_requested = self.trading_mode() == "live";
         if live_requested {
