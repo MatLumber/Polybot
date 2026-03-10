@@ -422,21 +422,56 @@ impl V3Strategy {
                 open_ts: win_open_ts,
             });
 
-        // Patch polymarket_price in the pending observation as soon as real data arrives.
-        // The first tick of a window often has polymarket_price=0.5 (orderbook not yet loaded).
-        // Once a real price is available (features.polymarket_price is Some), update the stored
-        // snapshot so the ML trains on actual market consensus rather than the 0.5 neutral default.
-        if features.polymarket_price.is_some() {
-            if let Some(pending) = self.pending_windows.get_mut(&win_key) {
-                if (pending.features.polymarket_price - 0.5).abs() < 1e-6 {
-                    pending.features.polymarket_price = current_token_price;
-                    pending.token_price_at_open = current_token_price;
-                    tracing::debug!(
-                        asset = ?asset,
-                        timeframe = ?timeframe,
-                        token_price = current_token_price,
-                        "🔧 Updated window observation polymarket_price from 0.5 to real value"
-                    );
+        // Patch the stored window observation with real data as it arrives.
+        // The first tick often has defaults (0.5 for prices, 0.0 for orderbook) because the
+        // orderbook WS hasn't delivered data yet. We update each field only once (when it
+        // transitions from default → real value) so the ML trains on accurate data.
+        if let Some(pending) = self.pending_windows.get_mut(&win_key) {
+            // polymarket_price + token_price_at_open
+            if let Some(real_price) = features.polymarket_price {
+                if (pending.features.polymarket_price - 0.5).abs() < 1e-6
+                    && (real_price - 0.5).abs() > 1e-4
+                {
+                    pending.features.polymarket_price = real_price;
+                    pending.features.token_price_window_open = real_price;
+                    pending.features.market_certainty = (real_price - 0.5).abs();
+                    pending.token_price_at_open = real_price;
+                }
+            }
+            // spread_bps + spread_percentile
+            if let Some(spread) = features.spread_bps {
+                if spread > 0.0 && pending.features.spread_bps < 1e-9 {
+                    pending.features.spread_bps = spread;
+                    // spread_percentile: recompute is complex; leave at 0.5 for first window,
+                    // subsequent windows will have history built up.
+                }
+            }
+            // depth_top5 + liquidity_concentration
+            if let Some(depth) = features.orderbook_depth_top5 {
+                if depth > 0.0 && pending.features.depth_top5 < 1e-9 {
+                    pending.features.depth_top5 = depth;
+                    pending.features.liquidity_concentration = (depth / 1000.0).min(1.0);
+                }
+            }
+            // orderbook_imbalance
+            if let Some(imbalance) = features.orderbook_imbalance {
+                if imbalance.abs() > 1e-6 && pending.features.orderbook_imbalance.abs() < 1e-9 {
+                    pending.features.orderbook_imbalance = imbalance;
+                }
+            }
+            // window shadows (default 0.5 when range=0 on first tick; update once range forms)
+            if let Some(upper) = features.window_upper_shadow {
+                if (pending.features.window_upper_shadow - 0.5).abs() < 1e-6
+                    && (upper - 0.5).abs() > 1e-3
+                {
+                    pending.features.window_upper_shadow = upper;
+                }
+            }
+            if let Some(lower) = features.window_lower_shadow {
+                if (pending.features.window_lower_shadow - 0.5).abs() < 1e-6
+                    && (lower - 0.5).abs() > 1e-3
+                {
+                    pending.features.window_lower_shadow = lower;
                 }
             }
         }
@@ -950,17 +985,16 @@ impl V3Strategy {
         let hour = dt.hour() as u8;
         let day_of_week = dt.weekday().num_days_from_monday() as u8;
 
-        // Compute real minutes-to-close based on actual market window boundaries.
-        // Old formula (60 * (24 - hour)) was "minutes until midnight UTC" — completely wrong.
-        // Correct: floor(ts / window_ms) gives window_open; window_open + window_ms = window_close.
-        let window_ms = match features.timeframe {
-            crate::types::Timeframe::Min15 => 15 * 60 * 1000i64,
-            crate::types::Timeframe::Hour1 => 60 * 60 * 1000i64,
+        // Compute real minutes-to-close from window_progress (which uses chrono::Utc::now()).
+        // Cannot use features.ts (= candle open_time = window_open_ts) because that gives
+        // a constant (window_close - window_open = full duration = 15 or 60 min always).
+        // window_progress is already computed with real wall-clock time in FeatureEngine.
+        let window_duration_min = match features.timeframe {
+            crate::types::Timeframe::Min15 => 15.0_f64,
+            crate::types::Timeframe::Hour1 => 60.0_f64,
         };
-        let window_close_ts = ((features.ts / window_ms) + 1) * window_ms;
-        let minutes_to_close =
-            ((window_close_ts - features.ts).max(0) as f64 / 60_000.0)
-                .min(window_ms as f64 / 60_000.0);
+        let wp = features.window_progress.unwrap_or(0.5).clamp(0.0, 1.0);
+        let minutes_to_close = (window_duration_min * (1.0 - wp)).max(0.0);
 
         MarketContext {
             timestamp: features.ts,
