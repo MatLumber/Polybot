@@ -211,7 +211,7 @@ impl MLFeatureVector {
             self.price_velocity,
             self.price_acceleration,
             self.momentum_2nd_order,
-            self.vwap_distance_pct,
+            // vwap_distance_pct REMOVED (always 0 in native_only mode: candles have no volume)
             self.stoch_rsi,
             self.stoch_rsi_overbought,
             self.stoch_rsi_oversold,
@@ -266,8 +266,8 @@ impl MLFeatureVector {
         ]
     }
 
-    /// 57 (prior) - 1 (rsi_divergence removed) + 2 (window_upper/lower_shadow added) = 58
-    pub const NUM_FEATURES: usize = 58;
+    /// 58 (prior) - 1 (vwap_distance_pct removed, always 0 in native_only mode) = 57
+    pub const NUM_FEATURES: usize = 57;
 
     /// Nombres de las features (para importancia)
     pub fn feature_names() -> Vec<&'static str> {
@@ -287,7 +287,7 @@ impl MLFeatureVector {
             "price_velocity",
             "price_acceleration",
             "momentum_2nd_order",
-            "vwap_distance_pct",
+            // vwap_distance_pct REMOVED
             "stoch_rsi",
             "stoch_rsi_overbought",
             "stoch_rsi_oversold",

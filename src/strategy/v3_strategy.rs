@@ -278,7 +278,7 @@ impl V3Strategy {
             .map(|(k, _)| *k)
             .collect();
         for key in expired_keys {
-            if let Some(obs) = self.pending_windows.remove(&key) {
+            if let Some(mut obs) = self.pending_windows.remove(&key) {
                 let target = if current_price >= obs.price_at_open {
                     1.0
                 } else {
@@ -305,6 +305,20 @@ impl V3Strategy {
                     dataset_before = self.dataset.len(),
                     "ðŸªŸ Window closed â€” recording ground-truth observation"
                 );
+                // Update token price dynamics with FINAL values at window close.
+                // These are always 0 when stored at window-open (first tick), so we
+                // overwrite them here with the actual window-end movement.
+                if obs.token_price_at_open > 1e-9 {
+                    let change = (current_token_price - obs.token_price_at_open)
+                        / obs.token_price_at_open;
+                    obs.features.token_price_change_window = change.clamp(-1.0, 1.0);
+                }
+                if obs.price_at_open > 1e-9 {
+                    let pct =
+                        (current_price - obs.price_at_open) / obs.price_at_open * 100.0;
+                    obs.features.price_vs_strike_pct = pct.clamp(-10.0, 10.0);
+                }
+
                 // Skip samples with mostly-zero features (captured before indicator warmup)
                 let feat_vec = obs.features.to_vec();
                 let non_zero = feat_vec.iter().filter(|&&v| v.abs() > 1e-10).count();
