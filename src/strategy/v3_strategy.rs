@@ -1249,9 +1249,7 @@ impl V3Strategy {
             indicators_triggered: record.indicators_used.clone(),
         };
 
-        // Always add to dataset even during cold start (predictor=None, <50 samples).
-        // Trades from fallback or manual closes carry real BTC direction labels and help
-        // the ML accumulate the 50 samples needed to activate.
+        // Always add to dataset even during cold start (predictor=None <50 samples).
         self.add_trade_to_dataset(trade_sample.clone());
         if let Err(e) = self.dataset.save(self.persistence.dataset_file()) {
             tracing::warn!("Failed to save dataset after closed trade: {}", e);
@@ -1283,20 +1281,37 @@ impl V3Strategy {
             }
 
             self.state.add_prediction_result(is_win);
+            // All closed trades go into the training dataset (fallback + ML).
+            // The target is pure BTC direction (1.0=UP, 0.0=DOWN), so fallback trades
+            // provide valid supervised signal â€” the ML learns real BTC outcomes from them.
+            // Excluding fallbacks created a bootstrap deadlock: ML needs 30 samples to
+            // train, but with no samples it always uses fallback, which was excluded â†’
+            // dataset stays at 0 forever.
+            // (dataset already added above, outside predictor block)
 
-            // Auto-save ML state (predictor weights + predictions) after every trade
-            if let Some(ref predictor) = self.predictor {
-                if let Err(e) = self.persistence.save_ml_state(predictor, &self.state, &self.dataset) {
-                    tracing::warn!(“Failed to auto-save ML state: {}”, e);
+            // Auto-save ML state after every trade so we don't lose data on crash/restart
+            if self.state.total_predictions % 1 == 0 {
+                if let Some(ref predictor) = self.predictor {
+                    if let Err(e) =
+                        self.persistence
+                            .save_ml_state(predictor, &self.state, &self.dataset)
+                    {
+                        tracing::warn!("Failed to auto-save ML state: {}", e);
+                    }
                 }
+            }
+            // Trigger retraining if appropriate
+            if let Err(e) = self.maybe_retrain() {
+                tracing::warn!("Failed during maybe_retrain check: {}", e);
             }
 
             info!(
                 asset = ?asset,
                 timeframe = ?timeframe,
                 prediction_correct = record.prediction_correct,
-                dataset_size = self.dataset.len(),
-                “Trade outcome registered in V3 Predictor”
+                window = %format!("${:.2} -> ${:.2}", record.window_open_price, record.window_close_price),
+                actual_direction = %record.actual_price_direction,
+                "Trade outcome registered in V3 Predictor (using prediction_correct)"
             );
         }
     }
