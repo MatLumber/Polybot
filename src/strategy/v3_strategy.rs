@@ -407,6 +407,25 @@ impl V3Strategy {
                 timeframe,
                 open_ts: win_open_ts,
             });
+
+        // Patch polymarket_price in the pending observation as soon as real data arrives.
+        // The first tick of a window often has polymarket_price=0.5 (orderbook not yet loaded).
+        // Once a real price is available (features.polymarket_price is Some), update the stored
+        // snapshot so the ML trains on actual market consensus rather than the 0.5 neutral default.
+        if features.polymarket_price.is_some() {
+            if let Some(pending) = self.pending_windows.get_mut(&win_key) {
+                if (pending.features.polymarket_price - 0.5).abs() < 1e-6 {
+                    pending.features.polymarket_price = current_token_price;
+                    pending.token_price_at_open = current_token_price;
+                    tracing::debug!(
+                        asset = ?asset,
+                        timeframe = ?timeframe,
+                        token_price = current_token_price,
+                        "🔧 Updated window observation polymarket_price from 0.5 to real value"
+                    );
+                }
+            }
+        }
         // === END WINDOW OBSERVATION TRACKING ===
         // One-per-window throttle: max 1 trade per (asset, timeframe) window.
         // Run this before filters/ML to avoid repeated evaluations in the same window
