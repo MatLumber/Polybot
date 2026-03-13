@@ -86,6 +86,8 @@ pub struct FilterConfig {
     pub min_volatility_5m: f64,
     pub optimal_hours_only: bool,
     pub max_window_progress: f64,
+    /// Stricter limit for 15m windows: 0.40 = only enter in first 6 min of 15m window.
+    pub max_window_progress_15m: f64,
     pub min_time_to_close_minutes: f64,
     pub min_model_confidence: f64,
 }
@@ -100,6 +102,7 @@ impl Default for FilterConfig {
             min_volatility_5m: 0.001,
             optimal_hours_only: false,
             max_window_progress: 0.70,
+            max_window_progress_15m: 0.40,
             min_time_to_close_minutes: 3.0,
             min_model_confidence: 0.55,
         }
@@ -243,8 +246,12 @@ impl SmartFilterEngine {
             return Some(FilterDecision::Reject(FilterReason::InsufficientTime));
         }
 
-        // No muy tarde en la ventana
-        if context.window_progress > self.config.max_window_progress {
+        // No muy tarde en la ventana — 15m tiene umbral más estricto (menos tiempo para desarrollarse)
+        let max_progress = match context.timeframe {
+            Timeframe::Min15 => self.config.max_window_progress_15m,
+            Timeframe::Hour1 => self.config.max_window_progress,
+        };
+        if context.window_progress > max_progress {
             return Some(FilterDecision::Reject(FilterReason::LateEntry));
         }
 

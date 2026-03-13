@@ -171,6 +171,7 @@ impl V3Strategy {
             min_volatility_5m: ml_config.filters.min_volatility_5m,
             optimal_hours_only: ml_config.filters.optimal_hours_only,
             max_window_progress: ml_config.filters.max_window_progress,
+            max_window_progress_15m: ml_config.filters.max_window_progress_15m,
             min_time_to_close_minutes: ml_config.filters.min_time_to_close_minutes,
             min_model_confidence: ml_config.min_confidence,
         };
@@ -653,11 +654,15 @@ impl V3Strategy {
             "ML prediction result"
         );
 
-        // Check minimum confidence
-        if prediction.confidence < self.config.min_confidence {
+        // Check minimum confidence (15m bar is higher due to noise)
+        let min_conf = match features.timeframe {
+            Timeframe::Min15 => self.config.min_confidence_15m,
+            Timeframe::Hour1 => self.config.min_confidence,
+        };
+        if prediction.confidence < min_conf {
             let reason = format!(
                 "low_ml_confidence: {:.2} < {:.2}",
-                prediction.confidence, self.config.min_confidence
+                prediction.confidence, min_conf
             );
             tracing::debug!(%reason, "ML prediction rejected");
             self.last_filter_reason = Some(reason);
@@ -749,11 +754,15 @@ impl V3Strategy {
             return None;
         }
 
-        // Check minimum confidence after edge blending
-        if confidence < self.config.min_confidence {
+        // Check minimum confidence after edge blending (15m bar is higher due to noise)
+        let min_conf_edge = match features.timeframe {
+            Timeframe::Min15 => self.config.min_confidence_15m,
+            Timeframe::Hour1 => self.config.min_confidence,
+        };
+        if confidence < min_conf_edge {
             let reason = format!(
                 "low_edge_confidence: {:.2} < {:.2}",
-                confidence, self.config.min_confidence
+                confidence, min_conf_edge
             );
             tracing::debug!(%reason, "ML prediction inherently lacked edge");
             self.last_filter_reason = Some(reason);
@@ -869,13 +878,17 @@ impl V3Strategy {
         let max_score = 2.0;
         let confidence = ((score as f64).abs() / max_score).min(1.0) * 0.5 + 0.5; // 0.5 floor
 
-        if confidence < self.config.min_confidence {
+        let min_conf_fallback = match features.timeframe {
+            Timeframe::Min15 => self.config.min_confidence_15m,
+            Timeframe::Hour1 => self.config.min_confidence,
+        };
+        if confidence < min_conf_fallback {
             tracing::info!(
                 ?features.asset,
                 ?features.timeframe,
                 confidence,
-                min_confidence = self.config.min_confidence,
-                "âŒ Fallback signal rejected (low confidence, weak trend)"
+                min_confidence = min_conf_fallback,
+                "â Fallback signal rejected (low confidence, weak trend)"
             );
             self.last_filter_reason = Some("fallback_low_confidence".to_string());
             return None;

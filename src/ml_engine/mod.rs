@@ -51,6 +51,8 @@ pub struct MLEngineConfig {
     pub training: TrainingConfig,
     /// Confianza mínima para señales
     pub min_confidence: f64,
+    /// Confianza mínima específica para ventanas 15m (más exigente por mayor ruido)
+    pub min_confidence_15m: f64,
     /// Edge neto mínimo requerido (probabilidad lado - costos)
     pub min_edge_net: f64,
     /// Permitir fallback cuando ML está listo pero rechaza la señal
@@ -120,6 +122,7 @@ impl Default for MLEngineConfig {
                 min_volatility_5m: 0.0001,      // Was 0.001 - allow very low vol
                 optimal_hours_only: false,      // Was true - don't restrict by hour
                 max_window_progress: 0.85,      // Avoid over-blocking entries late in window.
+                max_window_progress_15m: 0.40,  // 15m stricter: only enter in first 6 min of window
                 min_time_to_close_minutes: 1.0, // Keep a small buffer before expiry.
                 min_model_confidence: 0.52,     // Was 0.55 - lower threshold for exploration
             },
@@ -131,7 +134,8 @@ impl Default for MLEngineConfig {
                 walk_forward_test_days: 7,
                 early_stopping_patience: 10,
             },
-            min_confidence: 0.52, // Lower default for exploration phase
+            min_confidence: 0.52,    // Lower default for exploration phase
+            min_confidence_15m: 0.80, // 15m markets are noisier → higher bar
             min_edge_net: 0.015,  // 1.5% net edge floor
             allow_fallback_when_ml_ready: false,
             segmented_training: true,

@@ -38,6 +38,7 @@ impl MLConfigConvertible for MLConfig {
                 min_volatility_5m: 0.0001, // Lowered: 0.001 was blocking all Min15 signals (BTC 15m std dev is ~0.0003-0.0008 in normal conditions)
                 optimal_hours_only: self.optimal_hours_only,
                 max_window_progress: self.max_window_progress,
+                max_window_progress_15m: self.max_window_progress_15m,
                 min_time_to_close_minutes: self.min_time_to_close_minutes,
                 min_model_confidence: self.min_confidence,
             },
@@ -50,6 +51,7 @@ impl MLConfigConvertible for MLConfig {
                 early_stopping_patience: 10, // Default
             },
             min_confidence: self.min_confidence,
+            min_confidence_15m: self.min_confidence_15m,
             min_edge_net: self.min_edge_net,
             allow_fallback_when_ml_ready: self.allow_fallback_when_ml_ready,
             segmented_training: self.segmented_training,
@@ -111,6 +113,8 @@ mod tests {
             max_volatility_5m: 0.03,
             optimal_hours_only: false,
             max_window_progress: 0.85,
+            max_window_progress_15m: 0.40,
+            min_confidence_15m: 0.80,
             min_time_to_close_minutes: 1.0,
         };
 

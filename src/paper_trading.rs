@@ -1858,10 +1858,16 @@ impl PaperTradingEngine {
         }
 
         // Kelly sizing with timeframe-specific fractions/caps.
-        let (kelly_fraction, kelly_cap) = match signal.timeframe {
+        let (kelly_fraction_base, kelly_cap) = match signal.timeframe {
             Timeframe::Min15 => (self.config.kelly_fraction_15m, self.config.kelly_cap_15m),
             Timeframe::Hour1 => (self.config.kelly_fraction_1h, self.config.kelly_cap_1h),
         };
+        // Scale kelly_fraction by confidence: conservative at min threshold, larger at high confidence.
+        // conf=0.52 (floor) → scale≈0.80, conf=0.75 → scale≈1.00, conf=0.95 → scale≈1.25
+        let conf = signal.confidence.clamp(0.50, 0.95);
+        let conf_scale = 0.80 + (conf - 0.52).max(0.0) / 0.43 * 0.45;
+        let kelly_fraction = (kelly_fraction_base * conf_scale)
+            .clamp(kelly_fraction_base * 0.60, kelly_fraction_base * 1.40);
         // Dynamic uncertainty: when win_rate < 50%, inflate sigma to reduce Kelly size.
         // With >= 10 closed trades: sigma = max(0.05, 0.50 - win_rate).
         // At 60% win_rate: sigma = max(0.05, -0.10) = 0.05 (same as before).
@@ -3135,7 +3141,11 @@ mod tests {
             timeframe: Timeframe::Min15,
             direction,
             confidence: 0.62,
-            model_prob_up: if direction == Direction::Up { 0.62 } else { 0.38 },
+            model_prob_up: if direction == Direction::Up {
+                0.62
+            } else {
+                0.38
+            },
             features: sample_features(Asset::BTC, Timeframe::Min15, ts),
             strategy_id: "test".to_string(),
             market_slug: "btc-15m".to_string(),
