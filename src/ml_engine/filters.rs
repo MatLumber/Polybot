@@ -87,9 +87,14 @@ pub struct FilterConfig {
     pub optimal_hours_only: bool,
     pub max_window_progress: f64,
     /// Stricter limit for 15m windows: 0.40 = only enter in first 6 min of 15m window.
+    #[serde(default = "default_max_window_progress_15m")]
     pub max_window_progress_15m: f64,
     pub min_time_to_close_minutes: f64,
     pub min_model_confidence: f64,
+}
+
+fn default_max_window_progress_15m() -> f64 {
+    0.40
 }
 
 impl Default for FilterConfig {

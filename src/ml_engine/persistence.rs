@@ -209,7 +209,19 @@ impl MLPersistenceManager {
             return Ok(Some((MLPersistenceState::default(), dataset)));
         }
 
-        let state = MLPersistenceState::load(&self.state_file)?;
+        // If ml_state.json fails to deserialize (e.g. new fields added), fall back to defaults
+        // but KEEP the loaded dataset — never discard accumulated training samples.
+        let state = match MLPersistenceState::load(&self.state_file) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(
+                    "⚠️ ml_state.json deserialization failed ({}), using default weights but keeping {} dataset samples",
+                    e,
+                    dataset.len()
+                );
+                MLPersistenceState::default()
+            }
+        };
 
         info!(
             "🧠 ML state restored: {} predictions, {} correct, {:.1}% accuracy",
