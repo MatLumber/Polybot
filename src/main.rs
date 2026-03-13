@@ -1080,7 +1080,13 @@ async fn main() -> Result<()> {
                                     features.polymarket_price = Some(q.mid);
                                     if q.bid > 0.0 && q.ask > 0.0 {
                                         let spread = (q.ask - q.bid) / q.mid * 10000.0;
-                                        features.spread_bps = Some(spread);
+                                        // Polymarket CLOB has automated backstop orders at 0.01/0.99
+                                        // that create fake 19600+ bps spread. Only use CLOB spread
+                                        // if it's realistic (bid >= 0.05 indicates real liquidity near mid).
+                                        if q.bid >= 0.05 {
+                                            features.spread_bps = Some(spread);
+                                        }
+                                        // else: spread_bps = None → defaults to 0.0 → passes filter
                                     }
                                     if q.depth_top5 > 0.0 {
                                         features.orderbook_depth_top5 = Some(q.depth_top5);
