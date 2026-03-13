@@ -1812,6 +1812,23 @@ async fn main() -> Result<()> {
                             drop(contexts);
                             live_context = None;
                         }
+                        if let Some(ctx) = live_context.as_ref() {
+                            if !is_live_managed_asset(ctx.asset) {
+                                tracing::debug!(
+                                    token_id = %token_id,
+                                    asset = ?ctx.asset,
+                                    "Skipping non-BTC/ETH live context in position monitor"
+                                );
+                                let mut contexts = live_contexts_for_monitor.lock().await;
+                                if contexts.remove(&token_id).is_some() {
+                                    persist_live_position_contexts(
+                                        &live_contexts_path_for_monitor,
+                                        &contexts,
+                                    );
+                                }
+                                continue;
+                            }
+                        }
                         if live_context.is_none()
                             && live_recently_closed_for_monitor
                                 .lock()
@@ -1881,6 +1898,14 @@ async fn main() -> Result<()> {
                             if let (Some(asset), Some(timeframe)) =
                                 (inferred_asset, inferred_timeframe)
                             {
+                                if !is_live_managed_asset(asset) {
+                                    tracing::debug!(
+                                        token_id = %token_id,
+                                        asset = ?asset,
+                                        "Ignoring non-BTC/ETH wallet position during live context rehydration"
+                                    );
+                                    continue;
+                                }
                                 let inferred_expires_at_ms = fallback_market
                                     .as_ref()
                                     .and_then(|market| {
@@ -1974,6 +1999,15 @@ async fn main() -> Result<()> {
                             .map(|ctx| ctx.asset)
                             .or_else(|| infer_asset_from_market_text(&fallback_market_text))
                             .or_else(|| infer_asset_from_market_text(&pos.asset));
+                        if !asset.map(is_live_managed_asset).unwrap_or(false) {
+                            tracing::debug!(
+                                token_id = %token_id,
+                                inferred_asset = ?asset,
+                                market_text = %fallback_market_text,
+                                "Ignoring non-BTC/ETH wallet position in live TP/SL monitor"
+                            );
+                            continue;
+                        }
 
                         if let (Some(asset), Some(ctx)) = (asset, live_context.as_ref()) {
                             if position_risk_for_monitor
@@ -4572,6 +4606,10 @@ fn infer_asset_from_market_text(raw: &str) -> Option<Asset> {
         return Some(Asset::XRP);
     }
     None
+}
+
+fn is_live_managed_asset(asset: Asset) -> bool {
+    matches!(asset, Asset::BTC | Asset::ETH)
 }
 
 fn live_position_contexts_path(data_dir: &str) -> std::path::PathBuf {
