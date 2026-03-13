@@ -104,6 +104,8 @@ pub struct StrategyConfig {
 pub struct RiskConfig {
     /// Maximum position size in USDC
     pub max_position_usdc: f64,
+    /// Minimum position size in USDC
+    pub min_position_size: f64,
     /// Maximum daily loss in USDC (kill switch)
     pub max_daily_loss_usdc: f64,
     /// Maximum open positions
@@ -387,6 +389,7 @@ impl AppConfig {
             .set_default("strategy.calibration_min_samples_per_market", 30)?
             // Risk defaults
             .set_default("risk.max_position_usdc", 50.0)?
+            .set_default("risk.min_position_size", 1.0)?
             .set_default("risk.max_daily_loss_usdc", 500.0)? // Kill switch budget
             .set_default("risk.max_open_positions", 5)?
             .set_default("risk.max_drawdown_pct", 0.15)? // Re-evaluate logic if down 15%

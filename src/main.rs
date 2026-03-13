@@ -28,7 +28,7 @@ use crate::features::{FeatureEngine, Features, MarketRegime, OrderbookImbalanceT
 use crate::ml_engine::config_bridge::MLConfigConvertible;
 use crate::oracle::PriceAggregator;
 use crate::paper_trading::{PaperTradingConfig, PaperTradingEngine};
-use crate::persistence::{BalanceTracker, CsvPersistence, HardResetOptions};
+use crate::persistence::{BalanceTracker, CsvPersistence, HardResetOptions, RejectionRecord};
 use crate::risk::RiskManager;
 use crate::strategy::{Strategy, StrategyConfig, StrategyEngine, TradeResult};
 use crate::types::{Asset, Direction, FeatureSet, PriceSource, PriceTick, Signal, Timeframe};
@@ -278,6 +278,7 @@ async fn main() -> Result<()> {
     }
     let mut risk_cfg = risk::RiskConfig::default();
     risk_cfg.max_position_size = config.risk.max_position_usdc;
+    risk_cfg.min_position_size = config.risk.min_position_size.max(0.01);
     risk_cfg.max_daily_loss = config.risk.max_daily_loss_usdc;
     risk_cfg.max_total_exposure = (config.risk.max_position_usdc
         * config.risk.max_open_positions as f64)
@@ -3894,6 +3895,7 @@ async fn main() -> Result<()> {
                             };
 
                             let live_available_usdc = position_risk.get_balance().max(0.0);
+                            let live_min_position_usdc = config.risk.min_position_size.max(0.01);
                             let live_sizing_cap = config.risk.max_position_usdc.max(0.0);
                             let mut effective_size_usdc = if live_available_usdc > 0.0 {
                                 position_risk
@@ -3913,6 +3915,45 @@ async fn main() -> Result<()> {
                                     suggested_usdc = signal.suggested_size_usdc,
                                     "Skipping LIVE order due to non-positive effective notional"
                                 );
+                                continue;
+                            }
+                            if live_available_usdc > 0.0
+                                && effective_size_usdc + f64::EPSILON < live_min_position_usdc
+                            {
+                                warn!(
+                                    signal_id = %signal_id,
+                                    available_usdc = live_available_usdc,
+                                    effective_size_usdc,
+                                    min_position_size = live_min_position_usdc,
+                                    "Skipping LIVE order due to insufficient balance for minimum position size"
+                                );
+                                if let Err(e) = csv_persistence
+                                    .save_rejection(RejectionRecord {
+                                        timestamp: signal.ts,
+                                        signal_id: signal.id.clone(),
+                                        asset: signal.asset.to_string(),
+                                        timeframe: signal.timeframe.to_string(),
+                                        market_slug: signal.market_slug.clone(),
+                                        token_id: signal.token_id.clone(),
+                                        reason: "insufficient_balance".to_string(),
+                                        spread: quote.spread.max(0.0),
+                                        depth_top5: quote.depth_top5,
+                                        p_market,
+                                        p_model,
+                                        edge_net: ev.edge_net,
+                                    })
+                                    .await
+                                {
+                                    warn!(
+                                        signal_id = %signal_id,
+                                        error = %e,
+                                        "Failed to persist LIVE insufficient balance rejection"
+                                    );
+                                }
+                                #[cfg(feature = "dashboard")]
+                                live_main_dashboard_memory
+                                    .record_execution_rejection("insufficient_balance")
+                                    .await;
                                 continue;
                             }
 
